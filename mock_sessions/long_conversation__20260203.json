@@ -1,0 +1,6041 @@
+{
+  "session_id": "0e98c419-c46b-464c-8322-c097787301aa",
+  "name": "Long Conversation - 2026-02-03",
+  "created_at": "2026-02-04T21:46:32.427508",
+  "config": {
+    "name": "Default",
+    "description": "General purpose, balanced latency and accuracy",
+    "asr": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "model": "conformer",
+      "language": "en-US",
+      "vad_start_threshold": 0.5,
+      "vad_stop_threshold": 0.3,
+      "speech_timeout_ms": 500,
+      "requires_restart": false
+    },
+    "llm": {
+      "scheme": "openai",
+      "api_base": "http://localhost:11434/v1",
+      "api_key": null,
+      "model": "llama3.2:3b",
+      "temperature": 0.7,
+      "max_tokens": 512,
+      "system_prompt": "You are a helpful voice assistant.",
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "tts": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "voice": "",
+      "sample_rate": 22050,
+      "speed": 1.0,
+      "response_format": "pcm"
+    },
+    "devices": {
+      "video_source": "browser",
+      "video_device": null,
+      "audio_input_source": "browser",
+      "audio_input_device": null,
+      "audio_output_source": "browser",
+      "audio_output_device": null
+    },
+    "app": {
+      "barge_in_enabled": true,
+      "timeline_position": "right",
+      "session_auto_save": true,
+      "session_output_dir": "./sessions",
+      "theme": "dark",
+      "auto_restart_riva": false
+    }
+  },
+  "timeline": [
+    {
+      "timestamp": 7.152557373046875e-07,
+      "event_type": "session_start",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 8.344650268554688e-06,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.13670659065246582,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.14971208572387695,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's your name?",
+        "confidence": 0.9831222194218546
+      }
+    },
+    {
+      "timestamp": 0.18172764778137207,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.22799444198608398,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.2279984951019287,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I'm",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.23005366325378418,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "an",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.23210787773132324,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "AI",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.2341623306274414,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "voice",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.23621606826782227,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "assistant",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.23826956748962402,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "designed",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 0.24032306671142578,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 0.24237704277038574,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 0.2444314956665039,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 0.24648594856262207,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "various",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 0.24853920936584473,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tasks.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 0.2505934238433838,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.2505946159362793,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.27736878395080566,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.2773716449737549,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.29127001762390137,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.3113257884979248,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.3240334987640381,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.4977555274963379,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.5637996196746826,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me abo",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 0.5777790546417236,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.5919222831726074,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me about yourself",
+        "confidence": 0.9730582816275116
+      }
+    },
+    {
+      "timestamp": 0.6636285781860352,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.7959699630737305,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.795983076095581,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.7990391254425049,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "can",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.802093505859375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "answer",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.8051490783691406,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "questions,",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.8082046508789062,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.8112595081329346,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 0.8143155574798584,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tasks,",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 0.8173699378967285,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 0.8204243183135986,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 0.8234784603118896,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "natural",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 0.8265342712402344,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "conversations",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 0.8295893669128418,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "using",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 0.8326442241668701,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "voice.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 0.8356993198394775,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.8357019424438477,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.865962028503418,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8659665584564209,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8779730796813965,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8911569118499756,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.9012770652770996,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.9180459976196289,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.038879632949829,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.1001317501068115,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.114969253540039,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's the capital of France?",
+        "confidence": 0.9206905019895161
+      }
+    },
+    {
+      "timestamp": 1.2151930332183838,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.4237031936645508,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.4237112998962402,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Paris",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 1.428767204284668,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 1.4338226318359375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 1.438877820968628,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "capital",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 1.4439330101013184,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 1.4489872455596924,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "France.",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 1.4540433883666992,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.4540448188781738,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.5204684734344482,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.5204737186431885,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.5352838039398193,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.6313552856445312,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.7105028629302979,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "How far is",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 1.7403881549835205,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.7525255680084229,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "How far is the moon?",
+        "confidence": 0.9493562593846562
+      }
+    },
+    {
+      "timestamp": 1.790860891342163,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.8485627174377441,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.848567008972168,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 1.8506221771240234,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "moon",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 1.8526763916015625,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 1.8547306060791016,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "approximately",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 1.8567852973937988,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "238,855",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 1.858839750289917,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "miles",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 1.860893726348877,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "or",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 1.862947940826416,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "384,400",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 1.8650016784667969,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "kilometers",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 1.8670556545257568,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "from",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 1.869109869003296,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Earth.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 1.8711645603179932,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.8711659908294678,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.893908977508545,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.8939111232757568,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9135780334472656,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9293432235717773,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9406828880310059,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.1248745918273926,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.2360308170318604,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What's 15",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 2.2556991577148438,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.2721970081329346,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's 15 times 23?",
+        "confidence": 0.9694306114463058
+      }
+    },
+    {
+      "timestamp": 2.3196821212768555,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4457595348358154,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.445762872695923,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "15",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 2.448819160461426,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "times",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 2.451874017715454,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "23",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 2.4549286365509033,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "equals",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 2.457982063293457,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "345.",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 2.4610366821289062,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4610378742218018,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4963467121124268,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.4963490962982178,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.5101475715637207,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.6616199016571045,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.8043580055236816,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Who invented ",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 2.818918466567993,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.836064338684082,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Who invented the telephone?",
+        "confidence": 0.9766278681781488
+      }
+    },
+    {
+      "timestamp": 2.92209792137146,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.1386680603027344,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.1386773586273193,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Alexander",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 3.143733501434326,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Graham",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 3.1487877368927,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Bell",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 3.1538429260253906,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 3.1588969230651855,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "credited",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 3.163952589035034,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 3.1690070629119873,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "inventing",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 3.1740620136260986,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 3.179116725921631,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "telephone",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 3.1841719150543213,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 3.1892261505126953,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "1876.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 3.1942813396453857,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.1942837238311768,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.2716197967529297,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.2716240882873535,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.2860500812530518,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.2984731197357178,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.312143087387085,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.3855509757995605,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.480729818344116,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What's the sp",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 3.4993062019348145,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.51568341255188,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's the speed of light?",
+        "confidence": 0.9766752708506165
+      }
+    },
+    {
+      "timestamp": 3.5506701469421387,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.603027820587158,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.6030311584472656,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 3.6050891876220703,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "speed",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 3.6071434020996094,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 3.609196901321411,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "light",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 3.61125111579895,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 3.6133065223693848,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 3.6153604984283447,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "vacuum",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 3.6174139976501465,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 3.6194682121276855,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "about",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 3.6215226650238037,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "299,792",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 3.6235764026641846,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "kilometers",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 3.6256299018859863,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "per",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 3.6276848316192627,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "second.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 3.6297385692596436,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.6297402381896973,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.6565492153167725,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.6565518379211426,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.6751933097839355,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.692121982574463,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.705099105834961,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.8454251289367676,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.91552472114563,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me a",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 3.9328746795654297,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.94688081741333,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me a fun fact",
+        "confidence": 0.9544793950145232
+      }
+    },
+    {
+      "timestamp": 4.000789165496826,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.083869934082031,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.083876132965088,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Honey",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 4.086930751800537,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "never",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 4.089985132217407,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "spoils",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 4.093039035797119,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "-",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 4.096093416213989,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "archaeologists",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 4.099146842956543,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 4.102200984954834,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "found",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 4.105254888534546,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "3,000-year-old",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 4.108309507369995,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "honey",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 4.111363172531128,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that's",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 4.114418029785156,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "still",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 4.117471933364868,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "edible!",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 4.120526313781738,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.120528697967529,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.160966873168945,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.160968542098999,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.1756510734558105,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.190863609313965,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.207932233810425,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.221540212631226,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.419995546340942,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.4731833934783936,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What's the la",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 4.4959022998809814,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.508412837982178,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's the largest planet?",
+        "confidence": 0.9463785396503486
+      }
+    },
+    {
+      "timestamp": 4.6108176708221436,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.8125739097595215,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.812579393386841,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Jupiter",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 4.817635774612427,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 4.822691202163696,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 4.827746152877808,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "largest",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 4.83280086517334,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "planet",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 4.83785605430603,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 4.842911005020142,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "our",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 4.847965240478516,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "solar",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 4.853020191192627,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "system.",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 4.858075380325317,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.858077764511108,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.9327309131622314,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.932753801345825,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.9487504959106445,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.959134101867676,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.0877978801727295,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.1586384773254395,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "How many contin",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 5.169240713119507,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.188586473464966,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "How many continents are there?",
+        "confidence": 0.989465755947608
+      }
+    },
+    {
+      "timestamp": 5.2370569705963135,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.286065101623535,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.286073684692383,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "There",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 5.28812837600708,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "are",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 5.290234565734863,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "seven",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 5.292288541793823,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "continents:",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 5.294344902038574,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Asia,",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 5.296399354934692,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Africa,",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 5.298452854156494,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "North",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 5.300506830215454,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "America,",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 5.302560567855835,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "South",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 5.304614067077637,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "America,",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 5.306667804718018,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Antarctica,",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 5.3087217807769775,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Europe,",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 5.3107757568359375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 5.312835216522217,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Australia.",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 5.314889430999756,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.314890623092651,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.344265699386597,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.344267845153809,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.361914396286011,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.377213954925537,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.396868944168091,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.416500091552734,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.432054042816162,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.62198805809021,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.752293586730957,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.769759893417358,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's your name?",
+        "confidence": 0.9391987931697307
+      }
+    },
+    {
+      "timestamp": 5.838406324386597,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.954173803329468,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.954176425933838,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I'm",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 5.95723032951355,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "an",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 5.9602837562561035,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "AI",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 5.963337659835815,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "voice",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 5.9663920402526855,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "assistant",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 5.969445705413818,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "designed",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 5.97249960899353,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 5.975553750991821,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 5.978610277175903,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 5.981663942337036,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "various",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 5.984717607498169,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tasks.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 5.987772464752197,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.987773895263672,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.035383224487305,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.035384654998779,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.045939922332764,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.065582036972046,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.081335783004761,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.279721260070801,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 6.331207752227783,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 11: Tell",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 6.3546302318573,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 6.373748779296875,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 11: Tell me about yourself",
+        "confidence": 0.9494435008397001
+      }
+    },
+    {
+      "timestamp": 6.476551532745361,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.7045674324035645,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.704570531845093,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 6.709625005722046,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "can",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 6.714679479598999,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "answer",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 6.719733715057373,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "questions,",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 6.724792003631592,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 6.729846715927124,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 6.734901189804077,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tasks,",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 6.739959239959717,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 6.745014667510986,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 6.750068426132202,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "natural",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 6.755123615264893,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "conversations",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 6.760177850723267,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "using",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 6.765232563018799,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "voice.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 6.770287275314331,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.770288467407227,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.841440439224243,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.841441869735718,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.8572633266448975,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.870646953582764,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.888286828994751,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.902745962142944,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.97247838973999,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.025669097900391,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.038562774658203,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 12: What's the capital of France?",
+        "confidence": 0.98619178810541
+      }
+    },
+    {
+      "timestamp": 7.088308334350586,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.128899574279785,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.128904104232788,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Paris",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 7.130958318710327,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 7.133011817932129,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 7.135066032409668,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "capital",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 7.137119770050049,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 7.139173984527588,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "France.",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 7.141228437423706,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.1412293910980225,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.166579008102417,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.166582345962524,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.180671691894531,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.2869977951049805,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.3654420375823975,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.37678599357605,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 13: How far is the moon?",
+        "confidence": 0.983919725362611
+      }
+    },
+    {
+      "timestamp": 7.423673629760742,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.573087453842163,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.5730977058410645,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 7.576152563095093,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "moon",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 7.579206705093384,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 7.582261085510254,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "approximately",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 7.585314750671387,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "238,855",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 7.588370323181152,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "miles",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 7.591426372528076,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "or",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 7.594602346420288,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "384,400",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 7.597666263580322,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "kilometers",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 7.600721597671509,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "from",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 7.603776454925537,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Earth.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 7.606832504272461,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.606834888458252,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.644320964813232,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.644327163696289,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.655218601226807,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.671241760253906,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.685514688491821,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.739890098571777,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.837970495223999,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 14: Wha",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 7.851564884185791,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.868951320648193,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 14: What's 15 times 23?",
+        "confidence": 0.9737559384989424
+      }
+    },
+    {
+      "timestamp": 7.967238903045654,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.212755680084229,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.212764024734497,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "15",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 8.217819690704346,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "times",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 8.222874879837036,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "23",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 8.22792911529541,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "equals",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 8.232983350753784,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "345.",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 8.238038301467896,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.238040447235107,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.301258087158203,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.301261901855469,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.31516146659851,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.390276670455933,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 8.5339834690094,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 8.553005695343018,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 15: Who invented the telephone?",
+        "confidence": 0.9518385572727786
+      }
+    },
+    {
+      "timestamp": 8.594438552856445,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.638285398483276,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.6382896900177,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Alexander",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 8.64034390449524,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Graham",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 8.642400026321411,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Bell",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 8.644454002380371,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 8.646507978439331,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "credited",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 8.648561716079712,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 8.650615692138672,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "inventing",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 8.652669668197632,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 8.654723882675171,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "telephone",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 8.656784057617188,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 8.658838987350464,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "1876.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 8.660890817642212,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.660892486572266,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.681260108947754,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.681262493133545,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.69373369216919,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.713604211807251,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.72713828086853,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.824640035629272,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 8.876854658126831,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 16: What's",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 8.892729759216309,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 8.91089129447937,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 16: What's the speed of light?",
+        "confidence": 0.9272285557719316
+      }
+    },
+    {
+      "timestamp": 8.973223447799683,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.085562705993652,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.085578918457031,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 9.088635206222534,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "speed",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 9.091691493988037,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 9.094747304916382,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "light",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 9.097801446914673,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 9.100856304168701,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 9.103912115097046,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "vacuum",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 9.106966495513916,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 9.109984159469604,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "about",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 9.113039016723633,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "299,792",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 9.11609411239624,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "kilometers",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 9.119166612625122,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "per",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 9.122220993041992,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "second.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 9.125276565551758,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.12527871131897,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 9.167466163635254,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.167476177215576,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.181017637252808,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.19769024848938,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.209890127182007,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 9.400311708450317,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 9.479862451553345,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 17: Te",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 9.504682302474976,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 9.520908117294312,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 17: Tell me a fun fact",
+        "confidence": 0.9677371631418511
+      }
+    },
+    {
+      "timestamp": 9.607072830200195,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.80505895614624,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.8050696849823,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Honey",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 9.810127019882202,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "never",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 9.815181970596313,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "spoils",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 9.820237636566162,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "-",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 9.825292825698853,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "archaeologists",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 9.83034896850586,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 9.835410833358765,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "found",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 9.840466499328613,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "3,000-year-old",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 9.845523834228516,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "honey",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 9.850579023361206,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that's",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 9.855635404586792,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "still",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 9.860692024230957,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "edible!",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 9.86574935913086,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.865752220153809,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 9.919251680374146,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.919257164001465,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.931597471237183,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.94482946395874,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.957867622375488,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 9.97155475616455,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.044466495513916,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 10.118279457092285,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 10.137238264083862,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 18: What's the largest planet?",
+        "confidence": 0.9683940579527143
+      }
+    },
+    {
+      "timestamp": 10.18030858039856,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 10.233057022094727,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 10.233063220977783,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Jupiter",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 10.235119104385376,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 10.237173557281494,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 10.239234209060669,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "largest",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 10.241288900375366,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "planet",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 10.243344068527222,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 10.245398759841919,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "our",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 10.247453212738037,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "solar",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 10.249508380889893,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "system.",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 10.251563549041748,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 10.251565217971802,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.280309915542603,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.280313730239868,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.299864530563354,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.315532207489014,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.41676926612854,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 10.493624925613403,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 10.508360147476196,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 19: How many continents are there?",
+        "confidence": 0.9251987445136086
+      }
+    },
+    {
+      "timestamp": 10.550185441970825,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 10.64383602142334,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 10.643843173980713,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "There",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 10.646897315979004,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "are",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 10.649951696395874,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "seven",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 10.653006315231323,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "continents:",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 10.656064510345459,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Asia,",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 10.659119129180908,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Africa,",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 10.662174940109253,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "North",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 10.665228843688965,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "America,",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 10.668282747268677,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "South",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 10.671336889266968,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "America,",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 10.674391746520996,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Antarctica,",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 10.677445411682129,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Europe,",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 10.68049955368042,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 10.683553695678711,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Australia.",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 10.686608076095581,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 10.686609745025635,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.727684736251831,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.72768783569336,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.745201349258423,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.76413369178772,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.776074409484863,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.791784763336182,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 10.807657957077026,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.867201328277588,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 10.927190065383911,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 20: Wh",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 10.951152801513672,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 10.965731620788574,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 20: What's your name?",
+        "confidence": 0.9894032309234336
+      }
+    },
+    {
+      "timestamp": 11.083133220672607,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 11.235046148300171,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 11.235054969787598,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I'm",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 11.240110397338867,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "an",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 11.245165824890137,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "AI",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 11.250221014022827,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "voice",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 11.25527548789978,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "assistant",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 11.26033067703247,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "designed",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 11.265385866165161,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 11.27044153213501,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 11.275496482849121,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 11.280551671981812,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "various",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 11.285606622695923,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tasks.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 11.290661573410034,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 11.290663719177246,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 11.362045288085938,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.362049579620361,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.37362027168274,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.39087986946106,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.407570838928223,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 11.5888192653656,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 11.674473285675049,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 21: Tell",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 11.687644004821777,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 11.706252336502075,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 21: Tell me about yourself",
+        "confidence": 0.9627006602395096
+      }
+    },
+    {
+      "timestamp": 11.747664213180542,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 11.799850940704346,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 11.799860000610352,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 11.80191445350647,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "can",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 11.80396842956543,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "answer",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 11.805982112884521,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "questions,",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 11.808036804199219,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 11.810091733932495,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 11.812145471572876,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tasks,",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 11.814199447631836,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 11.816253662109375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 11.818308591842651,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "natural",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 11.820361852645874,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "conversations",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 11.822415828704834,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "using",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 11.824469566345215,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "voice.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 11.82652473449707,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 11.826526403427124,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 11.854247093200684,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.854250431060791,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.869638204574585,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.882787704467773,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.90016484260559,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 11.912605285644531,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 12.067867755889893,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 12.173366069793701,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 22: What's t",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 12.185771942138672,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 12.201741695404053,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 22: What's the capital of France?",
+        "confidence": 0.9525647257891364
+      }
+    },
+    {
+      "timestamp": 12.262655973434448,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 12.351806402206421,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 12.35181188583374,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Paris",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 12.354867458343506,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 12.357921361923218,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 12.360978364944458,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "capital",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 12.364033222198486,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 12.36708688735962,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "France.",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 12.370147705078125,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 12.370149850845337,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 12.401217699050903,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 12.401221752166748,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 12.418181657791138,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 12.596991539001465,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 12.726691722869873,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 23: How",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 12.746323347091675,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 12.763628005981445,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 23: How far is the moon?",
+        "confidence": 0.9607768610245572
+      }
+    },
+    {
+      "timestamp": 12.879077911376953,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 13.061992883682251,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 13.062003135681152,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 13.067063331604004,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "moon",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 13.0721275806427,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 13.077183723449707,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "approximately",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 13.08223843574524,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "238,855",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 13.08729362487793,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "miles",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 13.092347860336304,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "or",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 13.097402572631836,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "384,400",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 13.102457284927368,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "kilometers",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 13.107512712478638,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "from",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 13.112566709518433,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Earth.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 13.11762285232544,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 13.117626190185547,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 13.178499698638916,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 13.178512573242188,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 13.197808742523193,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 13.214985132217407,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 13.228848218917847,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 13.355328559875488,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 13.410842418670654,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 13.425265312194824,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 24: What's 15 times 23?",
+        "confidence": 0.9386282069238459
+      }
+    },
+    {
+      "timestamp": 13.467348575592041,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 13.519338846206665,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 13.519345045089722,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "15",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 13.52139925956726,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "times",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 13.523453950881958,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "23",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 13.52550721168518,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "equals",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 13.527561902999878,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "345.",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 13.529617071151733,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 13.529618978500366,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 13.551974534988403,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 13.551978349685669,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 13.562973260879517,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 13.7596275806427,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 13.820192813873291,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Question 25: Who inv",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 13.837642669677734,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 13.856359243392944,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 25: Who invented the telephone?",
+        "confidence": 0.9471415447278105
+      }
+    },
+    {
+      "timestamp": 13.90194821357727,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 14.05147385597229,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 14.05147910118103,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Alexander",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 14.054534196853638,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Graham",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 14.057588577270508,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Bell",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 14.060642957687378,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 14.063698291778564,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "credited",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 14.06675410270691,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 14.069808959960938,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "inventing",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 14.072863340377808,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 14.075918436050415,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "telephone",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 14.078972816467285,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 14.0819833278656,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "1876.",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 14.08503794670105,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 14.085039854049683,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 14.130832195281982,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.130834579467773,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.141815662384033,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.152790069580078,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.165066719055176,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 14.257307291030884,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 14.377844333648682,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 14.393688917160034,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 26: What's the speed of light?",
+        "confidence": 0.9659788860917373
+      }
+    },
+    {
+      "timestamp": 14.48542833328247,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 14.716501951217651,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 14.716519117355347,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 14.721577167510986,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "speed",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 14.726632595062256,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 14.731687545776367,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "light",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 14.736742496490479,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 14.741797685623169,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 14.746852397918701,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "vacuum",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 14.751908540725708,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 14.756963968276978,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "about",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 14.761983633041382,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "299,792",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 14.76703929901123,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "kilometers",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 14.772094488143921,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "per",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 14.777149438858032,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "second.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 14.782204866409302,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 14.782206773757935,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 14.848533868789673,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.848540544509888,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.868224382400513,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.888251304626465,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 14.903785705566406,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 14.999587535858154,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 15.144700765609741,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 15.156431674957275,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 27: Tell me a fun fact",
+        "confidence": 0.933399306980776
+      }
+    },
+    {
+      "timestamp": 15.202836275100708,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 15.243216514587402,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 15.243226289749146,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Honey",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 15.245343208312988,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "never",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 15.247407674789429,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "spoils",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 15.2494637966156,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "-",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 15.251518964767456,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "archaeologists",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 15.253574132919312,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 15.25562858581543,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "found",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 15.257684469223022,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "3,000-year-old",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 15.25974416732788,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "honey",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 15.261798858642578,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that's",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 15.263853549957275,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "still",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 15.265907764434814,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "edible!",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 15.26796841621399,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 15.267971992492676,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 15.297974109649658,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.297985792160034,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.309283256530762,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.324649095535278,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.336583614349365,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.347922325134277,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 15.408316612243652,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 15.476550817489624,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 15.490251302719116,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 28: What's the largest planet?",
+        "confidence": 0.9445826381640428
+      }
+    },
+    {
+      "timestamp": 15.539042234420776,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 15.651257991790771,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 15.651264190673828,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Jupiter",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 15.654319047927856,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 15.657372951507568,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 15.660427808761597,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "largest",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 15.663481950759888,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "planet",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 15.6665358543396,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 15.669589757919312,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "our",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 15.672645330429077,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "solar",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 15.675700902938843,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "system.",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 15.678755760192871,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 15.678757429122925,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 15.713720560073853,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.713723421096802,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.732977628707886,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 15.752861976623535,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 15.90498423576355,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 16.05378532409668,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 16.07015633583069,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Question 29: How many continents are there?",
+        "confidence": 0.9870838319450244
+      }
+    },
+    {
+      "timestamp": 16.18696141242981,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 16.378113985061646,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 16.37812066078186,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "There",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 16.383180618286133,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "are",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 16.388235569000244,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "seven",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 16.393290519714355,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "continents:",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 16.398345947265625,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Asia,",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 16.403401613235474,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Africa,",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 16.408458948135376,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "North",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 16.41351318359375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "America,",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 16.41856813430786,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "South",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 16.423623085021973,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "America,",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 16.428677797317505,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Antarctica,",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 16.433733463287354,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Europe,",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 16.438788175582886,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 16.44384264945984,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Australia.",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 16.448897123336792,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 16.448899269104004,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 16.52485942840576,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 16.524863481521606,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 16.544496297836304,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 16.55497121810913,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 16.569218635559082,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 16.587627172470093,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 16.602555513381958,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": 1,
+      "user_transcript": "What's your name?",
+      "ai_response": "I'm an AI voice assistant designed to help with various tasks.",
+      "user_confidence": 0.9831222194218546,
+      "start_time": 7.152557373046875e-07,
+      "end_time": 0.3240334987640381,
+      "latencies": {
+        "asr_latency": 0.013005495071411133,
+        "llm_latency": 0.10088133811950684,
+        "tts_latency": 0.026775360107421875,
+        "ttl": 0.14066219329833984
+      }
+    },
+    {
+      "turn_id": 2,
+      "user_transcript": "Tell me about yourself",
+      "ai_response": "I can answer questions, help with tasks, and have natural conversations using voice.",
+      "user_confidence": 0.9730582816275116,
+      "start_time": 0.3240334987640381,
+      "end_time": 0.9180459976196289,
+      "latencies": {
+        "asr_latency": 0.014143228530883789,
+        "llm_latency": 0.24377703666687012,
+        "tts_latency": 0.03026270866394043,
+        "ttl": 0.28818297386169434
+      }
+    },
+    {
+      "turn_id": 3,
+      "user_transcript": "What's the capital of France?",
+      "ai_response": "Paris is the capital of France.",
+      "user_confidence": 0.9206905019895161,
+      "start_time": 0.9180459976196289,
+      "end_time": 1.5352838039398193,
+      "latencies": {
+        "asr_latency": 0.014837503433227539,
+        "llm_latency": 0.33907413482666016,
+        "tts_latency": 0.06642508506774902,
+        "ttl": 0.4203367233276367
+      }
+    },
+    {
+      "turn_id": 4,
+      "user_transcript": "How far is the moon?",
+      "ai_response": "The moon is approximately 238,855 miles or 384,400 kilometers from Earth.",
+      "user_confidence": 0.9493562593846562,
+      "start_time": 1.5352838039398193,
+      "end_time": 1.9406828880310059,
+      "latencies": {
+        "asr_latency": 0.012137413024902344,
+        "llm_latency": 0.11863899230957031,
+        "tts_latency": 0.022744417190551758,
+        "ttl": 0.15352082252502441
+      }
+    },
+    {
+      "turn_id": 5,
+      "user_transcript": "What's 15 times 23?",
+      "ai_response": "15 times 23 equals 345.",
+      "user_confidence": 0.9694306114463058,
+      "start_time": 1.9406828880310059,
+      "end_time": 2.5101475715637207,
+      "latencies": {
+        "asr_latency": 0.01649785041809082,
+        "llm_latency": 0.18883967399597168,
+        "tts_latency": 0.03531002998352051,
+        "ttl": 0.240647554397583
+      }
+    },
+    {
+      "turn_id": 6,
+      "user_transcript": "Who invented the telephone?",
+      "ai_response": "Alexander Graham Bell is credited with inventing the telephone in 1876.",
+      "user_confidence": 0.9766278681781488,
+      "start_time": 2.5101475715637207,
+      "end_time": 3.312143087387085,
+      "latencies": {
+        "asr_latency": 0.017145872116088867,
+        "llm_latency": 0.3582170009613037,
+        "tts_latency": 0.07733845710754395,
+        "ttl": 0.4527013301849365
+      }
+    },
+    {
+      "turn_id": 7,
+      "user_transcript": "What's the speed of light?",
+      "ai_response": "The speed of light in a vacuum is about 299,792 kilometers per second.",
+      "user_confidence": 0.9766752708506165,
+      "start_time": 3.312143087387085,
+      "end_time": 3.705099105834961,
+      "latencies": {
+        "asr_latency": 0.01637721061706543,
+        "llm_latency": 0.11405515670776367,
+        "tts_latency": 0.026810646057128906,
+        "ttl": 0.157243013381958
+      }
+    },
+    {
+      "turn_id": 8,
+      "user_transcript": "Tell me a fun fact",
+      "ai_response": "Honey never spoils - archaeologists have found 3,000-year-old honey that's still edible!",
+      "user_confidence": 0.9544793950145232,
+      "start_time": 3.705099105834961,
+      "end_time": 4.221540212631226,
+      "latencies": {
+        "asr_latency": 0.01400613784790039,
+        "llm_latency": 0.1736454963684082,
+        "tts_latency": 0.04044055938720703,
+        "ttl": 0.22809219360351562
+      }
+    },
+    {
+      "turn_id": 9,
+      "user_transcript": "What's the largest planet?",
+      "ai_response": "Jupiter is the largest planet in our solar system.",
+      "user_confidence": 0.9463785396503486,
+      "start_time": 4.221540212631226,
+      "end_time": 4.959134101867676,
+      "latencies": {
+        "asr_latency": 0.012510538101196289,
+        "llm_latency": 0.34966254234313965,
+        "tts_latency": 0.07465553283691406,
+        "ttl": 0.43682861328125
+      }
+    },
+    {
+      "turn_id": 10,
+      "user_transcript": "How many continents are there?",
+      "ai_response": "There are seven continents: Asia, Africa, North America, South America, Antarctica, Europe, and Australia.",
+      "user_confidence": 0.989465755947608,
+      "start_time": 4.959134101867676,
+      "end_time": 5.432054042816162,
+      "latencies": {
+        "asr_latency": 0.019345760345458984,
+        "llm_latency": 0.12630295753479004,
+        "tts_latency": 0.02937626838684082,
+        "ttl": 0.17502498626708984
+      }
+    },
+    {
+      "turn_id": 11,
+      "user_transcript": "What's your name?",
+      "ai_response": "I'm an AI voice assistant designed to help with various tasks.",
+      "user_confidence": 0.9391987931697307,
+      "start_time": 5.432054042816162,
+      "end_time": 6.081335783004761,
+      "latencies": {
+        "asr_latency": 0.017466306686401367,
+        "llm_latency": 0.21801257133483887,
+        "tts_latency": 0.04761075973510742,
+        "ttl": 0.28308963775634766
+      }
+    },
+    {
+      "turn_id": 12,
+      "user_transcript": "Question 11: Tell me about yourself",
+      "ai_response": "I can answer questions, help with tasks, and have natural conversations using voice.",
+      "user_confidence": 0.9494435008397001,
+      "start_time": 6.081335783004761,
+      "end_time": 6.902745962142944,
+      "latencies": {
+        "asr_latency": 0.019118547439575195,
+        "llm_latency": 0.39653849601745605,
+        "tts_latency": 0.07115316390991211,
+        "ttl": 0.48681020736694336
+      }
+    },
+    {
+      "turn_id": 13,
+      "user_transcript": "Question 12: What's the capital of France?",
+      "ai_response": "Paris is the capital of France.",
+      "user_confidence": 0.98619178810541,
+      "start_time": 6.902745962142944,
+      "end_time": 7.180671691894531,
+      "latencies": {
+        "asr_latency": 0.0128936767578125,
+        "llm_latency": 0.10266566276550293,
+        "tts_latency": 0.025350570678710938,
+        "ttl": 0.14090991020202637
+      }
+    },
+    {
+      "turn_id": 14,
+      "user_transcript": "Question 13: How far is the moon?",
+      "ai_response": "The moon is approximately 238,855 miles or 384,400 kilometers from Earth.",
+      "user_confidence": 0.983919725362611,
+      "start_time": 7.180671691894531,
+      "end_time": 7.685514688491821,
+      "latencies": {
+        "asr_latency": 0.011343955993652344,
+        "llm_latency": 0.23004651069641113,
+        "tts_latency": 0.037488460540771484,
+        "ttl": 0.27887892723083496
+      }
+    },
+    {
+      "turn_id": 15,
+      "user_transcript": "Question 14: What's 15 times 23?",
+      "ai_response": "15 times 23 equals 345.",
+      "user_confidence": 0.9737559384989424,
+      "start_time": 7.685514688491821,
+      "end_time": 8.31516146659851,
+      "latencies": {
+        "asr_latency": 0.017386436462402344,
+        "llm_latency": 0.36908698081970215,
+        "tts_latency": 0.06321978569030762,
+        "ttl": 0.4496932029724121
+      }
+    },
+    {
+      "turn_id": 16,
+      "user_transcript": "Question 15: Who invented the telephone?",
+      "ai_response": "Alexander Graham Bell is credited with inventing the telephone in 1876.",
+      "user_confidence": 0.9518385572727786,
+      "start_time": 8.31516146659851,
+      "end_time": 8.72713828086853,
+      "latencies": {
+        "asr_latency": 0.019022226333618164,
+        "llm_latency": 0.10788512229919434,
+        "tts_latency": 0.020369291305541992,
+        "ttl": 0.1472766399383545
+      }
+    },
+    {
+      "turn_id": 17,
+      "user_transcript": "Question 16: What's the speed of light?",
+      "ai_response": "The speed of light in a vacuum is about 299,792 kilometers per second.",
+      "user_confidence": 0.9272285557719316,
+      "start_time": 8.72713828086853,
+      "end_time": 9.209890127182007,
+      "latencies": {
+        "asr_latency": 0.018161535263061523,
+        "llm_latency": 0.2143852710723877,
+        "tts_latency": 0.042189598083496094,
+        "ttl": 0.2747364044189453
+      }
+    },
+    {
+      "turn_id": 18,
+      "user_transcript": "Question 17: Tell me a fun fact",
+      "ai_response": "Honey never spoils - archaeologists have found 3,000-year-old honey that's still edible!",
+      "user_confidence": 0.9677371631418511,
+      "start_time": 9.209890127182007,
+      "end_time": 9.97155475616455,
+      "latencies": {
+        "asr_latency": 0.016225814819335938,
+        "llm_latency": 0.34484124183654785,
+        "tts_latency": 0.05350232124328613,
+        "ttl": 0.4145693778991699
+      }
+    },
+    {
+      "turn_id": 19,
+      "user_transcript": "Question 18: What's the largest planet?",
+      "ai_response": "Jupiter is the largest planet in our solar system.",
+      "user_confidence": 0.9683940579527143,
+      "start_time": 9.97155475616455,
+      "end_time": 10.315532207489014,
+      "latencies": {
+        "asr_latency": 0.01895880699157715,
+        "llm_latency": 0.11432528495788574,
+        "tts_latency": 0.028746366500854492,
+        "ttl": 0.16203045845031738
+      }
+    },
+    {
+      "turn_id": 20,
+      "user_transcript": "Question 19: How many continents are there?",
+      "ai_response": "There are seven continents: Asia, Africa, North America, South America, Antarctica, Europe, and Australia.",
+      "user_confidence": 0.9251987445136086,
+      "start_time": 10.315532207489014,
+      "end_time": 10.807657957077026,
+      "latencies": {
+        "asr_latency": 0.014735221862792969,
+        "llm_latency": 0.17824792861938477,
+        "tts_latency": 0.04107666015625,
+        "ttl": 0.23405981063842773
+      }
+    },
+    {
+      "turn_id": 21,
+      "user_transcript": "Question 20: What's your name?",
+      "ai_response": "I'm an AI voice assistant designed to help with various tasks.",
+      "user_confidence": 0.9894032309234336,
+      "start_time": 10.807657957077026,
+      "end_time": 11.407570838928223,
+      "latencies": {
+        "asr_latency": 0.014578819274902344,
+        "llm_latency": 0.32492995262145996,
+        "tts_latency": 0.07138371467590332,
+        "ttl": 0.4108924865722656
+      }
+    },
+    {
+      "turn_id": 22,
+      "user_transcript": "Question 21: Tell me about yourself",
+      "ai_response": "I can answer questions, help with tasks, and have natural conversations using voice.",
+      "user_confidence": 0.9627006602395096,
+      "start_time": 11.407570838928223,
+      "end_time": 11.912605285644531,
+      "latencies": {
+        "asr_latency": 0.01860833168029785,
+        "llm_latency": 0.12027239799499512,
+        "tts_latency": 0.02772235870361328,
+        "ttl": 0.16660308837890625
+      }
+    },
+    {
+      "turn_id": 23,
+      "user_transcript": "Question 22: What's the capital of France?",
+      "ai_response": "Paris is the capital of France.",
+      "user_confidence": 0.9525647257891364,
+      "start_time": 11.912605285644531,
+      "end_time": 12.418181657791138,
+      "latencies": {
+        "asr_latency": 0.01596975326538086,
+        "llm_latency": 0.16840600967407227,
+        "tts_latency": 0.03106999397277832,
+        "ttl": 0.21544575691223145
+      }
+    },
+    {
+      "turn_id": 24,
+      "user_transcript": "Question 23: How far is the moon?",
+      "ai_response": "The moon is approximately 238,855 miles or 384,400 kilometers from Earth.",
+      "user_confidence": 0.9607768610245572,
+      "start_time": 12.418181657791138,
+      "end_time": 13.228848218917847,
+      "latencies": {
+        "asr_latency": 0.017304658889770508,
+        "llm_latency": 0.35399484634399414,
+        "tts_latency": 0.06087684631347656,
+        "ttl": 0.4321763515472412
+      }
+    },
+    {
+      "turn_id": 25,
+      "user_transcript": "Question 24: What's 15 times 23?",
+      "ai_response": "15 times 23 equals 345.",
+      "user_confidence": 0.9386282069238459,
+      "start_time": 13.228848218917847,
+      "end_time": 13.562973260879517,
+      "latencies": {
+        "asr_latency": 0.014422893524169922,
+        "llm_latency": 0.10435175895690918,
+        "tts_latency": 0.022357463836669922,
+        "ttl": 0.14113211631774902
+      }
+    },
+    {
+      "turn_id": 26,
+      "user_transcript": "Question 25: Who invented the telephone?",
+      "ai_response": "Alexander Graham Bell is credited with inventing the telephone in 1876.",
+      "user_confidence": 0.9471415447278105,
+      "start_time": 13.562973260879517,
+      "end_time": 14.165066719055176,
+      "latencies": {
+        "asr_latency": 0.01871657371520996,
+        "llm_latency": 0.22867870330810547,
+        "tts_latency": 0.04579424858093262,
+        "ttl": 0.29318952560424805
+      }
+    },
+    {
+      "turn_id": 27,
+      "user_transcript": "Question 26: What's the speed of light?",
+      "ai_response": "The speed of light in a vacuum is about 299,792 kilometers per second.",
+      "user_confidence": 0.9659788860917373,
+      "start_time": 14.165066719055176,
+      "end_time": 14.903785705566406,
+      "latencies": {
+        "asr_latency": 0.01584458351135254,
+        "llm_latency": 0.3885159492492676,
+        "tts_latency": 0.0663290023803711,
+        "ttl": 0.4706895351409912
+      }
+    },
+    {
+      "turn_id": 28,
+      "user_transcript": "Question 27: Tell me a fun fact",
+      "ai_response": "Honey never spoils - archaeologists have found 3,000-year-old honey that's still edible!",
+      "user_confidence": 0.933399306980776,
+      "start_time": 14.903785705566406,
+      "end_time": 15.347922325134277,
+      "latencies": {
+        "asr_latency": 0.01173090934753418,
+        "llm_latency": 0.11153674125671387,
+        "tts_latency": 0.030005693435668945,
+        "ttl": 0.153273344039917
+      }
+    },
+    {
+      "turn_id": 29,
+      "user_transcript": "Question 28: What's the largest planet?",
+      "ai_response": "Jupiter is the largest planet in our solar system.",
+      "user_confidence": 0.9445826381640428,
+      "start_time": 15.347922325134277,
+      "end_time": 15.752861976623535,
+      "latencies": {
+        "asr_latency": 0.013700485229492188,
+        "llm_latency": 0.18850445747375488,
+        "tts_latency": 0.034964799880981445,
+        "ttl": 0.23716974258422852
+      }
+    },
+    {
+      "turn_id": 30,
+      "user_transcript": "Question 29: How many continents are there?",
+      "ai_response": "There are seven continents: Asia, Africa, North America, South America, Antarctica, Europe, and Australia.",
+      "user_confidence": 0.9870838319450244,
+      "start_time": 15.752861976623535,
+      "end_time": 16.602555513381958,
+      "latencies": {
+        "asr_latency": 0.01637101173400879,
+        "llm_latency": 0.3787407875061035,
+        "tts_latency": 0.07596230506896973,
+        "ttl": 0.47107410430908203
+      }
+    }
+  ],
+  "metrics": {
+    "total_turns": 30,
+    "avg_ttl": 0.28523136774698893,
+    "min_ttl": 0.14066219329833984,
+    "max_ttl": 0.48681020736694336,
+    "avg_asr_latency": 0.015752251942952475,
+    "avg_llm_latency": 0.22523536682128906,
+    "avg_tts_latency": 0.0442437489827474,
+    "session_duration": 16.602555513381958,
+    "active_duration": 16.602555513381958
+  }
+}

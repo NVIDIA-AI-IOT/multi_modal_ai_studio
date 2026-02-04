@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-modal AI Studio</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <h1>🎙️ Multi-modal AI Studio</h1>
+        </div>
+        <div class="header-right">
+            <button id="theme-toggle" class="icon-btn" title="Toggle theme">🌙</button>
+        </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="container">
+        <!-- Session List Sidebar -->
+        <aside class="session-list" id="session-list">
+            <div class="session-list-header">
+                <button id="new-session-btn" class="primary-btn new-session-btn">+ New Voice Chat</button>
+            </div>
+            <div class="session-list-subheader">
+                <h2>Sessions</h2>
+                <span class="session-count">Loading...</span>
+            </div>
+            <div class="session-items" id="session-items">
+                <!-- Sessions loaded via JS -->
+            </div>
+        </aside>
+
+        <!-- Main Content Panel -->
+        <div class="main-panel">
+            <!-- Content Area (config + chat side by side) -->
+            <div class="content-area">
+                <!-- Config Panel -->
+                <section class="config-panel" id="config-panel">
+                    <div class="config-header">
+                        <h3>Configuration</h3>
+                    </div>
+                    <div class="config-content" id="config-content">
+                        <div class="config-tabs">
+                            <button class="config-tab active" data-tab="asr">ASR</button>
+                            <button class="config-tab" data-tab="llm">LLM</button>
+                            <button class="config-tab" data-tab="tts">TTS</button>
+                            <button class="config-tab" data-tab="device">Devices</button>
+                            <button class="config-tab" data-tab="app">App</button>
+                        </div>
+                        <div class="config-tab-content" id="config-tab-content">
+                            <!-- Config details loaded via JS -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Chat Panel (Always 3 sections in order) -->
+                <section class="chat-panel" id="chat-panel">
+                    <!-- 1. Session Meta (Title + Stats) -->
+                    <div class="session-meta-container" id="session-meta">
+                        <h2 class="session-title" id="session-title">Select a session</h2>
+                        <div class="session-stats" id="session-stats">
+                            <!-- Populated by JS: Date | Turns | TTL or LIVE/PREVIEW status -->
+                        </div>
+                    </div>
+                    
+                    <!-- 2. Session Image (Preview or Video) -->
+                    <div class="session-image-container" id="session-image">
+                        <!-- Historical: Static preview image -->
+                        <img id="preview-image" class="session-preview-image" alt="Session preview" style="display: none;">
+                        <div class="image-placeholder" id="image-placeholder">
+                            <span class="placeholder-icon">🎥</span>
+                            <p class="placeholder-text">Multi-modal Session</p>
+                            <p class="placeholder-subtext">Vision + Voice Analysis</p>
+                        </div>
+                        
+                        <!-- Live: Video feed -->
+                        <video id="video-feed" class="session-video-feed" autoplay muted playsinline style="display: none;"></video>
+                    </div>
+                    
+                    <!-- Device Controls (live sessions only) -->
+                    <div class="device-controls-container" id="device-controls-container" style="display: none;">
+                        <div class="device-group">
+                            <div class="device-item">
+                                <label>🎥 Camera</label>
+                                <select id="camera-select" class="device-select">
+                                    <option value="browser">Browser WebRTC</option>
+                                    <option value="none">None</option>
+                                </select>
+                            </div>
+                            <div class="device-item">
+                                <label>🎤 Microphone</label>
+                                <select id="mic-select" class="device-select">
+                                    <option value="browser">Browser WebRTC</option>
+                                    <option value="none">None (text only)</option>
+                                </select>
+                                <div class="audio-level-indicator">
+                                    <div class="audio-level-bar" id="mic-level"></div>
+                                </div>
+                            </div>
+                            <div class="device-item">
+                                <label>🔊 Speaker</label>
+                                <select id="speaker-select" class="device-select">
+                                    <option value="browser">Browser WebRTC</option>
+                                    <option value="none">None (text only)</option>
+                                </select>
+                                <div class="audio-level-indicator">
+                                    <div class="audio-level-bar" id="speaker-level"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="session-control">
+                            <button id="start-session-btn" class="start-btn">
+                                <span class="btn-icon">▶</span>
+                                START Session
+                            </button>
+                            <button id="stop-session-btn" class="stop-btn" style="display: none;">
+                                <span class="btn-icon">⏸</span>
+                                STOP Session
+                            </button>
+                            <div class="session-status" id="session-status">
+                                <span class="status-indicator status-setup"></span>
+                                <span class="status-text">Setup Mode</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 3. Chat History -->
+                    <div class="chat-history" id="chat-history">
+                        <div class="empty-state">
+                            <p>👈 Select a session from the sidebar</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Timeline Panel -->
+            <section class="timeline-panel" id="timeline-panel">
+                <div class="timeline-header">
+                    <h3>Timeline</h3>
+                    <div class="timeline-controls">
+                        <button id="timeline-zoom-out" class="icon-btn" title="Zoom out">-</button>
+                        <button id="timeline-zoom-in" class="icon-btn" title="Zoom in">+</button>
+                        <button id="timeline-reset" class="icon-btn" title="Reset view">⟲</button>
+                    </div>
+                </div>
+                <div class="timeline-content" id="timeline-content">
+                    <canvas id="timeline-canvas"></canvas>
+                </div>
+                <div class="timeline-metrics" id="timeline-metrics">
+                    <!-- Metrics -->
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

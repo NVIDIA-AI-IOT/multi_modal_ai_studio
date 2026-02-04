@@ -1,0 +1,742 @@
+{
+  "session_id": "0319fcb6-1117-4f2f-8427-bb230b271cb1",
+  "name": "Low Latency Test - 2026-02-03",
+  "created_at": "2026-02-04T21:46:11.850219",
+  "config": {
+    "name": "Low Latency",
+    "description": "Optimized for fast responses with aggressive VAD",
+    "asr": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "model": "conformer",
+      "language": "en-US",
+      "vad_start_threshold": 0.6,
+      "vad_stop_threshold": 0.4,
+      "speech_timeout_ms": 300,
+      "requires_restart": false
+    },
+    "llm": {
+      "scheme": "openai",
+      "api_base": "http://localhost:11434/v1",
+      "api_key": null,
+      "model": "llama3.2:3b",
+      "temperature": 0.7,
+      "max_tokens": 256,
+      "system_prompt": "You are a helpful voice assistant. Keep responses concise.",
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "tts": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "voice": "",
+      "sample_rate": 22050,
+      "speed": 1.0,
+      "response_format": "pcm"
+    },
+    "devices": {
+      "video_source": "none",
+      "video_device": null,
+      "audio_input_source": "browser",
+      "audio_input_device": null,
+      "audio_output_source": "browser",
+      "audio_output_device": null
+    },
+    "app": {
+      "barge_in_enabled": true,
+      "timeline_position": "right",
+      "session_auto_save": true,
+      "session_output_dir": "./sessions",
+      "theme": "dark",
+      "auto_restart_riva": false
+    }
+  },
+  "timeline": [
+    {
+      "timestamp": 1.1920928955078125e-06,
+      "event_type": "session_start",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 7.867813110351562e-06,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.13632941246032715,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What's the w",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 0.153045654296875,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.16556406021118164,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's the weather like?",
+        "confidence": 0.9605384675394109
+      }
+    },
+    {
+      "timestamp": 0.19829821586608887,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.25255775451660156,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.2525634765625,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "It's",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.25461864471435547,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "sunny",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.25667357444763184,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.2587277889251709,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "72",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.26078224182128906,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "degrees.",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.26283740997314453,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.26284003257751465,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.28654050827026367,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.2865438461303711,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.2995281219482422,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.5492949485778809,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.6512043476104736,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Set a timer ",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 0.6746499538421631,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.6901397705078125,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Set a timer for 5 minutes",
+        "confidence": 0.9247380811664452
+      }
+    },
+    {
+      "timestamp": 0.7225275039672852,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.7754676342010498,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.7754747867584229,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Timer",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.7775306701660156,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "set",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.7795858383178711,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "for",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.781639814376831,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "5",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.783693790435791,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "minutes.",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.7857496738433838,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.7857522964477539,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.8134033679962158,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8134071826934814,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8325636386871338,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.123033046722412,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.2179913520812988,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.2363488674163818,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me a joke",
+        "confidence": 0.9678134017871683
+      }
+    },
+    {
+      "timestamp": 1.286257028579712,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.3436110019683838,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.343613862991333,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Why",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 1.345667839050293,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "don't",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 1.3477215766906738,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "scientists",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 1.3497767448425293,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "trust",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 1.351832628250122,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "atoms?",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 1.353886365890503,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Because",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 1.355940580368042,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "they",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 1.3579964637756348,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "make",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 1.360051155090332,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "up",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 1.3621044158935547,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "everything!",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 1.364159345626831,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.3641610145568848,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.38889741897583,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.3889000415802002,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.3992993831634521,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.4165725708007812,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.4318931102752686,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.690058946609497,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.8368170261383057,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What tim",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 1.8518638610839844,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.865652084350586,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What time is it?",
+        "confidence": 0.97524095830115
+      }
+    },
+    {
+      "timestamp": 1.896134853363037,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.944288969039917,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.944291114807129,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "It's",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 1.9463446140289307,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "2:30",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 1.9483988285064697,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "PM.",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 1.950453281402588,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.9504611492156982,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.9731009006500244,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9731028079986572,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.1793103218078613,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.303474187850952,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.3183891773223877,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Thanks",
+        "confidence": 0.9888000065822913
+      }
+    },
+    {
+      "timestamp": 2.360123634338379,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.406698226928711,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4067013263702393,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "You're",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 2.4087555408477783,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "welcome!",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 2.4108095169067383,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4108104705810547,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.431783437728882,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.4317851066589355,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": 1,
+      "user_transcript": "What's the weather like?",
+      "ai_response": "It's sunny and 72 degrees.",
+      "user_confidence": 0.9605384675394109,
+      "start_time": 1.1920928955078125e-06,
+      "end_time": 0.2995281219482422,
+      "latencies": {
+        "asr_latency": 0.01251840591430664,
+        "llm_latency": 0.09727334976196289,
+        "tts_latency": 0.02370309829711914,
+        "ttl": 0.13349485397338867
+      }
+    },
+    {
+      "turn_id": 2,
+      "user_transcript": "Set a timer for 5 minutes",
+      "ai_response": "Timer set for 5 minutes.",
+      "user_confidence": 0.9247380811664452,
+      "start_time": 0.2995281219482422,
+      "end_time": 0.8325636386871338,
+      "latencies": {
+        "asr_latency": 0.015489816665649414,
+        "llm_latency": 0.09560990333557129,
+        "tts_latency": 0.02765369415283203,
+        "ttl": 0.13875341415405273
+      }
+    },
+    {
+      "turn_id": 3,
+      "user_transcript": "Tell me a joke",
+      "ai_response": "Why don't scientists trust atoms? Because they make up everything!",
+      "user_confidence": 0.9678134017871683,
+      "start_time": 0.8325636386871338,
+      "end_time": 1.4318931102752686,
+      "latencies": {
+        "asr_latency": 0.018357515335083008,
+        "llm_latency": 0.12781047821044922,
+        "tts_latency": 0.024738073348999023,
+        "ttl": 0.17090606689453125
+      }
+    },
+    {
+      "turn_id": 4,
+      "user_transcript": "What time is it?",
+      "ai_response": "It's 2:30 PM.",
+      "user_confidence": 0.97524095830115,
+      "start_time": 1.4318931102752686,
+      "end_time": 1.9731028079986572,
+      "latencies": {
+        "asr_latency": 0.013788223266601562,
+        "llm_latency": 0.08480119705200195,
+        "tts_latency": 0.022647619247436523,
+        "ttl": 0.12123703956604004
+      }
+    },
+    {
+      "turn_id": 5,
+      "user_transcript": "Thanks",
+      "ai_response": "You're welcome!",
+      "user_confidence": 0.9888000065822913,
+      "start_time": 1.9731028079986572,
+      "end_time": 2.4317851066589355,
+      "latencies": {
+        "asr_latency": 0.014914989471435547,
+        "llm_latency": 0.09242033958435059,
+        "tts_latency": 0.020973920822143555,
+        "ttl": 0.1283092498779297
+      }
+    }
+  ],
+  "metrics": {
+    "total_turns": 5,
+    "avg_ttl": 0.13854012489318848,
+    "min_ttl": 0.12123703956604004,
+    "max_ttl": 0.17090606689453125,
+    "avg_asr_latency": 0.015013790130615235,
+    "avg_llm_latency": 0.09958305358886718,
+    "avg_tts_latency": 0.023943281173706053,
+    "session_duration": 2.4317851066589355,
+    "active_duration": 2.4317851066589355
+  }
+}

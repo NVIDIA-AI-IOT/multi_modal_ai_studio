@@ -1,0 +1,37 @@
+name: "Default"
+description: "General purpose, balanced latency and accuracy"
+
+asr:
+  scheme: riva
+  server: localhost:50051
+  model: conformer
+  language: en-US
+  vad_start_threshold: 0.5
+  vad_stop_threshold: 0.3
+  speech_timeout_ms: 500
+
+llm:
+  scheme: openai
+  api_base: http://localhost:11434/v1
+  model: llama3.2:3b
+  temperature: 0.7
+  max_tokens: 512
+  system_prompt: "You are a helpful voice assistant."
+
+tts:
+  scheme: riva
+  server: localhost:50051
+  voice: ""  # Empty = use Riva's default voice
+  sample_rate: 22050  # Riva's native rate
+
+devices:
+  video_source: browser
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  timeline_position: right  # Timeline collects ALL events (no buffer limit)
+  session_auto_save: true
+  session_output_dir: ./sessions
+  theme: dark

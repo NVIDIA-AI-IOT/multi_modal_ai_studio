@@ -1,0 +1,4025 @@
+{
+  "session_id": "02f49f9f-515c-4bc3-a5e4-8d24634ce136",
+  "name": "Mixed Performance - 2026-02-03",
+  "created_at": "2026-02-04T21:46:23.097096",
+  "config": {
+    "name": "Default",
+    "description": "General purpose, balanced latency and accuracy",
+    "asr": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "model": "conformer",
+      "language": "en-US",
+      "vad_start_threshold": 0.5,
+      "vad_stop_threshold": 0.3,
+      "speech_timeout_ms": 500,
+      "requires_restart": false
+    },
+    "llm": {
+      "scheme": "openai",
+      "api_base": "http://localhost:11434/v1",
+      "api_key": null,
+      "model": "llama3.2:3b",
+      "temperature": 0.7,
+      "max_tokens": 512,
+      "system_prompt": "You are a helpful voice assistant.",
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "tts": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "voice": "",
+      "sample_rate": 22050,
+      "speed": 1.0,
+      "response_format": "pcm"
+    },
+    "devices": {
+      "video_source": "browser",
+      "video_device": null,
+      "audio_input_source": "browser",
+      "audio_input_device": null,
+      "audio_output_source": "browser",
+      "audio_output_device": null
+    },
+    "app": {
+      "barge_in_enabled": true,
+      "timeline_position": "right",
+      "session_auto_save": true,
+      "session_output_dir": "./sessions",
+      "theme": "dark",
+      "auto_restart_riva": false
+    }
+  },
+  "timeline": [
+    {
+      "timestamp": 9.5367431640625e-07,
+      "event_type": "session_start",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 5.9604644775390625e-06,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.09677720069885254,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Hi t",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 0.1111304759979248,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.12167024612426758,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Hi there",
+        "confidence": 0.9438039509607081
+      }
+    },
+    {
+      "timestamp": 0.17010235786437988,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.21499037742614746,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.21499300003051758,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Hello!",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.21704697608947754,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "How",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.2191009521484375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "can",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.22115492820739746,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "I",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.22320890426635742,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.22526288032531738,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "you",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 0.22731685638427734,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "today?",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 0.2293710708618164,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.22937250137329102,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.2517669200897217,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.2517688274383545,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.2678556442260742,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.514540433883667,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.619673490524292,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me about m",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 0.6482212543487549,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.6666529178619385,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me about machine learning",
+        "confidence": 0.9553864312299708
+      }
+    },
+    {
+      "timestamp": 0.7199621200561523,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.8219435214996338,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.8219473361968994,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Machine",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.8250017166137695,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.8280551433563232,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.8311092853546143,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.8341629505157471,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "subset",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.8372173309326172,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 0.84027099609375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "artificial",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 0.8433258533477783,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "intelligence",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 0.8463802337646484,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "focused",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 0.8494343757629395,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "on",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 0.8524880409240723,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "building",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 0.8555421829223633,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "systems",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 0.8585963249206543,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 0.8616495132446289,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learn",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 0.8647031784057617,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "from",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 0.8677573204040527,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "data",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 0.8708112239837646,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 0.8738658428192139,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "improve",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 0.8769199848175049,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "their",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 0.8799734115600586,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "performance",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 0.8830268383026123,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "over",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 0.8860807418823242,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "time",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 0.8891348838806152,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "without",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 0.892188310623169,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "being",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 0.8952422142028809,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "explicitly",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 0.8982963562011719,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "programmed.",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 0.9013497829437256,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.901350736618042,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.9512603282928467,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.9512622356414795,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.9620118141174316,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.9820563793182373,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.9994585514068604,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.013962745666504,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.0244593620300293,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.0413174629211426,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.0552282333374023,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.0748088359832764,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.0913825035095215,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.2042527198791504,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.3344066143035889,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What's dee",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 1.3625922203063965,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.3821842670440674,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's deep learning?",
+        "confidence": 0.988455803217863
+      }
+    },
+    {
+      "timestamp": 1.5009291172027588,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.7432310581207275,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.7432353496551514,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Deep",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 1.7482898235321045,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 1.7533442974090576,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "uses",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 1.758399248123169,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "artificial",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 1.7634544372558594,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "neural",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 1.768510103225708,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "networks",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 1.7735662460327148,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 1.778630018234253,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "multiple",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 1.7836949825286865,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "layers",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 1.7887523174285889,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 1.7938075065612793,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "progressively",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 1.7988619804382324,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "extract",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 1.8039169311523438,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "higher-level",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 1.8089711666107178,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "features",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 1.814026117324829,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "from",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 1.8197083473205566,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "raw",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 1.8247711658477783,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "input,",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 1.8298265933990479,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "enabling",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 1.8348824977874756,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "impressive",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 1.8399369716644287,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "results",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 1.84499192237854,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 1.850045919418335,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computer",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 1.8551008701324463,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "vision,",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 1.8601574897766113,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "natural",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 1.8652124404907227,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "language",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 1.8702738285064697,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "processing,",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 1.8753297328948975,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 1.8803844451904297,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "speech",
+        "index": 27
+      }
+    },
+    {
+      "timestamp": 1.885439395904541,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "recognition.",
+        "index": 28
+      }
+    },
+    {
+      "timestamp": 1.8904962539672852,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.8904993534088135,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.9457237720489502,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9457297325134277,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9560673236846924,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.969231367111206,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.987921953201294,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.00693416595459,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0179545879364014,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0288145542144775,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0465900897979736,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.058439254760742,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.071852207183838,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 9,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.087379217147827,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 10,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.098581552505493,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.268242835998535,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4151611328125,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "How do neural ",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 2.4306278228759766,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.442917585372925,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "How do neural networks work?",
+        "confidence": 0.9512121272446458
+      }
+    },
+    {
+      "timestamp": 2.5201876163482666,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.6316885948181152,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.6316957473754883,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Neural",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 2.6347503662109375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "networks",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 2.6378109455108643,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "consist",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 2.6408655643463135,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 2.6439197063446045,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "interconnected",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 2.6469743251800537,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "nodes",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 2.650028705596924,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "organized",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 2.6530826091766357,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 2.656136989593506,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "layers",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 2.6591930389404297,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 2.6622474193573,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "process",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 2.665303945541382,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "information",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 2.6683590412139893,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "through",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 2.6714136600494385,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "weighted",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 2.6744461059570312,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "connections,",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 2.6775002479553223,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 2.6805548667907715,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 2.6836087703704834,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "recognize",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 2.6866633892059326,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "patterns",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 2.689718008041382,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "by",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 2.6927719116210938,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "adjusting",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 2.695826530456543,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "these",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 2.698880910873413,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "weights",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 2.701935052871704,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "through",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 2.7049896717071533,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "backpropagation.",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 2.7080445289611816,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.7080461978912354,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.7497811317443848,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.7497849464416504,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.759911060333252,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.7745203971862793,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.7933804988861084,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.811873197555542,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.828874349594116,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.845975399017334,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.85629940032959,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.870687961578369,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.8864824771881104,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 9,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.8989152908325195,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.2536728382110596,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.3402011394500732,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Ok",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 3.366684675216675,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.377959966659546,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Okay",
+        "confidence": 0.922456185526497
+      }
+    },
+    {
+      "timestamp": 3.4151251316070557,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.4563331604003906,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.4563376903533936,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Is",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 3.4583921432495117,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "there",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 3.46044659614563,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "anything",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 3.4625041484832764,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "else",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 3.4645590782165527,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "you'd",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 3.466613292694092,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "like",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 3.4686670303344727,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 3.4707212448120117,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "know?",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 3.4727768898010254,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.4727790355682373,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.5017573833465576,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.501760959625244,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.5205307006835938,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.540395498275757,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.9077141284942627,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.014490842819214,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Explain bac",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 4.028870344161987,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.042113780975342,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Explain backpropagation",
+        "confidence": 0.9684921767971099
+      }
+    },
+    {
+      "timestamp": 4.128567934036255,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.280857801437378,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.28087306022644,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Backpropagation",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 4.285929441452026,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 4.290985584259033,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "an",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 4.296040296554565,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "algorithm",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 4.301095247268677,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "for",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 4.306151390075684,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "training",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 4.311207294464111,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "neural",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 4.316261529922485,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "networks",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 4.321316719055176,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "by",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 4.326371431350708,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computing",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 4.331426382064819,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "gradients",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 4.336480617523193,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 4.34154486656189,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 4.346600532531738,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "loss",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 4.3516552448272705,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "function",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 4.35671067237854,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 4.36176872253418,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "respect",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 4.366823434829712,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 4.371878147125244,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "each",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 4.376933574676514,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "weight,",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 4.381988286972046,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "then",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 4.3870439529418945,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "updating",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 4.392098665237427,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "weights",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 4.397153377532959,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 4.402209520339966,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "minimize",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 4.407264471054077,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "error",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 4.4123194217681885,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "using",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 4.417374610900879,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "gradient",
+        "index": 27
+      }
+    },
+    {
+      "timestamp": 4.422429084777832,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "descent.",
+        "index": 28
+      }
+    },
+    {
+      "timestamp": 4.427484750747681,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.427488088607788,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.503918409347534,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.503934860229492,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.5178446769714355,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.5350871086120605,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.551981449127197,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.570936679840088,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.586451053619385,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.6044230461120605,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.618276596069336,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.631199598312378,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.641534090042114,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.932369947433472,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.993720769882202,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What about ",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 5.0079028606414795,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.0256288051605225,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What about overfitting?",
+        "confidence": 0.9458660529376479
+      }
+    },
+    {
+      "timestamp": 5.0706048011779785,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.16824746131897,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.1682658195495605,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Overfitting",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 5.171304941177368,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "occurs",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 5.174360275268555,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "when",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 5.177415370941162,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 5.1804704666137695,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "model",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 5.1835246086120605,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learns",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 5.1865785121917725,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "training",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 5.189633131027222,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "data",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 5.192687749862671,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "too",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 5.195741891860962,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "well,",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 5.198796033859253,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "including",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 5.201850891113281,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "noise",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 5.20490574836731,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 5.207959413528442,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "outliers,",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 5.211013078689575,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "resulting",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 5.214067220687866,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 5.217121362686157,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "poor",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 5.220175504684448,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "generalization",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 5.223229646682739,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 5.226283550262451,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "new",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 5.229337453842163,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "data.",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 5.232391595840454,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Techniques",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 5.235451936721802,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "like",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 5.238503456115723,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "regularization,",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 5.2415571212768555,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "dropout,",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 5.244611501693726,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 5.247667551040649,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "cross-validation",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 5.250721454620361,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "help",
+        "index": 27
+      }
+    },
+    {
+      "timestamp": 5.253775358200073,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "prevent",
+        "index": 28
+      }
+    },
+    {
+      "timestamp": 5.256829023361206,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "it.",
+        "index": 29
+      }
+    },
+    {
+      "timestamp": 5.2598841190338135,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.259886741638184,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.295090198516846,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.295095205307007,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.305722236633301,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.317830324172974,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.334490776062012,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.350348711013794,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.369425535202026,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.380774736404419,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.398038148880005,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.412792921066284,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.432377576828003,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 9,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.451032876968384,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.738438844680786,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.837938070297241,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Can you give",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 5.858555555343628,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.877233505249023,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Can you give an example?",
+        "confidence": 0.9312179232865413
+      }
+    },
+    {
+      "timestamp": 5.919485807418823,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.0537824630737305,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.053798675537109,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Sure!",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 6.056855201721191,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Imagine",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 6.059909343719482,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 6.062963485717773,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "student",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 6.066019773483276,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "who",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 6.069074392318726,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "memorizes",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 6.072127819061279,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "answers",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 6.07518196105957,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 6.07823634147644,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "practice",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 6.081290245056152,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "problems",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 6.084345102310181,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "without",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 6.087399959564209,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "understanding",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 6.090455532073975,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "concepts.",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 6.093510627746582,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "They'll",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 6.09656548500061,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "ace",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 6.099619626998901,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "practice",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 6.102673530578613,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "tests",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 6.105727434158325,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "but",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 6.10878324508667,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "fail",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 6.111837863922119,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "on",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 6.11489200592041,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "new",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 6.117950677871704,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "questions.",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 6.121006011962891,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.12100887298584,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.166102886199951,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.166109561920166,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.1855669021606445,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.203454971313477,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.216106176376343,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.227988958358765,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.239590883255005,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.254228115081787,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.269965171813965,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.486030340194702,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 6.5507447719573975,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 6.568620920181274,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "That makes sense",
+        "confidence": 0.9880365222945243
+      }
+    },
+    {
+      "timestamp": 6.600727558135986,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.6506266593933105,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.650632858276367,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Great!",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 6.652688980102539,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Understanding",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 6.654743671417236,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 6.656798362731934,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "concepts",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 6.658852815628052,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "rather",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 6.660907030105591,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "than",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 6.662960767745972,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "memorizing",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 6.6649980545043945,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 6.667093515396118,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "key",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 6.669147491455078,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 6.671201229095459,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "both",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 6.673255681991577,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 6.675309419631958,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 6.677363157272339,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "building",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 6.679416656494141,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "good",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 6.6814494132995605,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "ML",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 6.6835036277771,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "models.",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 6.685558319091797,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.685559988021851,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.709829568862915,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.709838628768921,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.729443311691284,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.7463014125823975,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.762141227722168,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.773150682449341,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.791391134262085,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.031824588775635,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.106440544128418,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What's the difference between sup",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 7.117981433868408,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.137052536010742,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What's the difference between supervised and unsupervised learning?",
+        "confidence": 0.9555564136056232
+      }
+    },
+    {
+      "timestamp": 7.203425884246826,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.35088038444519,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.350887298583984,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Supervised",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 7.353942632675171,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 7.35699725151062,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "uses",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 7.36005163192749,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "labeled",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 7.363110065460205,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "training",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 7.366164684295654,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "data",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 7.369219541549683,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 7.372273683547974,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learn",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 7.375328540802002,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "input-output",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 7.3783838748931885,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "mappings,",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 7.381439208984375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "while",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 7.384494066238403,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "unsupervised",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 7.387551784515381,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 7.390608310699463,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "finds",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 7.393663644790649,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "patterns",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 7.396718740463257,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 7.399773120880127,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "unlabeled",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 7.402827501296997,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "data",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 7.405881643295288,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "without",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 7.408936262130737,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "predefined",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 7.411990642547607,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "categories",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 7.415045261383057,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "or",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 7.418099880218506,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "targets.",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 7.421154975891113,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.421156644821167,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.4707536697387695,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.470757007598877,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.48316502571106,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.500883102416992,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.514527082443237,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.527140140533447,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.538349151611328,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.548973560333252,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.568657875061035,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.587055206298828,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.6022725105285645,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.837112665176392,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.913867950439453,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me more about u",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 7.935391664505005,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.950601816177368,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me more about unsupervised learning",
+        "confidence": 0.9212528165924102
+      }
+    },
+    {
+      "timestamp": 8.066622257232666,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.263794898986816,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.263804912567139,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Unsupervised",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 8.268861055374146,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 8.273916244506836,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "includes",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 8.278972148895264,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "clustering",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 8.284027814865112,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "algorithms",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 8.289082288742065,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "like",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 8.294139385223389,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "k-means,",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 8.299193859100342,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "dimensionality",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 8.304248094558716,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "reduction",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 8.309301853179932,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "techniques",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 8.314357280731201,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "like",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 8.319411277770996,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "PCA,",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 8.324471235275269,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 8.3295259475708,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "generative",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 8.33458161354065,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "models",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 8.339636325836182,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "like",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 8.344690799713135,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "autoencoders",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 8.349746227264404,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 8.354800462722778,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "GANs.",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 8.359855651855469,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.359858274459839,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.414615154266357,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.414624214172363,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.42988920211792,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.44528579711914,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.458367347717285,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.476463794708252,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.494252920150757,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.508968591690063,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.522554397583008,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.533153772354126,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.754666328430176,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 8.805442094802856,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 8.824182987213135,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Thanks for explaining",
+        "confidence": 0.9274400906079938
+      }
+    },
+    {
+      "timestamp": 8.858421325683594,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.900557279586792,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.900567293167114,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "You're",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 8.902623653411865,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "welcome!",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 8.90467882156372,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Machine",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 8.906733751296997,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 8.908788204193115,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 8.910842895507812,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 8.912896871566772,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "fascinating",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 8.91495156288147,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "field",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 8.917006015777588,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "with",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 8.919059991836548,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "lots",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 8.921114444732666,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 8.923170566558838,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "explore.",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 8.925225973129272,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.925227642059326,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.953301429748535,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.953309297561646,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.965084791183472,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.979907274246216,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.99924111366272,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": 1,
+      "user_transcript": "Hi there",
+      "ai_response": "Hello! How can I help you today?",
+      "user_confidence": 0.9438039509607081,
+      "start_time": 9.5367431640625e-07,
+      "end_time": 0.2678556442260742,
+      "latencies": {
+        "asr_latency": 0.010539770126342773,
+        "llm_latency": 0.10770082473754883,
+        "tts_latency": 0.022395849227905273,
+        "ttl": 0.14063644409179688
+      }
+    },
+    {
+      "turn_id": 2,
+      "user_transcript": "Tell me about machine learning",
+      "ai_response": "Machine learning is a subset of artificial intelligence focused on building systems that learn from data and improve their performance over time without being explicitly programmed.",
+      "user_confidence": 0.9553864312299708,
+      "start_time": 0.2678556442260742,
+      "end_time": 1.0913825035095215,
+      "latencies": {
+        "asr_latency": 0.018431663513183594,
+        "llm_latency": 0.2346968650817871,
+        "tts_latency": 0.049910545349121094,
+        "ttl": 0.3030390739440918
+      }
+    },
+    {
+      "turn_id": 3,
+      "user_transcript": "What's deep learning?",
+      "ai_response": "Deep learning uses artificial neural networks with multiple layers to progressively extract higher-level features from raw input, enabling impressive results in computer vision, natural language processing, and speech recognition.",
+      "user_confidence": 0.988455803217863,
+      "start_time": 1.0913825035095215,
+      "end_time": 2.098581552505493,
+      "latencies": {
+        "asr_latency": 0.0195920467376709,
+        "llm_latency": 0.5083119869232178,
+        "tts_latency": 0.05522751808166504,
+        "ttl": 0.5831315517425537
+      }
+    },
+    {
+      "turn_id": 4,
+      "user_transcript": "How do neural networks work?",
+      "ai_response": "Neural networks consist of interconnected nodes organized in layers that process information through weighted connections, learning to recognize patterns by adjusting these weights through backpropagation.",
+      "user_confidence": 0.9512121272446458,
+      "start_time": 2.098581552505493,
+      "end_time": 2.8989152908325195,
+      "latencies": {
+        "asr_latency": 0.012289762496948242,
+        "llm_latency": 0.26512694358825684,
+        "tts_latency": 0.041736602783203125,
+        "ttl": 0.3191533088684082
+      }
+    },
+    {
+      "turn_id": 5,
+      "user_transcript": "Okay",
+      "ai_response": "Is there anything else you'd like to know?",
+      "user_confidence": 0.922456185526497,
+      "start_time": 2.8989152908325195,
+      "end_time": 3.540395498275757,
+      "latencies": {
+        "asr_latency": 0.011275291442871094,
+        "llm_latency": 0.09481692314147949,
+        "tts_latency": 0.028980493545532227,
+        "ttl": 0.1350727081298828
+      }
+    },
+    {
+      "turn_id": 6,
+      "user_transcript": "Explain backpropagation",
+      "ai_response": "Backpropagation is an algorithm for training neural networks by computing gradients of the loss function with respect to each weight, then updating weights to minimize error using gradient descent.",
+      "user_confidence": 0.9684921767971099,
+      "start_time": 3.540395498275757,
+      "end_time": 4.641534090042114,
+      "latencies": {
+        "asr_latency": 0.013243436813354492,
+        "llm_latency": 0.38537096977233887,
+        "tts_latency": 0.07643365859985352,
+        "ttl": 0.4750480651855469
+      }
+    },
+    {
+      "turn_id": 7,
+      "user_transcript": "What about overfitting?",
+      "ai_response": "Overfitting occurs when a model learns training data too well, including noise and outliers, resulting in poor generalization to new data. Techniques like regularization, dropout, and cross-validation help prevent it.",
+      "user_confidence": 0.9458660529376479,
+      "start_time": 4.641534090042114,
+      "end_time": 5.451032876968384,
+      "latencies": {
+        "asr_latency": 0.01772594451904297,
+        "llm_latency": 0.23425531387329102,
+        "tts_latency": 0.03520607948303223,
+        "ttl": 0.2871873378753662
+      }
+    },
+    {
+      "turn_id": 8,
+      "user_transcript": "Can you give an example?",
+      "ai_response": "Sure! Imagine a student who memorizes answers to practice problems without understanding concepts. They'll ace practice tests but fail on new questions.",
+      "user_confidence": 0.9312179232865413,
+      "start_time": 5.451032876968384,
+      "end_time": 6.269965171813965,
+      "latencies": {
+        "asr_latency": 0.018677949905395508,
+        "llm_latency": 0.2437725067138672,
+        "tts_latency": 0.04509687423706055,
+        "ttl": 0.30754733085632324
+      }
+    },
+    {
+      "turn_id": 9,
+      "user_transcript": "That makes sense",
+      "ai_response": "Great! Understanding the concepts rather than memorizing is key to both learning and building good ML models.",
+      "user_confidence": 0.9880365222945243,
+      "start_time": 6.269965171813965,
+      "end_time": 6.791391134262085,
+      "latencies": {
+        "asr_latency": 0.017876148223876953,
+        "llm_latency": 0.11693739891052246,
+        "tts_latency": 0.024271249771118164,
+        "ttl": 0.15908479690551758
+      }
+    },
+    {
+      "turn_id": 10,
+      "user_transcript": "What's the difference between supervised and unsupervised learning?",
+      "ai_response": "Supervised learning uses labeled training data to learn input-output mappings, while unsupervised learning finds patterns in unlabeled data without predefined categories or targets.",
+      "user_confidence": 0.9555564136056232,
+      "start_time": 6.791391134262085,
+      "end_time": 7.6022725105285645,
+      "latencies": {
+        "asr_latency": 0.019071102142333984,
+        "llm_latency": 0.2841024398803711,
+        "tts_latency": 0.04959869384765625,
+        "ttl": 0.35277223587036133
+      }
+    },
+    {
+      "turn_id": 11,
+      "user_transcript": "Tell me more about unsupervised learning",
+      "ai_response": "Unsupervised learning includes clustering algorithms like k-means, dimensionality reduction techniques like PCA, and generative models like autoencoders and GANs.",
+      "user_confidence": 0.9212528165924102,
+      "start_time": 7.6022725105285645,
+      "end_time": 8.533153772354126,
+      "latencies": {
+        "asr_latency": 0.015210151672363281,
+        "llm_latency": 0.4092538356781006,
+        "tts_latency": 0.05475950241088867,
+        "ttl": 0.47922348976135254
+      }
+    },
+    {
+      "turn_id": 12,
+      "user_transcript": "Thanks for explaining",
+      "ai_response": "You're welcome! Machine learning is a fascinating field with lots to explore.",
+      "user_confidence": 0.9274400906079938,
+      "start_time": 8.533153772354126,
+      "end_time": 8.99924111366272,
+      "latencies": {
+        "asr_latency": 0.01874089241027832,
+        "llm_latency": 0.1010429859161377,
+        "tts_latency": 0.028075456619262695,
+        "ttl": 0.1478593349456787
+      }
+    }
+  ],
+  "metrics": {
+    "total_turns": 12,
+    "avg_ttl": 0.3074796398480733,
+    "min_ttl": 0.1350727081298828,
+    "max_ttl": 0.5831315517425537,
+    "avg_asr_latency": 0.016056180000305176,
+    "avg_llm_latency": 0.24878241618474325,
+    "avg_tts_latency": 0.0426410436630249,
+    "session_duration": 8.99924111366272,
+    "active_duration": 8.99924111366272
+  }
+}

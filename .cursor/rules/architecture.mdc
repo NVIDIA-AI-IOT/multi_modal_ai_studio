@@ -1,0 +1,95 @@
+# Architecture Principles
+
+## Module Organization
+
+```
+multi_modal_ai_studio/
+├── config/         # Configuration schema and management (device-agnostic)
+├── backends/       # ASR, LLM, TTS implementations (pluggable)
+├── devices/        # USB/browser device detection and routing
+├── core/           # Session, conversation, timeline logic
+├── server/         # Web server (aiohttp + WebSocket)
+├── cli/            # Command-line interface for headless mode
+└── utils/          # Shared utilities
+```
+
+## Backend Abstraction
+
+All backends implement base abstract classes:
+
+- `ASRBackend`: Streaming transcription (partial + final results)
+- `LLMBackend`: Streaming text generation (token-by-token)
+- `TTSBackend`: Streaming audio synthesis (chunked audio)
+
+This allows easy swapping between Riva, OpenAI, Azure, etc.
+
+## Configuration System
+
+- **Unified schema**: Single `SessionConfig` dataclass for all modes (WebUI/CLI)
+- **Preset support**: System presets (bundled) and user presets (saved from sessions)
+- **Export/import**: YAML, JSON, or CLI args - all interchangeable
+- **Validation**: Check requirements, warn about incompatibilities (e.g., missing API keys)
+
+## Data Flow
+
+### Live Mode (WebUI or Headless)
+
+```
+User Input (Browser/USB)
+    ↓
+DeviceRouter
+    ↓
+ASR Backend → Partial transcripts → Display
+    ↓
+  Final transcript
+    ↓
+LLM Backend → Token stream → Display
+    ↓
+  Complete response
+    ↓
+TTS Backend → Audio chunks → Speaker
+    ↓
+Timeline Tracking (all stages)
+    ↓
+Session Storage (JSON)
+```
+
+### Playback Mode (Future)
+
+```
+Load Session JSON
+    ↓
+Parse timeline data
+    ↓
+Render timeline visualization
+    ↓
+Display chat history
+    ↓
+Show configuration used
+```
+
+## Session Data Format
+
+Each session stored as JSON with:
+
+1. **Metadata**: ID, timestamp, title, description
+2. **Configurations**: Complete ASR/LLM/TTS/device configs
+3. **Timeline events**: Timestamped markers for all pipeline stages
+4. **Turns**: Array of conversation turns with transcripts/responses
+5. **Metrics**: Calculated performance metrics (TTFA, etc.)
+
+This format supports both live recording and offline playback.
+
+## Concurrency Model
+
+- **Async/await**: All I/O operations (WebSocket, gRPC, HTTP)
+- **aiohttp**: Web server and HTTP client
+- **asyncio**: Event loop management
+- **Thread pools**: For blocking operations (USB audio I/O)
+
+## Error Handling
+
+- Graceful degradation (e.g., if TTS fails, show text response)
+- Detailed logging at all stages
+- User-friendly error messages in UI
+- Automatic reconnection for transient failures

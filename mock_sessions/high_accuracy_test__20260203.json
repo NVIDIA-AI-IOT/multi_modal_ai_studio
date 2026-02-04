@@ -1,0 +1,3193 @@
+{
+  "session_id": "de9a5d50-43d2-4fd1-bd37-cec42670a05b",
+  "name": "High Accuracy Test - 2026-02-03",
+  "created_at": "2026-02-04T21:46:14.457557",
+  "config": {
+    "name": "High Accuracy",
+    "description": "Prioritizes accuracy over speed with conservative VAD",
+    "asr": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "model": "conformer",
+      "language": "en-US",
+      "vad_start_threshold": 0.4,
+      "vad_stop_threshold": 0.2,
+      "speech_timeout_ms": 800,
+      "requires_restart": false
+    },
+    "llm": {
+      "scheme": "openai",
+      "api_base": "http://localhost:11434/v1",
+      "api_key": null,
+      "model": "llama3.1:8b",
+      "temperature": 0.5,
+      "max_tokens": 1024,
+      "system_prompt": "You are a knowledgeable voice assistant. Provide thorough, accurate responses.",
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "tts": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "voice": "",
+      "sample_rate": 22050,
+      "speed": 1.0,
+      "response_format": "pcm"
+    },
+    "devices": {
+      "video_source": "browser",
+      "video_device": null,
+      "audio_input_source": "browser",
+      "audio_input_device": null,
+      "audio_output_source": "browser",
+      "audio_output_device": null
+    },
+    "app": {
+      "barge_in_enabled": false,
+      "timeline_position": "right",
+      "session_auto_save": true,
+      "session_output_dir": "./sessions",
+      "theme": "dark",
+      "auto_restart_riva": false
+    }
+  },
+  "timeline": [
+    {
+      "timestamp": 1.1920928955078125e-06,
+      "event_type": "session_start",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 5.9604644775390625e-06,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.12175798416137695,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 0.1357710361480713,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Explain quantum computing",
+        "confidence": 0.9376581875411882
+      }
+    },
+    {
+      "timestamp": 0.2268524169921875,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.4524409770965576,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.4524528980255127,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Quantum",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 0.45751023292541504,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computing",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 0.46256589889526367,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "harnesses",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 0.4676210880279541,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 0.47267699241638184,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "mechanical",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 0.47773241996765137,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "phenomena",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 0.4827878475189209,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "like",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 0.48784351348876953,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "superposition",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 0.49289870262145996,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 0.4979534149169922,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "entanglement",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 0.5030081272125244,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 0.5080640316009521,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "process",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 0.5131196975708008,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "information",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 0.5181746482849121,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 0.5232295989990234,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "ways",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 0.5282845497131348,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "classical",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 0.533339262008667,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computers",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 0.5383942127227783,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "cannot.",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 0.5434491634368896,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Unlike",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 0.5485062599182129,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "classical",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 0.5535612106323242,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "bits",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 0.5586159229278564,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 0.5636708736419678,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "are",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 0.5687320232391357,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "either",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 0.5737874507904053,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "0",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 0.5788428783416748,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "or",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 0.5838973522186279,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "1,",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 0.5889534950256348,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 27
+      }
+    },
+    {
+      "timestamp": 0.594008207321167,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "bits",
+        "index": 28
+      }
+    },
+    {
+      "timestamp": 0.5990636348724365,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "or",
+        "index": 29
+      }
+    },
+    {
+      "timestamp": 0.6041181087493896,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "qubits",
+        "index": 30
+      }
+    },
+    {
+      "timestamp": 0.6091737747192383,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "can",
+        "index": 31
+      }
+    },
+    {
+      "timestamp": 0.6142282485961914,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "exist",
+        "index": 32
+      }
+    },
+    {
+      "timestamp": 0.6192829608917236,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "in",
+        "index": 33
+      }
+    },
+    {
+      "timestamp": 0.6243376731872559,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "multiple",
+        "index": 34
+      }
+    },
+    {
+      "timestamp": 0.6293935775756836,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "states",
+        "index": 35
+      }
+    },
+    {
+      "timestamp": 0.6344482898712158,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "simultaneously.",
+        "index": 36
+      }
+    },
+    {
+      "timestamp": 0.6395039558410645,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 0.6395065784454346,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 0.7066688537597656,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.7066736221313477,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.7238225936889648,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.7355976104736328,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.7507421970367432,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.7634382247924805,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.773897647857666,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.7932548522949219,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8078467845916748,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8182051181793213,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8361759185791016,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 9,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8476769924163818,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 10,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8588902950286865,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 11,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8762681484222412,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 12,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 0.8886499404907227,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.330301284790039,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.3844900131225586,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What are the m",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 1.4015817642211914,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.4177966117858887,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What are the main challenges?",
+        "confidence": 0.9373683144774214
+      }
+    },
+    {
+      "timestamp": 1.5149545669555664,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.7591307163238525,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.759138822555542,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "The",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 1.7642011642456055,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "main",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 1.7692561149597168,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "challenges",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 1.7743115425109863,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "include",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 1.7793660163879395,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "maintaining",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 1.7844212055206299,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 1.789475440979004,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "coherence,",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 1.7945306301116943,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "error",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 1.7995853424072266,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "correction,",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 1.8046400547027588,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "scaling",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 1.8096940517425537,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 1.814749002456665,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "large",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 1.8198034763336182,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "numbers",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 1.8248584270477295,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 1.8299131393432617,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "qubits,",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 1.834968090057373,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 1.8400225639343262,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "operating",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 1.8450770378112793,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "at",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 1.8501315116882324,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "extremely",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 1.8551862239837646,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "low",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 1.8602418899536133,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "temperatures",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 1.8652961254119873,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "near",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 1.8703513145446777,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "absolute",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 1.875406265258789,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "zero.",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 1.8804614543914795,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 1.880462884902954,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 1.9310762882232666,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9310789108276367,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9469895362854004,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9631805419921875,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9752237796783447,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 1.9908740520477295,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0100960731506348,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0269575119018555,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0383803844451904,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.0508084297180176,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.3256733417510986,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.4415090084075928,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "How is it different fr",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 2.4715559482574463,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 2.490917205810547,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "How is it different from classical computing?",
+        "confidence": 0.9458434444014757
+      }
+    },
+    {
+      "timestamp": 2.585190534591675,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.740837574005127,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.7408478260040283,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Classical",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 2.7459051609039307,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computing",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 2.7509610652923584,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "uses",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 2.756016492843628,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "binary",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 2.76107120513916,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "logic",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 2.7661263942718506,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "gates",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 2.771181583404541,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 2.7762374877929688,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "sequential",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 2.78129243850708,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "processing,",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 2.7863481044769287,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "while",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 2.791403293609619,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 2.7964587211608887,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computing",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 2.801513433456421,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "uses",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 2.806567430496216,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 2.811621904373169,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "gates",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 2.8166778087615967,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 2.82173228263855,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "parallel",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 2.8267877101898193,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "processing",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 2.831843137741089,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "across",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 2.836897611618042,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "superposed",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 2.8419525623321533,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "states,",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 2.8470098972320557,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "potentially",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 2.852067232131958,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "solving",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 2.8571219444274902,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "certain",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 2.8621768951416016,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "problems",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 2.867231845855713,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "exponentially",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 2.8722872734069824,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "faster.",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 2.8773438930511475,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 2.8773462772369385,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 2.940906047821045,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.940920352935791,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.960108995437622,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.9731783866882324,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 2.988795280456543,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.0050439834594727,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.0249202251434326,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.0368218421936035,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.0561416149139404,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.069936752319336,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.08054780960083,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 9,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.0968918800354004,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 10,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.109091281890869,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.4111597537994385,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.466958999633789,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "What are practic",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 3.4946866035461426,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.5072500705718994,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What are practical applications?",
+        "confidence": 0.9845152759397225
+      }
+    },
+    {
+      "timestamp": 3.596862554550171,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.7847390174865723,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.784742832183838,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Practical",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 3.789797306060791,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "applications",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 3.7948524951934814,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "include",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 3.7999067306518555,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "cryptography,",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 3.8049607276916504,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "drug",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 3.81001615524292,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "discovery,",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 3.8150711059570312,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "financial",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 3.8201301097869873,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "modeling,",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 3.8251845836639404,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "climate",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 3.8302390575408936,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "simulation,",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 3.835293769836426,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "optimization",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 3.840348720550537,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "problems,",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 3.8454031944274902,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 3.8504579067230225,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "machine",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 3.855513095855713,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "learning",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 3.860567808151245,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "acceleration.",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 3.8656227588653564,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.86562442779541,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.9164352416992188,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.9164371490478516,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.927767753601074,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.9475364685058594,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.96561336517334,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.9804890155792236,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 3.99399471282959,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.01299786567688,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 4.02812123298645,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.395206928253174,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.514786720275879,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "When will it ",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 4.5337975025177,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 4.550212144851685,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "When will it be mainstream?",
+        "confidence": 0.9200874520516524
+      }
+    },
+    {
+      "timestamp": 4.651005029678345,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.886091709136963,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 4.886099815368652,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Widespread",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 4.891155004501343,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 4.8962109088897705,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computing",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 4.901265859603882,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "adoption",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 4.906320571899414,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 4.911375284194946,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "likely",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 4.916430234909058,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "10-20",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 4.9214842319488525,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "years",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 4.926538705825806,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "away,",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 4.931594133377075,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "though",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 4.936648845672607,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "specialized",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 4.94170355796814,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "applications",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 4.946759223937988,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "may",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 4.951813220977783,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "emerge",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 4.956867933273315,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "sooner",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 4.961923360824585,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "as",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 4.966977834701538,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 4.972032308578491,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "technology",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 4.97708797454834,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "matures",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 4.982143878936768,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 4.9871985912323,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "becomes",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 4.992254018783569,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "more",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 4.997308969497681,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "accessible.",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 5.002371072769165,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.002373695373535,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.062192678451538,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.062196254730225,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.073146820068359,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.087085962295532,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.105581521987915,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.122377395629883,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.139138698577881,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.154369354248047,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.170249938964844,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 5.182900667190552,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 5.504226446151733,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.555039405822754,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me about qua",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 5.580892562866211,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 5.597070217132568,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Tell me about quantum entanglement",
+        "confidence": 0.9446660205002347
+      }
+    },
+    {
+      "timestamp": 5.707432508468628,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.861019611358643,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 5.861023902893066,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Quantum",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 5.866078853607178,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "entanglement",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 5.87113356590271,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "is",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 5.876188516616821,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "a",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 5.881243467330933,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "phenomenon",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 5.886298418045044,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "where",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 5.891353607177734,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "particles",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 5.896408319473267,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "become",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 5.90146279335022,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "correlated",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 5.906517505645752,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "such",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 5.911571979522705,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "that",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 5.916626691818237,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "the",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 5.921682357788086,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 5.926737070083618,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "state",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 5.9317944049835205,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 5.936848402023315,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "one",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 5.9419028759002686,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "particle",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 5.946957588195801,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "cannot",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 5.952012062072754,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "be",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 5.957066535949707,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "described",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 5.962122440338135,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "independently",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 5.967177152633667,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 5.972233057022095,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "others,",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 5.977288007736206,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "even",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 5.982343435287476,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "when",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 5.987399101257324,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "separated",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 5.9924538135528564,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "by",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 5.9975080490112305,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "large",
+        "index": 27
+      }
+    },
+    {
+      "timestamp": 6.002561807632446,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "distances.",
+        "index": 28
+      }
+    },
+    {
+      "timestamp": 6.007616996765137,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.007617950439453,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.080165863037109,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.080167770385742,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.0952558517456055,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.107109069824219,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.124347448348999,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.143009424209595,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.158939838409424,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.175128221511841,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.193209886550903,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.204211235046387,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 6.22380518913269,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 6.4520158767700195,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 6.557051658630371,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 6.5694215297698975,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "How does quantum error correction work?",
+        "confidence": 0.9886305029945652
+      }
+    },
+    {
+      "timestamp": 6.661032676696777,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.866458177566528,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 6.866468191146851,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Quantum",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 6.871524095535278,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "error",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 6.876579523086548,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "correction",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 6.881634712219238,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "uses",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 6.8866894245147705,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "redundant",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 6.891744136810303,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "encoding",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 6.896799087524414,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "of",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 6.901854038238525,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 6.906908750534058,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "information",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 6.91196346282959,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "across",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 6.917018890380859,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "multiple",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 6.922073125839233,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "physical",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 6.927126884460449,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "qubits",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 6.93218207359314,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 6.937236785888672,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "protect",
+        "index": 14
+      }
+    },
+    {
+      "timestamp": 6.942291498184204,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "against",
+        "index": 15
+      }
+    },
+    {
+      "timestamp": 6.947345972061157,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "errors",
+        "index": 16
+      }
+    },
+    {
+      "timestamp": 6.95240044593811,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "from",
+        "index": 17
+      }
+    },
+    {
+      "timestamp": 6.957455158233643,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "decoherence",
+        "index": 18
+      }
+    },
+    {
+      "timestamp": 6.962509870529175,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "and",
+        "index": 19
+      }
+    },
+    {
+      "timestamp": 6.967565059661865,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "noise,",
+        "index": 20
+      }
+    },
+    {
+      "timestamp": 6.972619295120239,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "similar",
+        "index": 21
+      }
+    },
+    {
+      "timestamp": 6.977674245834351,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 22
+      }
+    },
+    {
+      "timestamp": 6.982730388641357,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "classical",
+        "index": 23
+      }
+    },
+    {
+      "timestamp": 6.9877846240997314,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "error",
+        "index": 24
+      }
+    },
+    {
+      "timestamp": 6.992839336395264,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "correction",
+        "index": 25
+      }
+    },
+    {
+      "timestamp": 6.997894287109375,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "but",
+        "index": 26
+      }
+    },
+    {
+      "timestamp": 7.002948999404907,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "more",
+        "index": 27
+      }
+    },
+    {
+      "timestamp": 7.00800347328186,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "complex",
+        "index": 28
+      }
+    },
+    {
+      "timestamp": 7.0130579471588135,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "due",
+        "index": 29
+      }
+    },
+    {
+      "timestamp": 7.018112659454346,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 30
+      }
+    },
+    {
+      "timestamp": 7.023167610168457,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 31
+      }
+    },
+    {
+      "timestamp": 7.028223276138306,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "constraints.",
+        "index": 32
+      }
+    },
+    {
+      "timestamp": 7.033279180526733,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.033281087875366,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.109117269515991,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.109120607376099,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.123882055282593,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.13430643081665,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.1523597240448,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.163568019866943,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 4,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.178714036941528,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 5,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.191889524459839,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 6,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.205448389053345,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 7,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.218053340911865,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 8,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.231652498245239,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 9,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.2504096031188965,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 10,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.2662436962127686,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 11,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 7.277925968170166,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 7.554517507553101,
+      "event_type": "user_speech_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.677992582321167,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "Thank you for ",
+        "is_final": false
+      }
+    },
+    {
+      "timestamp": 7.690720081329346,
+      "event_type": "user_speech_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.709407329559326,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "Thank you for the explanation",
+        "confidence": 0.977431405935866
+      }
+    },
+    {
+      "timestamp": 7.794183254241943,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.984237194061279,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 7.98424220085144,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "You're",
+        "index": 0
+      }
+    },
+    {
+      "timestamp": 7.989297866821289,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "welcome!",
+        "index": 1
+      }
+    },
+    {
+      "timestamp": 7.994353294372559,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "Feel",
+        "index": 2
+      }
+    },
+    {
+      "timestamp": 7.99940824508667,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "free",
+        "index": 3
+      }
+    },
+    {
+      "timestamp": 8.004463195800781,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "to",
+        "index": 4
+      }
+    },
+    {
+      "timestamp": 8.009518146514893,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "ask",
+        "index": 5
+      }
+    },
+    {
+      "timestamp": 8.014572858810425,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "if",
+        "index": 6
+      }
+    },
+    {
+      "timestamp": 8.019627809524536,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "you",
+        "index": 7
+      }
+    },
+    {
+      "timestamp": 8.024682760238647,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "have",
+        "index": 8
+      }
+    },
+    {
+      "timestamp": 8.029737949371338,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "more",
+        "index": 9
+      }
+    },
+    {
+      "timestamp": 8.03479266166687,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "questions",
+        "index": 10
+      }
+    },
+    {
+      "timestamp": 8.039847612380981,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "about",
+        "index": 11
+      }
+    },
+    {
+      "timestamp": 8.044902324676514,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "quantum",
+        "index": 12
+      }
+    },
+    {
+      "timestamp": 8.049957275390625,
+      "event_type": "llm_token",
+      "lane": "llm",
+      "data": {
+        "token": "computing.",
+        "index": 13
+      }
+    },
+    {
+      "timestamp": 8.055012464523315,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 8.05501389503479,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 8.11452054977417,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.114522695541382,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 0,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.130268335342407,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 1,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.141302108764648,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 2,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.156931161880493,
+      "event_type": "tts_audio",
+      "lane": "tts",
+      "data": {
+        "chunk_index": 3,
+        "chunk_size": 2048
+      }
+    },
+    {
+      "timestamp": 8.168097734451294,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": 1,
+      "user_transcript": "Explain quantum computing",
+      "ai_response": "Quantum computing harnesses quantum mechanical phenomena like superposition and entanglement to process information in ways classical computers cannot. Unlike classical bits that are either 0 or 1, quantum bits or qubits can exist in multiple states simultaneously.",
+      "user_confidence": 0.9376581875411882,
+      "start_time": 1.1920928955078125e-06,
+      "end_time": 0.8886499404907227,
+      "latencies": {
+        "asr_latency": 0.014013051986694336,
+        "llm_latency": 0.5037329196929932,
+        "tts_latency": 0.06716489791870117,
+        "ttl": 0.5849108695983887
+      }
+    },
+    {
+      "turn_id": 2,
+      "user_transcript": "What are the main challenges?",
+      "ai_response": "The main challenges include maintaining quantum coherence, error correction, scaling to large numbers of qubits, and operating at extremely low temperatures near absolute zero.",
+      "user_confidence": 0.9373683144774214,
+      "start_time": 0.8886499404907227,
+      "end_time": 2.0508084297180176,
+      "latencies": {
+        "asr_latency": 0.016214847564697266,
+        "llm_latency": 0.4626648426055908,
+        "tts_latency": 0.05061483383178711,
+        "ttl": 0.5294945240020752
+      }
+    },
+    {
+      "turn_id": 3,
+      "user_transcript": "How is it different from classical computing?",
+      "ai_response": "Classical computing uses binary logic gates and sequential processing, while quantum computing uses quantum gates and parallel processing across superposed states, potentially solving certain problems exponentially faster.",
+      "user_confidence": 0.9458434444014757,
+      "start_time": 2.0508084297180176,
+      "end_time": 3.109091281890869,
+      "latencies": {
+        "asr_latency": 0.019361257553100586,
+        "llm_latency": 0.3864266872406006,
+        "tts_latency": 0.06356215476989746,
+        "ttl": 0.46935009956359863
+      }
+    },
+    {
+      "turn_id": 4,
+      "user_transcript": "What are practical applications?",
+      "ai_response": "Practical applications include cryptography, drug discovery, financial modeling, climate simulation, optimization problems, and machine learning acceleration.",
+      "user_confidence": 0.9845152759397225,
+      "start_time": 3.109091281890869,
+      "end_time": 4.02812123298645,
+      "latencies": {
+        "asr_latency": 0.012563467025756836,
+        "llm_latency": 0.35837268829345703,
+        "tts_latency": 0.050812482833862305,
+        "ttl": 0.42174863815307617
+      }
+    },
+    {
+      "turn_id": 5,
+      "user_transcript": "When will it be mainstream?",
+      "ai_response": "Widespread quantum computing adoption is likely 10-20 years away, though specialized applications may emerge sooner as the technology matures and becomes more accessible.",
+      "user_confidence": 0.9200874520516524,
+      "start_time": 4.02812123298645,
+      "end_time": 5.182900667190552,
+      "latencies": {
+        "asr_latency": 0.016414642333984375,
+        "llm_latency": 0.45215892791748047,
+        "tts_latency": 0.05982160568237305,
+        "ttl": 0.5283951759338379
+      }
+    },
+    {
+      "turn_id": 6,
+      "user_transcript": "Tell me about quantum entanglement",
+      "ai_response": "Quantum entanglement is a phenomenon where particles become correlated such that the quantum state of one particle cannot be described independently of others, even when separated by large distances.",
+      "user_confidence": 0.9446660205002347,
+      "start_time": 5.182900667190552,
+      "end_time": 6.22380518913269,
+      "latencies": {
+        "asr_latency": 0.016177654266357422,
+        "llm_latency": 0.41054677963256836,
+        "tts_latency": 0.07254886627197266,
+        "ttl": 0.49927330017089844
+      }
+    },
+    {
+      "turn_id": 7,
+      "user_transcript": "How does quantum error correction work?",
+      "ai_response": "Quantum error correction uses redundant encoding of quantum information across multiple physical qubits to protect against errors from decoherence and noise, similar to classical error correction but more complex due to quantum constraints.",
+      "user_confidence": 0.9886305029945652,
+      "start_time": 6.22380518913269,
+      "end_time": 7.277925968170166,
+      "latencies": {
+        "asr_latency": 0.012369871139526367,
+        "llm_latency": 0.46385765075683594,
+        "tts_latency": 0.07583808898925781,
+        "ttl": 0.5520656108856201
+      }
+    },
+    {
+      "turn_id": 8,
+      "user_transcript": "Thank you for the explanation",
+      "ai_response": "You're welcome! Feel free to ask if you have more questions about quantum computing.",
+      "user_confidence": 0.977431405935866,
+      "start_time": 7.277925968170166,
+      "end_time": 8.168097734451294,
+      "latencies": {
+        "asr_latency": 0.01868724822998047,
+        "llm_latency": 0.34560513496398926,
+        "tts_latency": 0.05950808525085449,
+        "ttl": 0.4238004684448242
+      }
+    }
+  ],
+  "metrics": {
+    "total_turns": 8,
+    "avg_ttl": 0.5011298358440399,
+    "min_ttl": 0.42174863815307617,
+    "max_ttl": 0.5849108695983887,
+    "avg_asr_latency": 0.015725255012512207,
+    "avg_llm_latency": 0.42292070388793945,
+    "avg_tts_latency": 0.06248387694358826,
+    "session_duration": 8.168097734451294,
+    "active_duration": 8.168097734451294
+  }
+}

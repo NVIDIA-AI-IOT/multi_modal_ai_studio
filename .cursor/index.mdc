@@ -1,0 +1,27 @@
+# Multi-modal AI Studio - Cursor Rules Index
+
+This project uses the Cursor rules directory system for AI guidance.
+
+## Active Rules
+
+- [Project Overview](./rules/project.mdc) - Goals, principles, and scope
+- [Architecture Principles](./rules/architecture.mdc) - System design and data flow
+- [Code Style](./rules/code-style.mdc) - Python conventions and patterns
+- [Backend Implementation](./rules/backends.mdc) - Adding new ASR/LLM/TTS backends
+- [UI Patterns](./rules/ui-patterns.mdc) - Frontend design system
+- [Documentation Guidelines](./rules/documentation.mdc) - Where to place docs and what to commit
+
+## Quick Reference
+
+- **Project**: Multi-modal voice/text/video AI interface with session management
+- **Backends**: Riva gRPC, OpenAI REST + Realtime, Azure Speech (future)
+- **Key Features**: Timeline analysis, latency metrics, configuration presets
+- **Modes**: WebUI (default) or headless CLI
+- **Current Phase**: Foundation (Phase 1) - see [Implementation Plan](../docs/cursor/IMPLEMENTATION_PHASES.md)
+
+## Development Workflow
+
+1. Read relevant rule files before starting new features
+2. Follow architecture patterns for consistency
+3. Update planning docs when making significant changes
+4. Test both WebUI and CLI modes when applicable

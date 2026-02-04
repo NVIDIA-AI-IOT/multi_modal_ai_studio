@@ -1,0 +1,124 @@
+# Backend Implementation Rules
+
+## Adding New Backends
+
+When adding a new ASR/LLM/TTS backend:
+
+1. **Create file** in appropriate directory (`backends/asr/`, `backends/llm/`, `backends/tts/`)
+2. **Inherit from base class** (`ASRBackend`, `LLMBackend`, `TTSBackend`)
+3. **Implement all abstract methods**
+4. **Add configuration fields** to schema in `config/schema.py`
+5. **Register in factory** function
+6. **Update UI** to add tab in config panel
+7. **Add preset example** in `presets/` directory
+8. **Document** in `docs/api-backends.md`
+
+## Backend Types
+
+### Riva Backend (gRPC)
+
+- **Reuse code** from `live-riva-webui` (riva_bridge.py, riva_tts.py)
+- Handle gRPC **connection lifecycle** (connect, disconnect, reconnect)
+- Implement **proper error recovery** (transient vs permanent failures)
+- Support **streaming** for both ASR and TTS
+
+### OpenAI REST Backend
+
+- Use **aiohttp** for async HTTP requests
+- Implement **chunking** for non-streaming APIs (Whisper)
+- Handle **rate limits** and implement exponential backoff
+- Support **retries** for transient failures
+
+### OpenAI Realtime Backend
+
+- Use **WebSocket** for bidirectional streaming
+- Handle **both ASR and TTS** in single connection
+- Implement **turn detection** (server-side VAD)
+- Manage **session state** and event handling
+
+### Azure Speech Backend (Future)
+
+- Similar to OpenAI REST
+- Handle **Azure-specific auth** (subscription keys)
+- Support **custom neural voices**
+
+## Base Classes
+
+### ASRBackend
+
+```python
+class ASRBackend(ABC):
+    @abstractmethod
+    async def start_stream(self) -> None:
+        """Start streaming recognition"""
+        
+    @abstractmethod
+    async def send_audio(self, audio_chunk: bytes) -> None:
+        """Send audio chunk for recognition"""
+        
+    @abstractmethod
+    async def receive_results(self) -> AsyncIterator[ASRResult]:
+        """Yield recognition results (partial and final)"""
+        
+    @abstractmethod
+    async def stop_stream(self) -> None:
+        """Stop streaming recognition"""
+```
+
+### LLMBackend
+
+```python
+class LLMBackend(ABC):
+    @abstractmethod
+    async def generate_stream(
+        self, 
+        prompt: str, 
+        history: List[Dict]
+    ) -> AsyncIterator[str]:
+        """Generate response tokens"""
+```
+
+### TTSBackend
+
+```python
+class TTSBackend(ABC):
+    @abstractmethod
+    async def synthesize_stream(
+        self, 
+        text: str
+    ) -> AsyncIterator[bytes]:
+        """Generate audio chunks"""
+```
+
+## Testing Backends
+
+- **Unit tests** with mocked gRPC/HTTP responses
+- **Integration tests** with real services (optional, requires credentials)
+- **Error condition tests** (network failure, invalid API key, timeout)
+- **Performance tests** (latency, throughput)
+
+## Error Handling
+
+Each backend should handle:
+
+1. **Connection errors**: Retry with backoff
+2. **Authentication errors**: Clear message, fail fast
+3. **Rate limits**: Backoff and retry
+4. **Timeouts**: Configurable, with sensible defaults
+5. **Invalid input**: Validate before sending
+
+## Configuration
+
+Each backend config should include:
+
+- **Required fields**: Server, API key, model
+- **Optional fields**: Timeout, retry settings, advanced options
+- **Validation**: Check consistency, provide defaults
+- **Secrets handling**: Never log API keys
+
+## Performance Considerations
+
+- **Connection pooling**: Reuse HTTP/gRPC connections
+- **Buffering**: Batch small audio chunks when possible
+- **Streaming**: Prefer streaming over batch APIs
+- **Async**: Use async/await for all I/O operations

@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-modal-ai-studio"
+version = "0.1.0"
+description = "Multi-modal AI interface with voice, text, and video support for analyzing conversational AI systems"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+keywords = ["ai", "voice", "multimodal", "riva", "nvidia", "openai", "conversational-ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "aiohttp>=3.8.0",
+    "grpcio>=1.50.0",
+    "nvidia-riva-client>=2.14.0",
+    "openai>=1.0.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "numpy>=1.21.0",
+    "websockets>=11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+audio = [
+    "pyaudio>=0.2.13",  # For local USB device access (headless mode)
+]
+
+[project.scripts]
+multi-modal-ai-studio = "multi_modal_ai_studio.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/multi-modal-ai-studio"
+Documentation = "https://github.com/yourusername/multi-modal-ai-studio/tree/main/docs"
+Repository = "https://github.com/yourusername/multi-modal-ai-studio"
+Issues = "https://github.com/yourusername/multi-modal-ai-studio/issues"
+
+[tool.setuptools]
+packages = ["multi_modal_ai_studio"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+multi_modal_ai_studio = ["server/static/**/*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

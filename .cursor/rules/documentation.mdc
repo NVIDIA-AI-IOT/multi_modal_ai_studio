@@ -1,0 +1,85 @@
+# Documentation Guidelines
+
+## Purpose
+This rule defines where different types of documentation should be placed and what should be committed to version control.
+
+## Documentation Structure
+
+### 1. Private Planning & Development Notes
+**Location**: `docs/cursor/` (gitignored)
+
+**Purpose**: Per-session notes, design decisions, and planning docs for AI/developer reference during active development.
+
+**Rules**:
+- Use ALL CAPS with underscores (e.g., `PLAN_FEATURE_X.md`, `UI_DESIGN.md`)
+- These files are for internal reference only and should NOT be committed
+- They are automatically ignored by git via `.gitignore`
+
+**Examples**:
+- `docs/cursor/PLAN_MULTI_MODAL_AI_STUDIO.md`
+- `docs/cursor/UI_DESIGN.md`
+- `docs/cursor/IMPLEMENTATION_PHASES.md`
+
+### 2. Public Documentation
+**Location**: `docs/` (committed to git)
+
+**Purpose**: Documentation for fellow developers, users, and contributors.
+
+**Rules**:
+- Use lowercase with hyphens (e.g., `session-management.md`, `api-reference.md`)
+- Must be useful for other developers or users
+- Should be maintained and kept up-to-date
+- Focus on "how to use" rather than "why we decided"
+
+**Examples**:
+- `docs/SESSION_MANAGEMENT.md` - How session recording works
+- `docs/AUDIO_MODES.md` - Guide to audio device options
+- `docs/TIMELINE_DESIGN.md` - Timeline visualization concepts
+
+### 3. Root-Level Temporary Docs
+**Location**: `./` (project root)
+
+**Rules**:
+- **DO NOT** create CAPITAL LETTER markdown files in the root directory for one-time development information
+- **DO NOT** commit files like `WEBUI_READY.md`, `PHASE1_PROGRESS.md`, `PROJECT_STATS.txt`, etc.
+- These types of notes should go in `docs/cursor/` instead
+- Exception: Standard project files like `README.md`, `LICENSE`, `CHANGELOG.md` are fine
+
+**Wrong** ❌:
+```
+/PROJECT_SUMMARY.md
+/WEBUI_IMPROVEMENTS.md
+/SESSION_SUMMARY.md
+/UNIFIED_CHAT_PANEL_STRUCTURE.md
+```
+
+**Right** ✅:
+```
+/docs/cursor/PROJECT_SUMMARY.md
+/docs/cursor/WEBUI_IMPROVEMENTS.md
+/docs/cursor/SESSION_SUMMARY.md
+/docs/cursor/UNIFIED_CHAT_PANEL_STRUCTURE.md
+```
+
+### 4. Standard Root Files (Allowed)
+These are the only documentation files that should exist in the project root:
+- `README.md` - Project overview and quick start
+- `LICENSE` - License information
+- `CHANGELOG.md` - Version history and changes
+- `CONTRIBUTING.md` - Contribution guidelines (if needed)
+
+## Git Workflow
+
+Before committing:
+1. Check for CAPITAL LETTER `.md` files in root: `ls *.md | grep -E '^[A-Z_]+\.md$'`
+2. Move any found files to `docs/cursor/` if they're development notes
+3. Delete them if they're no longer needed
+4. Only commit files from the approved list above
+
+## AI Assistant Behavior
+
+When creating documentation during development:
+- Always place development/planning notes in `docs/cursor/`
+- Ask before creating any new markdown files in the root directory
+- Suggest moving existing root markdown files to `docs/cursor/` when encountered
+- Only create user-facing docs in `docs/` when explicitly requested

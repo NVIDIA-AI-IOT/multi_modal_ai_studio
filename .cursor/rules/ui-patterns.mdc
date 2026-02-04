@@ -1,0 +1,178 @@
+# UI Patterns
+
+## Design System
+
+- **NVIDIA Brand**: Use `nvidia-brand.css` for consistent styling
+- **3-Pane Layout**: Left (sessions), Middle (config/video/chat), Right/Bottom (timeline)
+- **Responsive**: Support mobile and desktop
+- **Dark/Light Mode**: Toggle in settings
+- **Accessibility**: Keyboard navigation, screen reader support
+
+## Layout Modes
+
+### Standard Mode (Config Visible)
+
+```
+┌─────────┬──────────────────┬─────────────┐
+│         │ Config Tabs      │             │
+│ Session │ (ASR/LLM/TTS)    │   Chat      │
+│ List    ├──────────────────┤  History    │
+│         │ Video / Controls │             │
+└─────────┴──────────────────┴─────────────┘
+│        Timeline (Bottom)                 │
+└─────────────────────────────────────────┘
+```
+
+### Quick Start Mode (Config Hidden)
+
+```
+┌─────────┬──────────────────────────────┐
+│         │ Video / Controls             │
+│ Session ├──────────────────────────────┤
+│ List    │    Chat History              │
+│         │    (Full width)              │
+└─────────┴──────────────────────────────┘
+│        Timeline (Bottom)                │
+└─────────────────────────────────────────┘
+```
+
+## Configuration Panel
+
+### Tab-Based Backend Selection
+
+Each service (ASR, LLM, TTS) has tabs for different backends:
+
+```
+ASR Configuration
+┌────────┬──────────────┬─────────────────┐
+│ Riva   │ OpenAI REST  │ OpenAI Realtime │
+└────────┴──────────────┴─────────────────┘
+```
+
+### Collapsible Sections
+
+- **Main settings**: Always visible (scheme, model, server)
+- **Advanced settings**: Collapsed by default
+- **Warnings**: Show inline when config needs attention
+
+### Validation Feedback
+
+- **✓ Green**: Valid configuration
+- **⚠ Yellow**: Warning (e.g., "requires RIVA restart")
+- **✗ Red**: Error (e.g., "API key required")
+
+## Session List
+
+### Session Card
+
+```
+┌─────────────────────────┐
+│ [✓] Session #47         │  ← Checkbox for comparison
+│ Low Latency Test        │  ← Title
+│                         │
+│ 🎤 Riva  🧠 Llama3      │  ← Backend badges
+│ 🔊 Riva                 │
+│                         │
+│ ⚡ 1.2s TTFA            │  ← Key metric
+│ 💬 15 turns             │
+│ 📅 2026-02-03           │  ← Date
+└─────────────────────────┘
+```
+
+### Actions
+
+- **Click**: Load session
+- **Right-click**: Context menu (export, delete, save as preset)
+- **Checkbox**: Select for comparison
+
+## Device Selection
+
+```
+┌──────────────────────────┐
+│ 📹 Video Source          │
+│ ┌──────────────────────┐ │
+│ │ Browser WebRTC      ▼│ │
+│ └──────────────────────┘ │
+│ 📡 Status: Active        │
+└──────────────────────────┘
+```
+
+### Device Status Indicators
+
+- 🟢 **Active**: Device working
+- 🟡 **Ready**: Device available but not streaming
+- 🔴 **Error**: Device unavailable or failed
+
+### Interaction Mode Display
+
+Show current mode based on device selection:
+
+- 🎤 Voice Input → 🔊 Voice Output
+- 🎤 Voice Input → 📝 Text Output
+- ⌨️ Text Input → 🔊 Voice Output
+- ⌨️ Text Input → 📝 Text Output
+
+## Timeline Visualization
+
+### Layout Options
+
+1. **Bottom (default)**: Horizontal, full width
+2. **Right**: Vertical, bottom-to-top (compact)
+3. **Hidden**: Maximize chat area
+
+### Lanes
+
+- **Audio**: Waveform visualization
+- **Speech**: ASR activity (partial + final)
+- **LLM**: Token generation (prefill + decode)
+- **TTS**: Audio synthesis duration
+
+### Controls
+
+- **Pause/Resume**: Freeze timeline for inspection
+- **Drag**: Scroll through history
+- **Zoom**: Adjust time scale
+
+### Playback Mode (Future)
+
+When viewing recorded session:
+
+- Show timeline from session data
+- Highlight metrics (TTFA markers)
+- Allow scrubbing to specific turns
+- Export timeline as image
+
+## Chat Display
+
+### Message Bubbles
+
+- **User**: Right-aligned, blue
+- **AI**: Left-aligned, green
+- **System**: Center, gray (e.g., "Session started")
+
+### Metadata
+
+- Timestamp
+- Confidence score (for ASR)
+- Token count (for LLM)
+- Audio duration (for TTS)
+
+## Controls Bar
+
+```
+┌────────┐ ┌────────┐ ┌─────────┐
+│ Video  │ │  Mic   │ │ Speaker │
+└────────┘ └────────┘ └─────────┘
+```
+
+Each with:
+- Status indicator (active/ready/error)
+- Volume/level meter
+- Mute/unmute toggle
+
+## Settings Panel
+
+- **UI Settings**: Theme, timeline position, layout
+- **Presets**: Manage saved presets
+- **Export/Import**: Configuration management
+- **About**: Version, credits, license

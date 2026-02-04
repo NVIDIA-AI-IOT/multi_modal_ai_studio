@@ -1,0 +1,143 @@
+"""
+Main CLI entry point for Multi-modal AI Studio.
+
+This module handles command-line argument parsing and dispatches to
+either WebUI mode (default) or headless mode.
+"""
+
+import argparse
+import sys
+import logging
+from pathlib import Path
+
+
+def main():
+    """Main entry point for CLI."""
+    parser = argparse.ArgumentParser(
+        description="Multi-modal AI Studio - Voice/Text/Video AI Interface",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # WebUI mode with Riva backend
+  multi-modal-ai-studio --port 8091 --riva-server localhost:50051
+  
+  # WebUI with preset
+  multi-modal-ai-studio --preset low-latency
+  
+  # Headless mode with config file
+  multi-modal-ai-studio --mode headless --config my-preset.yaml
+  
+  # Text-only mode
+  multi-modal-ai-studio --audio-input none --audio-output none
+
+For more information, visit: https://github.com/yourusername/multi-modal-ai-studio
+        """
+    )
+    
+    # Mode selection
+    parser.add_argument(
+        "--mode",
+        choices=["webui", "headless"],
+        default="webui",
+        help="Operation mode (default: webui)"
+    )
+    
+    # Configuration
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Load configuration from YAML/JSON file"
+    )
+    
+    parser.add_argument(
+        "--preset",
+        help="Load system preset (default, low-latency, high-accuracy, text-only, openai-realtime)"
+    )
+    
+    # Server options (WebUI mode)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8091,
+        help="Web server port (default: 8091)"
+    )
+    
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Web server host (default: 0.0.0.0)"
+    )
+    
+    # ASR options
+    asr_group = parser.add_argument_group("ASR (Speech Recognition)")
+    asr_group.add_argument("--asr-scheme", choices=["riva", "openai-rest", "openai-realtime", "azure", "none"], help="ASR backend")
+    asr_group.add_argument("--asr-server", help="ASR server address (for Riva)")
+    asr_group.add_argument("--asr-api-key", help="ASR API key (for OpenAI, Azure)")
+    asr_group.add_argument("--asr-model", help="ASR model name")
+    asr_group.add_argument("--asr-language", help="Language code (e.g., en-US)")
+    asr_group.add_argument("--asr-vad-start", type=float, help="VAD start threshold (0.0-1.0)")
+    asr_group.add_argument("--asr-vad-stop", type=float, help="VAD stop threshold (0.0-1.0)")
+    
+    # LLM options
+    llm_group = parser.add_argument_group("LLM (Language Model)")
+    llm_group.add_argument("--llm-scheme", choices=["openai", "anthropic", "none"], help="LLM backend")
+    llm_group.add_argument("--llm-api-base", help="LLM API base URL")
+    llm_group.add_argument("--llm-api-key", help="LLM API key")
+    llm_group.add_argument("--llm-model", help="LLM model name")
+    llm_group.add_argument("--llm-temperature", type=float, help="Sampling temperature (0.0-2.0)")
+    llm_group.add_argument("--llm-max-tokens", type=int, help="Maximum tokens to generate")
+    
+    # TTS options
+    tts_group = parser.add_argument_group("TTS (Text-to-Speech)")
+    tts_group.add_argument("--tts-scheme", choices=["riva", "openai-rest", "openai-realtime", "elevenlabs", "none"], help="TTS backend")
+    tts_group.add_argument("--tts-server", help="TTS server address (for Riva)")
+    tts_group.add_argument("--tts-api-key", help="TTS API key")
+    tts_group.add_argument("--tts-voice", help="TTS voice identifier")
+    
+    # Device options
+    device_group = parser.add_argument_group("Device Configuration")
+    device_group.add_argument("--audio-input", help="Audio input (browser, usb:device, alsa:device, none)")
+    device_group.add_argument("--audio-output", help="Audio output (browser, usb:device, alsa:device, none)")
+    device_group.add_argument("--video-input", help="Video input (browser, usb:device, none)")
+    
+    # App options
+    app_group = parser.add_argument_group("Application Settings")
+    app_group.add_argument("--barge-in", action="store_true", help="Enable barge-in (interrupt AI)")
+    app_group.add_argument("--no-barge-in", action="store_true", help="Disable barge-in")
+    app_group.add_argument("--timeline-buffer", type=int, help="Timeline buffer in seconds (15-300)")
+    app_group.add_argument("--session-output-dir", help="Directory for session storage")
+    
+    # Logging
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level (default: INFO)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Configure logging
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Multi-modal AI Studio starting...")
+    
+    # TODO: Implement mode dispatch
+    if args.mode == "webui":
+        logger.info(f"Starting WebUI server on {args.host}:{args.port}")
+        logger.error("WebUI mode not yet implemented")
+        sys.exit(1)
+    elif args.mode == "headless":
+        logger.info("Starting headless mode")
+        logger.error("Headless mode not yet implemented")
+        sys.exit(1)
+    
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,37 @@
+# Project Overview
+
+## Multi-modal AI Studio
+
+A next-generation voice/text/video AI interface designed for analyzing and optimizing conversational AI systems.
+
+## Core Goals
+
+1. **Multi-modal Support**: Voice, text, video inputs and outputs
+2. **Multi-backend**: Riva gRPC, OpenAI REST/Realtime, Azure Speech
+3. **Session Management**: Save/load complete configurations with chat history and timeline data
+4. **Performance Analysis**: Real-time timeline visualization and latency metrics
+5. **Flexible Deployment**: WebUI or headless CLI mode
+
+## Design Principles
+
+- **Reuse proven code** from live-riva-webui where applicable
+- **Extensible architecture** for adding new backends easily
+- **Config-first design** - everything is configurable and exportable
+- **Accessibility** - support text-only, voice-only, or mixed interaction modes
+- **Developer-focused** - designed for analyzing and optimizing voice AI systems
+
+## Key Differentiators vs Live RIVA WebUI
+
+1. **Session persistence**: Save complete configs + timeline data for offline analysis
+2. **Multi-backend**: Not just Riva, but OpenAI and other APIs
+3. **Comparison mode**: Compare multiple sessions side-by-side
+4. **Preset system**: Quick-start with pre-configured setups
+5. **Headless mode**: Run without WebUI for automation/production
+6. **Timeline playback**: Replay recorded sessions (not just live monitoring)
+
+## Target Users
+
+- **Voice AI Developers**: Optimize latency and accuracy
+- **Researchers**: Analyze turn-taking dynamics and conversation patterns
+- **Product Teams**: Demo and showcase voice AI capabilities
+- **DevOps/MLOps**: Automated testing and monitoring in headless mode

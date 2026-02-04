@@ -1,0 +1,28 @@
+name: "Text Only"
+description: "Traditional text chat without voice"
+
+asr:
+  scheme: none
+
+llm:
+  scheme: openai
+  api_base: http://localhost:11434/v1
+  model: llama3.2:3b
+  temperature: 0.7
+  max_tokens: 512
+  system_prompt: "You are a helpful AI assistant."
+
+tts:
+  scheme: none
+
+devices:
+  video_source: none
+  audio_input_source: none  # Text input
+  audio_output_source: none  # Text output
+
+app:
+  barge_in_enabled: false
+  timeline_position: hidden  # No timeline needed for text-only
+  session_auto_save: true
+  session_output_dir: ./sessions
+  theme: dark
