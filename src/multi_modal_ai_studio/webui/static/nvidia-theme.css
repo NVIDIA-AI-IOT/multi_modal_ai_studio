@@ -1,0 +1,1093 @@
+/* =====================================================
+   NVIDIA-Themed Multi-modal AI Studio
+   Dual-mode design system with NVIDIA brand colors
+   ===================================================== */
+
+/* ===== CSS Variables ===== */
+:root {
+    /* NVIDIA Brand Colors */
+    --nvidia-green: #76B900;
+    --nvidia-green-dark: #5a8f00;
+    --nvidia-green-light: #8fd919;
+    --nvidia-black: #000000;
+    
+    /* Dark Mode Theme */
+    --dark-bg-primary: #0a0a0a;
+    --dark-bg-secondary: #1a1a1a;
+    --dark-bg-tertiary: #2a2a2a;
+    --dark-bg-elevated: #1e1e1e;
+    --dark-text-primary: #ffffff;
+    --dark-text-secondary: #b0b0b0;
+    --dark-text-tertiary: #808080;
+    --dark-border-color: #333333;
+    --dark-border-hover: #4a4a4a;
+    
+    /* Light Mode Theme - NVIDIA-inspired */
+    --light-bg-primary: #ffffff;
+    --light-bg-secondary: #f8f9fa;
+    --light-bg-tertiary: #e9ecef;
+    --light-bg-elevated: #ffffff;
+    --light-text-primary: #1a1d1f;
+    --light-text-secondary: #495057;
+    --light-text-tertiary: #6c757d;
+    --light-border-color: #dee2e6;
+    --light-border-hover: #adb5bd;
+    --light-accent-bg: #f0f7e8;
+    --light-accent-border: #d4e8c1;
+    
+    /* Accent Colors */
+    --accent-primary: var(--nvidia-green);
+    --accent-hover: var(--nvidia-green-light);
+    --accent-active: var(--nvidia-green-dark);
+    
+    /* Semantic Colors */
+    --success: #76B900;
+    --warning: #ff9500;
+    --error: #ef4444;
+    --info: #3b82f6;
+    
+    /* Shadows & Effects */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    
+    /* NVIDIA Glow Effects */
+    --glow-nvidia: 0 0 20px rgba(118, 185, 0, 0.3);
+    --glow-nvidia-strong: 0 0 30px rgba(118, 185, 0, 0.5);
+    
+    /* Typography */
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    --font-mono: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+    
+    /* Spacing */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+    
+    /* Border Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-base: 250ms ease;
+    --transition-slow: 350ms ease;
+}
+
+/* Dark Mode (Default) */
+[data-theme="dark"], :root {
+    --bg-primary: var(--dark-bg-primary);
+    --bg-secondary: var(--dark-bg-secondary);
+    --bg-tertiary: var(--dark-bg-tertiary);
+    --bg-elevated: var(--dark-bg-elevated);
+    --bg-hover: rgba(118, 185, 0, 0.1);
+    --text-primary: var(--dark-text-primary);
+    --text-secondary: var(--dark-text-secondary);
+    --text-tertiary: var(--dark-text-tertiary);
+    --border-color: var(--dark-border-color);
+    --border-hover: var(--dark-border-hover);
+}
+
+/* Light Mode */
+[data-theme="light"] {
+    --bg-primary: var(--light-bg-primary);
+    --bg-secondary: var(--light-bg-secondary);
+    --bg-tertiary: var(--light-bg-tertiary);
+    --bg-elevated: var(--light-bg-elevated);
+    --bg-hover: var(--light-accent-bg);
+    --text-primary: var(--light-text-primary);
+    --text-secondary: var(--light-text-secondary);
+    --text-tertiary: var(--light-text-tertiary);
+    --border-color: var(--light-border-color);
+    --border-hover: var(--light-border-hover);
+    
+    /* Light mode specific tweaks */
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0 10px 20px -5px rgba(0, 0, 0, 0.15);
+    --shadow-xl: 0 20px 30px -10px rgba(0, 0, 0, 0.18);
+    
+    /* Subtle NVIDIA green glow for light mode */
+    --glow-nvidia: 0 0 15px rgba(118, 185, 0, 0.15);
+    --glow-nvidia-strong: 0 0 25px rgba(118, 185, 0, 0.25);
+}
+
+/* Light mode accent backgrounds for better visibility */
+[data-theme="light"] .session-item.active {
+    background: var(--light-accent-bg);
+    border-color: var(--nvidia-green);
+}
+
+[data-theme="light"] .config-tab:hover {
+    background: var(--light-accent-bg);
+}
+
+[data-theme="light"] .chat-message.assistant {
+    background: var(--light-accent-bg);
+    border-left-color: var(--nvidia-green);
+}
+
+/* Enhance NVIDIA green visibility in light mode */
+[data-theme="light"] .stat-value,
+[data-theme="light"] .timeline-metric-value {
+    color: var(--nvidia-green-dark);
+}
+
+/* Light mode header with subtle accent */
+[data-theme="light"] .header {
+    background: var(--bg-primary);
+    box-shadow: 0 2px 8px rgba(118, 185, 0, 0.08);
+}
+
+/* Light mode elevated surfaces */
+[data-theme="light"] .session-meta-container,
+[data-theme="light"] .device-controls-container {
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-md);
+}
+
+/* Light mode timeline with subtle green accent */
+[data-theme="light"] .timeline-panel {
+    background: var(--bg-primary);
+}
+
+[data-theme="light"] .timeline-viz-container {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="light"] .timeline-scroll-track {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+/* ===== Base Styles ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color var(--transition-base), color var(--transition-base);
+}
+
+/* ===== Typography ===== */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.125rem; }
+h5 { font-size: 1rem; }
+h6 { font-size: 0.875rem; }
+
+a {
+    color: var(--accent-primary);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+a:hover {
+    color: var(--accent-hover);
+}
+
+code, pre {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+}
+
+/* ===== Layout ===== */
+.container {
+    display: grid;
+    grid-template-columns: 280px 1fr 1fr;
+    grid-template-rows: 1fr auto;
+    grid-template-areas:
+        "sidebar config chat"
+        "sidebar timeline timeline";
+    height: 100vh;
+    gap: 0;
+}
+
+/* ===== Header ===== */
+.header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-color);
+    padding: var(--space-md) var(--space-xl);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.header-title::before {
+    content: '';
+    width: 4px;
+    height: 24px;
+    background: linear-gradient(to bottom, var(--nvidia-green), var(--nvidia-green-dark));
+    border-radius: var(--radius-sm);
+    box-shadow: var(--glow-nvidia);
+}
+
+/* ===== Session List Sidebar ===== */
+.session-list {
+    grid-area: sidebar;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.session-list-header {
+    padding: var(--space-lg);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-elevated);
+}
+
+.session-list-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+}
+
+.session-count {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}
+
+.new-session-btn {
+    width: 100%;
+    margin-top: var(--space-md);
+    padding: var(--space-md);
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
+}
+
+.new-session-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
+}
+
+.new-session-btn:active {
+    transform: translateY(0);
+}
+
+.session-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-sm);
+}
+
+.session-item {
+    padding: var(--space-md);
+    margin-bottom: var(--space-sm);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-base);
+}
+
+.session-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    transform: translateX(4px);
+}
+
+.session-item.active {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    box-shadow: inset 3px 0 0 var(--accent-primary), var(--shadow-md);
+}
+
+.session-item-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.session-item-meta {
+    display: flex;
+    gap: var(--space-md);
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-sm);
+}
+
+.session-item-metrics {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.metric-badge {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+/* ===== NVIDIA-Style Tabs ===== */
+/* ===== NVIDIA-Style Tabs (matching build.nvidia.com) ===== */
+.config-tabs {
+    display: flex;
+    gap: var(--space-lg);
+    padding: 0 var(--space-lg);
+    padding-top: var(--space-md);
+    padding-bottom: var(--space-sm);
+    background: var(--bg-elevated);
+    border-bottom: 2px solid var(--border-color);
+    overflow-x: auto;
+    overflow-y: hidden;
+    position: relative;
+    min-height: 0;
+    flex-shrink: 0;
+}
+
+/* Hide scrollbar but keep functionality */
+.config-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.config-tabs {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.config-tab {
+    position: relative;
+    padding: var(--space-sm) 0;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: opacity var(--transition-base), color var(--transition-base);
+    white-space: nowrap;
+    opacity: 0.75;
+    flex-shrink: 0;
+}
+
+.config-tab:hover {
+    color: var(--text-primary);
+    opacity: 1;
+}
+
+.config-tab.active {
+    color: var(--text-primary);
+    font-weight: 600;
+    opacity: 1;
+}
+
+.config-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: calc(-1 * var(--space-sm) - 2px);
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(to right, var(--nvidia-green-light), var(--nvidia-green));
+    border-radius: 2px;
+    box-shadow: var(--glow-nvidia);
+}
+
+/* ===== Config Panel ===== */
+.config-panel {
+    grid-area: config;
+    background: var(--bg-primary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.config-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.config-tab-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-lg);
+}
+    overflow-y: auto;
+    padding: var(--space-lg);
+}
+
+.config-section {
+    margin-bottom: var(--space-xl);
+}
+
+.config-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.config-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.config-item:last-child {
+    border-bottom: none;
+}
+
+.config-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.config-value {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+}
+
+/* ===== Chat Panel ===== */
+.chat-panel {
+    grid-area: chat;
+    background: var(--bg-primary);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-sm) var(--space-md);
+    gap: var(--space-sm);
+    overflow-y: auto;
+}
+
+.session-meta-container {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg) var(--space-xl);
+    flex-shrink: 0;
+    box-shadow: var(--shadow-sm);
+}
+
+.session-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: var(--space-sm);
+    background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.session-stats {
+    display: flex;
+    gap: var(--space-xl);
+    font-size: 0.875rem;
+}
+
+.session-stat-item {
+    display: flex;
+    gap: var(--space-sm);
+    align-items: center;
+}
+
+.stat-label {
+    color: var(--text-tertiary);
+    font-weight: 500;
+}
+
+.stat-value {
+    color: var(--nvidia-green);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+/* ===== Session Image Container ===== */
+.session-image-container {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    position: relative;
+    aspect-ratio: 16 / 9;
+    max-height: 400px;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-md);
+}
+
+.session-preview-image,
+.session-video-feed {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.image-placeholder,
+.video-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-tertiary);
+    padding: var(--space-2xl);
+    text-align: center;
+}
+
+.placeholder-icon {
+    font-size: 4rem;
+    margin-bottom: var(--space-lg);
+    opacity: 0.5;
+}
+
+.placeholder-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: var(--space-sm);
+    color: var(--text-secondary);
+}
+
+.placeholder-subtext {
+    font-size: 0.9rem;
+    color: var(--text-tertiary);
+}
+
+/* Hide placeholder when content is loaded */
+.session-preview-image[src]:not([src=""]) + .image-placeholder,
+.session-video-feed.active + .video-placeholder {
+    display: none;
+}
+
+/* ===== Device Controls ===== */
+.device-controls-container {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    flex-shrink: 0;
+}
+
+.device-group {
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-md);
+}
+
+.device-item {
+    flex: 1;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.device-item label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.device-select {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.device-select:hover {
+    border-color: var(--accent-primary);
+}
+
+.device-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(118, 185, 0, 0.1);
+}
+
+.session-control {
+    display: flex;
+    gap: var(--space-md);
+    align-items: center;
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-color);
+}
+
+.start-btn, .stop-btn {
+    flex: 1;
+    padding: var(--space-md) var(--space-xl);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    transition: all var(--transition-base);
+}
+
+.start-btn {
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+    color: white;
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
+}
+
+.start-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
+}
+
+.stop-btn {
+    background: linear-gradient(135deg, var(--error), #dc2626);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+
+.stop-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+/* ===== Chat History (compact: more lines visible) ===== */
+.chat-history {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    padding: 0 var(--space-xs);
+}
+
+.chat-message {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    animation: slideIn var(--transition-base);
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chat-message.user {
+    border-left: 3px solid var(--info);
+    flex-direction: row-reverse;
+}
+
+.chat-message.ai,
+.chat-message.assistant {
+    border-left: 3px solid var(--nvidia-green);
+}
+
+.chat-avatar {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.chat-bubble {
+    flex: 1;
+    min-width: 0;
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.chat-message.user .chat-bubble {
+    background: var(--info);
+    color: white;
+    border-color: var(--info);
+}
+
+.chat-text {
+    line-height: 1.4;
+    font-size: 0.9rem;
+}
+
+.chat-meta {
+    font-size: 0.65rem;
+    color: var(--text-tertiary);
+    opacity: 0.85;
+    margin-top: 0.15rem;
+    line-height: 1.2;
+}
+
+.chat-placeholder {
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.message-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+}
+
+.message-role {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.message-timestamp {
+    color: var(--text-tertiary);
+    font-size: 0.75rem;
+}
+
+.message-content {
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    font-size: 1.1rem;
+}
+
+/* ===== Timeline Panel (preserve Live RIVA WebUI styling) ===== */
+.timeline-panel {
+    grid-area: timeline;
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    height: 200px;
+    padding: var(--space-lg);
+}
+
+.timeline-viz-container {
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    padding: 16px;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.timeline-viz-container.inactive {
+    opacity: 0.4;
+    filter: grayscale(50%);
+    pointer-events: none;
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.timeline-header h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.timeline-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+}
+
+#timelineCanvas {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    display: block;
+    flex: 1;
+}
+
+/* Timeline scroll bar (below canvas) */
+.timeline-scroll-bar {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 8px;
+}
+
+.timeline-scroll-track {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    position: relative;
+    cursor: pointer;
+}
+
+.timeline-scroll-thumb {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    background: var(--text-muted);
+    border-radius: 4px;
+    transition: width 0.1s ease;
+    min-width: 30px;
+    cursor: grab;
+}
+
+.timeline-scroll-thumb:active {
+    cursor: grabbing;
+}
+
+.timeline-scroll-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.timeline-controls {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.timeline-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+#timeline-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.timeline-metrics {
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: var(--space-xl);
+    font-size: 0.75rem;
+}
+
+.timeline-metric {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.timeline-metric-label {
+    color: var(--text-tertiary);
+}
+
+.timeline-metric-value {
+    color: var(--nvidia-green);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+/* ===== Buttons ===== */
+.icon-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    font-size: 1rem;
+}
+
+.icon-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    transform: scale(1.05);
+}
+
+.icon-btn:active {
+    transform: scale(0.95);
+}
+
+.primary-btn {
+    padding: var(--space-sm) var(--space-lg);
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
+}
+
+.primary-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
+}
+
+.primary-btn:active {
+    transform: translateY(0);
+}
+
+/* ===== Scrollbar Styling ===== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+/* ===== Utility Classes ===== */
+.text-nvidia {
+    color: var(--nvidia-green);
+}
+
+.bg-nvidia {
+    background: var(--nvidia-green);
+}
+
+.glow-nvidia {
+    box-shadow: var(--glow-nvidia);
+}
+
+.gradient-nvidia {
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+}
+
+/* ===== Responsive Design ===== */
+@media (max-width: 1200px) {
+    .container {
+        grid-template-columns: 240px 1fr;
+        grid-template-areas:
+            "sidebar config"
+            "sidebar timeline";
+    }
+    
+    .chat-panel {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .container {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "config"
+            "timeline";
+    }
+    
+    .session-list {
+        display: none;
+    }
+}

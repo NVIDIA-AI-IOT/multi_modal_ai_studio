@@ -1,102 +1,250 @@
-/* ===== CSS Variables (Theme) ===== */
+/* =====================================================
+   NVIDIA-Themed Multi-modal AI Studio
+   Dual-mode design system with NVIDIA brand colors
+   ===================================================== */
+
+/* ===== CSS Variables ===== */
 :root {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #2d2d2d;
-    --bg-tertiary: #3a3a3a;
-    --bg-hover: #404040;
-    --text-primary: #e0e0e0;
-    --text-secondary: #a0a0a0;
-    --border-color: #404040;
-    --accent-primary: #76b900;  /* NVIDIA green */
-    --accent-secondary: #00a0ff;
-    --timeline-system: #666;
-    --timeline-audio: #4CAF50;
-    --timeline-speech: #2196F3;
-    --timeline-llm: #FF9800;
-    --timeline-tts: #9C27B0;
-    --ttl-highlight: #ff5722;
+    /* NVIDIA Brand Colors */
+    --nvidia-green: #76B900;
+    --nvidia-green-dark: #5a8f00;
+    --nvidia-green-light: #8fd919;
+    --nvidia-black: #000000;
+
+    /* Timeline Colors (Live RIVA WebUI palette) */
+    --timeline-user: #76B900;          /* User/Audio - NVIDIA Green */
+    --timeline-ai: #9C27B0;            /* AI/System - Purple */
+    --timeline-vad: #64B5F6;           /* VAD - Light Blue */
+    --timeline-asr: #1976D2;           /* ASR/Speech - Dark Blue */
+    --timeline-tts: #EC407A;           /* TTS - Pink/Magenta */
+    --timeline-llm-prefill: #FF9800;   /* LLM Prefill - Orange */
+    --timeline-llm-generate: #FFB74D;  /* LLM Generate - Light Orange */
+    --timeline-ttl: #FFEB3B;           /* TTL - Yellow */
+
+    /* Semantic aliases for timeline lanes (Live RIVA WebUI style) */
+    --timeline-system: #9C27B0;        /* System lane - Purple */
+    --timeline-audio: #76B900;         /* Audio lane - Green */
+    --timeline-speech: #1976D2;        /* Speech/ASR lane - Blue (final transcript dot) */
+    --timeline-speech-partial: #64B5F6; /* ASR partial transcript dot - Light blue */
+    --timeline-llm: #FF9800;           /* LLM lane - Orange */
+    --timeline-tts-lane: #EC407A;      /* TTS lane - Magenta */
+    --timeline-tts-rect: #EC407A;      /* TTS lane rectangle (tts_start→tts_complete) - Magenta */
+    --timeline-tts-first-audio-line: #CE93D8;  /* Thin vertical line at tts_first_audio (FFTA) - Light purple */
+
+    /* Highlight colors */
+    --ttl-highlight: #FFEB3B;
+
+    /* Dark Mode Theme */
+    --dark-bg-primary: #0a0a0a;
+    --dark-bg-secondary: #1a1a1a;
+    --dark-bg-tertiary: #2a2a2a;
+    --dark-bg-elevated: #1e1e1e;
+    --dark-text-primary: #ffffff;
+    --dark-text-secondary: #b0b0b0;
+    --dark-text-tertiary: #808080;
+    --dark-border-color: #333333;
+    --dark-border-hover: #4a4a4a;
+
+    /* Light Mode Theme - NVIDIA-inspired */
+    --light-bg-primary: #ffffff;
+    --light-bg-secondary: #f8f9fa;
+    --light-bg-tertiary: #e9ecef;
+    --light-bg-elevated: #ffffff;
+    --light-text-primary: #1a1d1f;
+    --light-text-secondary: #495057;
+    --light-text-tertiary: #6c757d;
+    --light-border-color: #dee2e6;
+    --light-border-hover: #adb5bd;
+    --light-accent-bg: #f0f7e8;
+    --light-accent-border: #d4e8c1;
+
+    /* Accent Colors */
+    --accent-primary: var(--nvidia-green);
+    --accent-hover: var(--nvidia-green-light);
+    --accent-active: var(--nvidia-green-dark);
+
+    /* Semantic Colors */
+    --success: #76B900;
+    --warning: #ff9500;
+    --error: #ef4444;
+    --info: #3b82f6;
+
+    /* Shadows & Effects */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+
+    /* NVIDIA Glow Effects */
+    --glow-nvidia: 0 0 20px rgba(118, 185, 0, 0.3);
+    --glow-nvidia-strong: 0 0 30px rgba(118, 185, 0, 0.5);
+
+    /* Typography */
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    --font-mono: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+    --font-title: 'Outfit', var(--font-sans);
+
+    /* Spacing */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+
+    /* Border Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-base: 250ms ease;
+    --transition-slow: 350ms ease;
 }
 
+/* Dark Mode (Default) */
+[data-theme="dark"], :root {
+    --bg-primary: var(--dark-bg-primary);
+    --bg-secondary: var(--dark-bg-secondary);
+    --bg-tertiary: var(--dark-bg-tertiary);
+    --bg-elevated: var(--dark-bg-elevated);
+    --bg-hover: rgba(118, 185, 0, 0.1);
+    --text-primary: var(--dark-text-primary);
+    --text-secondary: var(--dark-text-secondary);
+    --text-tertiary: var(--dark-text-tertiary);
+    --border-color: var(--dark-border-color);
+    --border-hover: var(--dark-border-hover);
+    --config-panel-bg-readonly: #121212;
+    --config-panel-bg-editable: var(--dark-bg-primary);
+}
+
+/* Light Mode */
 [data-theme="light"] {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f5f5f5;
-    --bg-tertiary: #e8e8e8;
-    --bg-hover: #d5d5d5;
-    --text-primary: #1a1a1a;
-    --text-secondary: #666666;
-    --border-color: #d0d0d0;
+    --bg-primary: var(--light-bg-primary);
+    --bg-secondary: var(--light-bg-secondary);
+    --bg-tertiary: var(--light-bg-tertiary);
+    --bg-elevated: var(--light-bg-elevated);
+    --bg-hover: var(--light-accent-bg);
+    --text-primary: var(--light-text-primary);
+    --text-secondary: var(--light-text-secondary);
+    --text-tertiary: var(--light-text-tertiary);
+    --border-color: var(--light-border-color);
+    --border-hover: var(--light-border-hover);
+    --config-panel-bg-readonly: #e8eaed;
+    --config-panel-bg-editable: var(--light-bg-primary);
+
+    /* Light mode specific tweaks */
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.12);
+    --shadow-lg: 0 10px 20px -5px rgba(0, 0, 0, 0.15);
+    --shadow-xl: 0 20px 30px -10px rgba(0, 0, 0, 0.18);
+
+    /* Subtle NVIDIA green glow for light mode */
+    --glow-nvidia: 0 0 15px rgba(118, 185, 0, 0.15);
+    --glow-nvidia-strong: 0 0 25px rgba(118, 185, 0, 0.25);
 }
 
-/* ===== Reset & Base Styles ===== */
+/* Light mode accent backgrounds for better visibility */
+[data-theme="light"] .session-item.active {
+    background: var(--light-accent-bg);
+    border-color: var(--nvidia-green);
+}
+
+[data-theme="light"] .config-tab:hover {
+    background: var(--light-accent-bg);
+}
+
+[data-theme="light"] .chat-message.assistant {
+    background: var(--light-accent-bg);
+    border-left-color: var(--nvidia-green);
+}
+
+/* Enhance NVIDIA green visibility in light mode */
+[data-theme="light"] .stat-value,
+[data-theme="light"] .timeline-metric-value {
+    color: var(--nvidia-green-dark);
+}
+
+/* Light mode header with subtle accent */
+[data-theme="light"] .header {
+    background: var(--bg-primary);
+    box-shadow: 0 2px 8px rgba(118, 185, 0, 0.08);
+}
+
+/* Light mode elevated surfaces */
+[data-theme="light"] .session-meta-container,
+[data-theme="light"] .device-controls-container {
+    background: var(--bg-primary);
+    box-shadow: var(--shadow-md);
+}
+
+/* Light mode timeline with subtle green accent */
+[data-theme="light"] .timeline-panel {
+    background: var(--bg-primary);
+}
+
+[data-theme="light"] .timeline-viz-container {
+    background: var(--bg-tertiary);
+}
+
+[data-theme="light"] .timeline-scroll-track {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+/* ===== Base Styles ===== */
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+html, body {
+    height: 100%;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
-    overflow: hidden;
+    transition: background-color var(--transition-base), color var(--transition-base);
 }
 
-/* ===== Header ===== */
-.header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 1.5rem;
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-    height: 64px;
-}
-
-.header h1 {
-    font-size: 1.25rem;
+/* ===== Typography ===== */
+h1, h2, h3, h4, h5, h6 {
     font-weight: 600;
-}
-
-.header-right {
-    display: flex;
-    gap: 0.75rem;
-    align-items: center;
-}
-
-/* ===== Buttons ===== */
-.icon-btn {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
+    line-height: 1.2;
     color: var(--text-primary);
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.95rem;
-    transition: all 0.2s;
 }
 
-.icon-btn:hover {
-    background: var(--bg-hover);
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.125rem; }
+h5 { font-size: 1rem; }
+h6 { font-size: 0.875rem; }
+
+a {
+    color: var(--accent-primary);
+    text-decoration: none;
+    transition: color var(--transition-fast);
 }
 
-.primary-btn {
-    background: var(--accent-primary);
-    border: none;
-    color: white;
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.95rem;
-    font-weight: 500;
-    transition: all 0.2s;
+a:hover {
+    color: var(--accent-hover);
 }
 
-.primary-btn:hover {
-    opacity: 0.9;
-    transform: translateY(-1px);
+code, pre {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
 }
 
-/* ===== Container Layout ===== */
+/* ===== Layout ===== */
 .container {
     display: grid;
     grid-template-columns: 280px 1fr;
@@ -118,6 +266,68 @@ body {
     overflow: hidden;
 }
 
+/* ===== Header ===== */
+.header {
+    background: var(--bg-elevated);
+    border-bottom: 1px solid var(--border-color);
+    padding: var(--space-md) var(--space-xl);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-sm);
+    height: 64px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Theme toggle (Auto / Light / Dark) – matches Live RIVA WebUI */
+.theme-toggle {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.theme-toggle:hover {
+    background: var(--bg-hover);
+}
+
+.theme-toggle svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.header-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    font-family: var(--font-title);
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.header-title::before {
+    content: '';
+    width: 4px;
+    height: 24px;
+    background: linear-gradient(to bottom, var(--nvidia-green), var(--nvidia-green-dark));
+    border-radius: var(--radius-sm);
+    box-shadow: var(--glow-nvidia);
+}
+
 /* ===== Session List Sidebar ===== */
 .session-list {
     background: var(--bg-secondary);
@@ -125,280 +335,708 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    padding-left: var(--space-sm);
+    padding-right: var(--space-sm);
 }
 
 .session-list-header {
-    padding: 1rem 1.25rem;
+    padding: var(--space-lg) var(--space-lg) var(--space-lg) 0;
     border-bottom: 1px solid var(--border-color);
+}
+
+.session-list-subheader {
+    padding: var(--space-md) 0 var(--space-sm) 0;
+}
+
+.session-list-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+}
+
+.session-count {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
 }
 
 .new-session-btn {
     width: 100%;
-    justify-content: center;
-    display: flex;
-    align-items: center;
-}
-
-.session-list-subheader {
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.session-list-subheader h2 {
-    font-size: 1.1rem;
+    padding: var(--space-md);
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
     font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
 }
 
-.session-count {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
+.new-session-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
+}
+
+.new-session-btn:active {
+    transform: translateY(0);
+}
+
+/* Highlight when in setup mode so user can start recording right away */
+.new-session-btn--highlight {
+    outline: 4px solid var(--nvidia-green, #76b900);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(118, 185, 0, 0.3);
 }
 
 .session-items {
     flex: 1;
     overflow-y: auto;
-    padding: 0.5rem;
+    padding: var(--space-sm);
 }
 
 .session-item {
-    background: var(--bg-tertiary);
+    padding: var(--space-md);
+    margin-bottom: var(--space-sm);
+    background: var(--bg-primary);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    margin-bottom: 0.5rem;
+    border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--transition-base);
 }
 
 .session-item:hover {
     background: var(--bg-hover);
-    transform: translateX(2px);
+    border-color: var(--accent-primary);
+    transform: translateX(4px);
 }
 
 .session-item.active {
-    border-color: var(--accent-primary);
     background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    box-shadow: inset 3px 0 0 var(--accent-primary), var(--shadow-md);
 }
 
 .session-item-name {
-    font-weight: 500;
-    font-size: 0.95rem;
-    margin-bottom: 0.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
 }
 
 .session-item-meta {
     display: flex;
-    justify-content: space-between;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    margin-top: 0.5rem;
+    gap: var(--space-md);
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-sm);
 }
 
 .session-item-metrics {
     display: flex;
-    gap: 0.75rem;
-    font-size: 0.85rem;
-    margin-top: 0.5rem;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
 }
 
 .metric-badge {
-    background: var(--bg-primary);
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-family: monospace;
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+/* ===== Config tabs (NVIDIA-style: link-like with gradient underline) ===== */
+.config-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xl);
+    margin-bottom: 0;
+    margin-left: 10px;
+    margin-right: 10px;
+    padding: 0 var(--space-lg);
+    /* Bar is 7px tall at bottom:-18px (18–25px below tab); padding must fit it so nav overflow doesn't clip */
+    padding-bottom: 10px;
+    border-bottom:2px solid var(--border-color);
+    overflow-x: auto;
+    min-height: 0;
+    flex-shrink: 0;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.config-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.config-tab {
+    position: relative;
+    padding: var(--space-sm) 0;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: opacity var(--transition-base), color var(--transition-base);
+    white-space: nowrap;
+    opacity: 0.75;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.config-tab:hover {
+    opacity: 1;
+}
+.config-tab .config-tab-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.config-tab.active {
+    font-weight: 600;
+    opacity: 1;
+}
+/* 7px bar fully inside nav padding (18–25px below tab); overlaps border; z-index paints on top */
+.config-tab.active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -10px;
+    height: 7px;
+    width: 100%;
+    background: linear-gradient(to right, #b8e600, var(--nvidia-green));
+    border-radius: 9999px;
+    z-index: 1;
 }
 
 /* ===== Config Panel ===== */
 .config-panel {
-    background: var(--bg-secondary);
+    background: var(--config-panel-bg-readonly);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: opacity 0.3s ease, transform 0.3s ease;
-    position: relative;
-    z-index: 5;
+    transition: background-color var(--transition-base);
+}
+.config-panel.config-panel--editable {
+    background: var(--config-panel-bg-editable);
 }
 
-.config-panel.collapsed {
-    display: none; /* Just hide completely instead of transform */
-}
-
-/* Collapsed config panel indicator bar */
-.config-panel-bar {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 12px;
-    background: var(--bg-tertiary);
-    border-right: 2px solid var(--accent-primary);
-    cursor: pointer;
-    display: none; /* Hidden by default */
-    z-index: 50;
-    align-items: center;
-    justify-content: center;
-    writing-mode: vertical-rl;
-    font-size: 0.8rem;
-    color: var(--accent-primary);
-    transition: background 0.2s ease;
-}
-
-.config-panel-bar:hover {
-    background: var(--bg-hover);
-}
-
-/* Show bar when config is collapsed */
-.main-panel.config-collapsed .config-panel-bar {
-    display: flex;
+/* Green highlight when in setup mode (ready to START session) */
+.config-panel--start-ready {
+    margin: 2px;
+    border: 4px solid var(--nvidia-green, #76b900);
+    border-radius: var(--radius-md);
+    box-shadow: 0 0 12px rgba(118, 185, 0, 0.25);
 }
 
 .config-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 1.5rem;
-    cursor: pointer;
-    border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0;
-}
-
-.config-header h3 {
-    font-size: 1rem;
-    font-weight: 600;
+    padding: var(--space-md) var(--space-lg);
 }
 
 .config-content {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
 }
 
-.config-tabs {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.75rem 1.5rem;
-    background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border-color);
-    flex-shrink: 0;
-}
-
-.config-tab {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    transition: all 0.2s;
-}
-
-.config-tab:hover {
-    background: var(--bg-secondary);
-}
-
-.config-tab.active {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-weight: 500;
-}
-
 .config-tab-content {
-    padding: 1.5rem;
     flex: 1;
     overflow-y: auto;
+    padding: var(--space-lg);
 }
 
-.config-group {
-    margin-bottom: 1.5rem;
+.config-section {
+    margin-bottom: var(--space-xl);
 }
 
-.config-group h4 {
-    font-size: 0.9rem;
+.config-section-title {
+    font-size: 1rem;
     font-weight: 600;
-    color: var(--text-secondary);
-    margin-bottom: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    color: var(--text-primary);
+    margin-bottom: var(--space-md);
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-color);
 }
 
-.config-row {
+.config-item {
     display: flex;
     justify-content: space-between;
-    padding: 0.5rem 0;
-    font-size: 0.9rem;
+    align-items: center;
+    padding: var(--space-sm) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Read-only config input (Live RIVA WebUI-style) */
+.readonly-config-input {
+    cursor: not-allowed;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.config-deployment-hint {
+    color: var(--text-secondary);
+    font-size: 11px;
+    display: block;
+    margin-top: 4px;
+}
+
+/* Nested panel (Advanced ASR Settings) */
+.nested-panel {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.nested-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.nested-panel-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.nested-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.nested-panel-toggle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+}
+
+.nested-panel-toggle.expanded {
+    transform: rotate(0deg);
+}
+
+.nested-panel-content {
+    padding: 16px;
+    background: var(--bg-primary);
+}
+
+/* Config display grid (Model Configuration, VAD read-only rows) */
+.config-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.config-grid .config-item {
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    font-size: 12px;
+    min-height: 32px;
+    border-bottom: none;
 }
 
 .config-label {
     color: var(--text-secondary);
+    font-weight: 500;
 }
 
 .config-value {
-    font-family: monospace;
     color: var(--text-primary);
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 11px;
+}
+
+/* VAD Tuning (sliders + presets) */
+.vad-tuning-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.vad-slider-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vad-slider-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.vad-slider-value {
+    font-family: inherit;
+    color: var(--nvidia-green);
+    font-weight: 600;
+    font-size: 11px;
+}
+
+.vad-slider {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--bg-tertiary);
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+}
+
+.vad-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--nvidia-green);
+    cursor: pointer;
+}
+
+.vad-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--nvidia-green);
+    cursor: pointer;
+    border: none;
+}
+
+.vad-presets {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.vad-preset-btn {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.vad-preset-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--nvidia-green);
+}
+
+/* Editable Config Forms */
+.config-form {
+    padding: var(--space-md) 0;
+    transition: opacity 0.2s ease;
+}
+
+.config-form.config-updated {
+    opacity: 0.8;
+}
+
+/* Read-only forms */
+.config-form.readonly input,
+.config-form.readonly select,
+.config-form.readonly textarea {
+    background: var(--bg-secondary);
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+.config-form.readonly input[type="checkbox"],
+.config-form.readonly input[type="range"] {
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Backend Selection Tabs (nested tabs for ASR/TTS) */
+.backend-tabs {
+    display: flex;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-xl);
+    padding-bottom: var(--space-md);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.backend-tabs.disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.backend-tab {
+    padding: var(--space-sm) var(--space-lg);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    white-space: nowrap;
+}
+
+.backend-tab:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--nvidia-green);
+    color: var(--text-primary);
+}
+
+.backend-tab.active {
+    background: linear-gradient(135deg, rgba(118, 185, 0, 0.1), rgba(118, 185, 0, 0.05));
+    border-color: var(--nvidia-green);
+    color: var(--nvidia-green);
+    font-weight: 600;
+    box-shadow: 0 0 0 1px rgba(118, 185, 0, 0.2);
+}
+
+.backend-tab:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.backend-content {
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.config-note {
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--nvidia-green);
+    padding: var(--space-md);
+    margin-bottom: var(--space-lg);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.form-group {
+    margin-bottom: var(--space-lg);
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-family: var(--font-sans);
+    transition: all var(--transition-base);
+}
+
+.form-group input[type="text"]:focus,
+.form-group input[type="number"]:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--nvidia-green);
+    box-shadow: 0 0 0 3px rgba(118, 185, 0, 0.1);
+}
+
+.form-group input[type="range"] {
+    width: calc(100% - 60px);
+    margin-right: var(--space-sm);
+    accent-color: var(--nvidia-green);
+}
+
+.form-group .range-value {
+    display: inline-block;
+    min-width: 40px;
+    text-align: center;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--nvidia-green);
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+    font-family: var(--font-mono);
+}
+
+.input-hint {
+    display: block;
+    margin-top: var(--space-xs);
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-sm);
+    cursor: pointer;
+    font-weight: 500 !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--nvidia-green);
+}
+
+.config-item:last-child {
+    border-bottom: none;
+}
+
+.config-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.config-value {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
 }
 
 /* ===== Chat Panel ===== */
 .chat-panel {
     background: var(--bg-primary);
-    overflow-y: auto;
-    padding: 1.5rem;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    padding: var(--space-sm) var(--space-md);
+    gap: var(--space-sm);
+    overflow-y: auto;
 }
 
-/* ===== Session Meta Container ===== */
 .session-meta-container {
-    background: var(--bg-secondary);
+    background: var(--bg-elevated);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem 1.5rem;
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg) var(--space-xl);
     flex-shrink: 0;
+    box-shadow: var(--shadow-sm);
 }
 
 .session-title {
-    font-size: 1.2rem;
+    font-size: 1.25rem;
     font-weight: 600;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-sm);
+    background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .session-stats {
     display: flex;
-    gap: 2rem;
-    font-size: 0.9rem;
+    gap: var(--space-xl);
+    font-size: 0.875rem;
+}
+.session-stats:empty {
+    display: none;
+}
+
+/* Device tags in session-meta: one line, tag/pill style (from Configuration > Devices) */
+.device-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    align-items: center;
+}
+.device-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.device-tag .lucide-inline {
+    width: 12px;
+    height: 12px;
+    opacity: 0.9;
 }
 
 .session-stat-item {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-sm);
+    align-items: center;
 }
 
 .stat-label {
-    color: var(--text-secondary);
+    color: var(--text-tertiary);
+    font-weight: 500;
 }
 
 .stat-value {
-    color: var(--text-primary);
-    font-family: monospace;
-    font-weight: 600;
+    color: var(--nvidia-green);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 1rem;
 }
 
 /* ===== Session Image Container ===== */
 .session-image-container {
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
     position: relative;
     aspect-ratio: 16 / 9;
-    max-height: 320px;
+    width: 80%; /* Reduced from full width */
+    max-height: 280px; /* Reduced from 400px */
+    margin: 0 auto; /* Center the container */
     flex-shrink: 0;
+    box-shadow: var(--shadow-md);
 }
 
 .session-preview-image,
@@ -410,303 +1048,425 @@ body {
 
 .image-placeholder,
 .video-placeholder {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    color: var(--text-secondary);
+    height: 100%;
+    color: var(--text-tertiary);
+    padding: var(--space-2xl);
+    text-align: center;
 }
 
-.placeholder-icon,
-.video-icon {
-    font-size: 3.5rem;
-    margin-bottom: 0.75rem;
+/* START button overlay: centered on image placeholder so no vertical scroll; shown only in setup mode via JS */
+.start-session-overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    pointer-events: none;
+}
+.start-session-overlay .start-btn {
+    pointer-events: auto;
+    flex: none;
+}
+
+.placeholder-icon {
+    font-size: 4rem;
+    margin-bottom: var(--space-lg);
     opacity: 0.5;
 }
 
-.placeholder-text,
-.placeholder-subtext {
-    font-size: 1rem;
-    margin: 0.25rem 0;
+.placeholder-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: var(--space-sm);
+    color: var(--text-secondary);
 }
 
 .placeholder-subtext {
-    font-size: 0.85rem;
-    opacity: 0.7;
+    font-size: 0.9rem;
+    color: var(--text-tertiary);
 }
 
-/* Hide placeholder when image/video is loaded */
+/* Hide placeholder when content is loaded */
 .session-preview-image[src]:not([src=""]) + .image-placeholder,
 .session-video-feed.active + .video-placeholder {
     display: none;
 }
 
-/* ===== Device Controls Container ===== */
-.device-controls-container {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 1rem;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+/* Mic amplitude waveform: bottom of camera preview, raised 20px; timeline-style (user green, dark rounded back) */
+.mic-waveform-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    height: 28px;
+    z-index: 3;
+    pointer-events: none;
+    background: transparent;
 }
-
-/* No show config button in chat panel anymore - it moves to video area */
-
-/* ===== Live Session Container ===== */
-/* ===== Device Controls ===== */
-
-.device-group {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-}
-
-.device-item {
-    flex: 1;
-    min-width: 150px;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.device-item label {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-}
-
-.device-select {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    padding: 0.5rem;
-    border-radius: 6px;
-    font-size: 0.9rem;
-    cursor: pointer;
-}
-
-.device-select:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-}
-
-/* Audio Level Indicators */
-.audio-level-indicator {
-    height: 4px;
-    background: var(--bg-tertiary);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.audio-level-bar {
+.mic-waveform-overlay canvas {
+    display: block;
+    width: 100%;
     height: 100%;
-    background: var(--accent-primary);
-    width: 0%;
-    transition: width 0.1s ease;
 }
 
-/* ===== Session Control ===== */
+/* ===== Device controls: STOP button only (indicators moved to session-meta) ===== */
+.device-controls-container {
+    flex-shrink: 0;
+}
+
 .session-control {
     display: flex;
-    gap: 1rem;
+    gap: var(--space-md);
     align-items: center;
-    padding: 1rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-color);
 }
 
 .start-btn, .stop-btn {
     flex: 1;
-    padding: 0.75rem 1.5rem;
+    padding: var(--space-md) var(--space-xl);
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    transition: all 0.2s;
+    gap: var(--space-sm);
+    transition: all var(--transition-base);
 }
 
 .start-btn {
-    background: var(--accent-primary);
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
     color: white;
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
 }
 
 .start-btn:hover {
-    opacity: 0.9;
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
 }
 
 .stop-btn {
-    background: #ff5722;
+    background: linear-gradient(135deg, var(--error), #dc2626);
     color: white;
+    box-shadow: var(--shadow-md);
 }
 
 .stop-btn:hover {
-    opacity: 0.9;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
 }
 
-.btn-icon {
-    font-size: 1.1rem;
+/* ===== Chat History (compact: more lines visible) ===== */
+.chat-history {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 0 var(--space-xs);
 }
 
-.session-status {
+/* ===== Voice pipeline message log (JSON, like Live RIVA WebUI) ===== */
+.voice-debug-panel {
+    flex-shrink: 0;
+    margin-top: var(--space-sm);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    max-height: 220px;
+    display: flex;
+    flex-direction: column;
+}
+.voice-debug-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: var(--bg-tertiary);
-    border-radius: 6px;
-    font-size: 0.85rem;
+    justify-content: space-between;
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+.voice-debug-panel.collapsed .voice-debug-log {
+    display: none;
+}
+.voice-debug-log {
+    flex: 1;
+    margin: 0;
+    padding: var(--space-sm);
+    overflow: auto;
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text-secondary);
+    min-height: 60px;
+    max-height: 160px;
 }
 
-.status-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    animation: pulse 2s infinite;
+/* ===== Chat Input (bottom, when Mic = None - Text Only, ChatGPT-style) ===== */
+.chat-input-container {
+    flex-shrink: 0;
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-sm);
+    padding: var(--space-md) 0 0;
+    border-top: 1px solid var(--border-color);
+    margin-top: var(--space-sm);
 }
-
-.status-setup {
-    background: #888;
-    animation: none;
+.chat-input {
+    flex: 1;
+    min-height: 44px;
+    max-height: 120px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: none;
+    transition: border-color var(--transition-fast);
 }
-
-.status-live {
-    background: #ff5722;
+.chat-input:focus {
+    outline: none;
+    border-color: var(--nvidia-green);
 }
-
-.status-paused {
-    background: #ff9800;
+.chat-input::placeholder {
+    color: var(--text-tertiary);
 }
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-}
-
-.status-text {
-    font-weight: 500;
-}
-
-.empty-state {
+.chat-send-btn {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 100%;
-    color: var(--text-secondary);
-    font-size: 1.1rem;
+    border: none;
+    border-radius: var(--radius-md);
+    background: var(--nvidia-green);
+    color: white;
+    cursor: pointer;
+    transition: background var(--transition-fast), transform var(--transition-fast);
 }
-
-.chat-history {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    flex: 1;
-    overflow-y: auto;
-    background: var(--bg-primary);
+.chat-send-btn:hover {
+    background: var(--nvidia-green-light);
+    transform: scale(1.05);
+}
+.chat-send-btn .lucide-inline {
+    width: 18px;
+    height: 18px;
 }
 
 .chat-message {
     display: flex;
-    gap: 0.75rem;
+    flex-direction: row;
     align-items: flex-start;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    animation: slideIn var(--transition-base);
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .chat-message.user {
+    border-left: 3px solid var(--info);
     flex-direction: row-reverse;
 }
 
+.chat-message.ai,
+.chat-message.assistant {
+    border-left: 3px solid var(--nvidia-green);
+}
+
 .chat-avatar {
-    width: 32px;
-    height: 32px;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.25rem;
+    font-size: 0.9rem;
     flex-shrink: 0;
+    opacity: 0.9;
 }
 
 .chat-bubble {
+    flex: 1;
+    min-width: 0;
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--radius-md);
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 0.75rem 1rem;
-    max-width: 70%;
 }
 
 .chat-message.user .chat-bubble {
-    background: var(--accent-primary);
+    background: var(--info);
     color: white;
-    border-color: var(--accent-primary);
+    border-color: var(--info);
 }
 
 .chat-text {
-    line-height: 1.5;
-    font-size: 0.95rem;
+    line-height: 1.4;
+    font-size: 0.9rem;
 }
 
+/* Confidence / TTL: subtle, small */
 .chat-meta {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin-top: 0.5rem;
+    font-size: 0.65rem;
+    color: var(--text-tertiary);
+    opacity: 0.85;
+    margin-top: 0.15rem;
+    line-height: 1.2;
 }
 
-/* ===== Timeline Panel ===== */
+.chat-placeholder {
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+.message-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+}
+
+.message-role {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.message-timestamp {
+    color: var(--text-tertiary);
+    font-size: 0.75rem;
+}
+
+.message-content {
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    font-size: 1.1rem;
+}
+
+/* ===== Timeline Panel (preserve Live RIVA WebUI styling) ===== */
 .timeline-panel {
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     border-top: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    height: 300px;
-    transition: height 0.3s ease; /* Ready for collapse animation */
+    height: 320px; /* Default height, can be resized */
+    min-height: 200px; /* Minimum height */
+    max-height: 600px; /* Maximum height */
+    padding: var(--space-sm) var(--space-md); /* Reduced padding */
+    position: relative;
+    transition: height var(--transition-base), min-height var(--transition-base);
 }
 
-/* Future: Timeline collapsed state */
-.timeline-panel.collapsed {
-    height: 40px;
+/* Minimized when Configuration > App > Enable Timeline Visualization is unchecked */
+.timeline-panel.timeline-panel--minimized {
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
+}
+.timeline-panel.timeline-panel--minimized .timeline-content,
+.timeline-panel.timeline-panel--minimized .timeline-metrics,
+.timeline-panel.timeline-panel--minimized .timeline-scroll-bar {
+    display: none !important;
+}
+.timeline-panel.timeline-panel--minimized .timeline-resize-handle {
+    pointer-events: none;
+    opacity: 0.5;
 }
 
-.timeline-panel.collapsed .timeline-content,
-.timeline-panel.collapsed .timeline-metrics {
-    display: none;
+/* Resize Handle */
+.timeline-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    cursor: ns-resize;
+    z-index: 10;
+    transition: background 0.2s ease;
+}
+
+.timeline-resize-handle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 60px;
+    height: 4px;
+    background: var(--border-color);
+    border-radius: 2px;
+    transition: all 0.2s ease;
+}
+
+.timeline-resize-handle:hover::before,
+.timeline-resize-handle.dragging::before {
+    background: var(--nvidia-green);
+    width: 100px;
+    box-shadow: 0 0 8px rgba(118, 185, 0, 0.4);
 }
 
 .timeline-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem 1.5rem;
-    border-bottom: 1px solid var(--border-color);
+    padding: var(--space-xs) 0;
+    flex-shrink: 0;
 }
 
 .timeline-header h3 {
-    font-size: 1rem;
+    font-size: 0.875rem;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin: 0;
 }
 
 .timeline-controls {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-sm);
 }
 
 .timeline-content {
     flex: 1;
     position: relative;
     overflow: hidden;
+    display: flex;
 }
 
 #timeline-canvas {
@@ -715,31 +1475,257 @@ body {
     display: block;
 }
 
+.timeline-gain-label {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-right: 2px;
+}
+
+.timeline-gain-select {
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    min-width: 0;
+    width: 3.5em;
+}
+
 .timeline-metrics {
-    padding: 0.75rem 1.5rem;
+    padding: var(--space-sm) 0;
+    background: transparent;
     border-top: 1px solid var(--border-color);
     display: flex;
-    gap: 2rem;
-    font-size: 0.85rem;
+    gap: var(--space-xl);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    margin-top: var(--space-sm);
+}
+
+/* Timeline Scrollbar */
+.timeline-scroll-bar {
+    display: none;
+    width: 100%;
+    height: 20px;
+    padding: 0 var(--space-md);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+}
+
+.timeline-scroll-track {
+    position: relative;
+    width: 100%;
+    height: 12px;
+    margin-top: 4px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+}
+
+.timeline-scroll-thumb {
+    position: absolute;
+    height: 100%;
+    background: var(--nvidia-green);
+    border-radius: var(--radius-md);
+    cursor: grab;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(118, 185, 0, 0.4),
+                0 0 0 1px rgba(118, 185, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.timeline-scroll-thumb:hover {
+    background: var(--nvidia-green-hover);
+    box-shadow: 0 3px 8px rgba(118, 185, 0, 0.6),
+                0 0 0 2px rgba(118, 185, 0, 0.4);
+    transform: scaleY(1.1);
+}
+
+.timeline-scroll-thumb:active {
+    cursor: grabbing;
+    background: var(--nvidia-green-hover);
+    box-shadow: 0 2px 4px rgba(118, 185, 0, 0.5),
+                0 0 0 2px rgba(118, 185, 0, 0.5);
+}
+
+/* Light mode adjustments */
+[data-theme="light"] .timeline-scroll-thumb {
+    box-shadow: 0 2px 6px rgba(118, 185, 0, 0.3),
+                0 0 0 1px rgba(118, 185, 0, 0.4);
+    border: 2px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .timeline-scroll-thumb:hover {
+    box-shadow: 0 3px 8px rgba(118, 185, 0, 0.5),
+                0 0 0 2px rgba(118, 185, 0, 0.5);
+}
+
+.timeline-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+}
+
+#timelineCanvas {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    display: block;
+    flex: 1;
+}
+
+/* Timeline scroll bar (below canvas) - REMOVED: duplicate styles, see main scrollbar styles above */
+
+.timeline-controls {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.timeline-metrics {
+    padding: var(--space-sm) 0;
+    background: transparent;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: var(--space-xl);
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    margin-top: var(--space-sm);
 }
 
 .timeline-metric {
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-sm);
 }
 
 .timeline-metric-label {
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.5px;
+    color: var(--text-tertiary);
 }
 
 .timeline-metric-value {
-    font-family: monospace;
-    font-size: 1.1rem;
+    color: var(--nvidia-green);
+    font-family: var(--font-mono);
     font-weight: 600;
+}
+
+/* Lucide icons (inline with text) */
+.lucide-inline {
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    display: inline-block;
+}
+.header-title-icon.lucide-inline {
+    width: 1.25em;
+    height: 1.25em;
+    margin-right: 0.25em;
+}
+.placeholder-icon .lucide-inline {
+    width: 48px;
+    height: 48px;
+    color: var(--text-tertiary);
+}
+
+/* ===== Buttons ===== */
+.icon-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    font-size: 1rem;
+}
+
+.icon-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    transform: scale(1.05);
+}
+
+.icon-btn:active {
+    transform: scale(0.95);
+}
+
+/* API Base URL presets (Live RIVA WebUI-style) */
+.api-presets-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 220px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 100;
+    padding: var(--space-xs);
+}
+.api-preset-item {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 10px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+.api-preset-item:hover {
+    background: var(--bg-hover);
+}
+.api-preset-item strong { font-size: 12px; }
+.api-preset-item span { font-size: 11px; color: var(--text-secondary); }
+
+.btn-secondary {
+    padding: var(--space-xs) var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.btn-secondary:hover {
+    background: var(--bg-hover);
+    border-color: var(--nvidia-green);
+}
+
+.primary-btn {
+    padding: var(--space-sm) var(--space-lg);
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
+}
+
+.primary-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
+}
+
+.primary-btn:active {
+    transform: translateY(0);
 }
 
 /* ===== Scrollbar Styling ===== */
@@ -749,88 +1735,221 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--bg-primary);
+    background: var(--bg-secondary);
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--bg-tertiary);
-    border-radius: 4px;
+    background: var(--border-color);
+    border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--bg-hover);
+    background: var(--border-hover);
+}
+
+/* ===== Utility Classes ===== */
+.text-nvidia {
+    color: var(--nvidia-green);
+}
+
+.bg-nvidia {
+    background: var(--nvidia-green);
+}
+
+.glow-nvidia {
+    box-shadow: var(--glow-nvidia);
+}
+
+.gradient-nvidia {
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+}
+
+/* ===== Modal Styles ===== */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease;
+}
+
+.modal.show {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(30px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-lg);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--text-primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 2rem;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: var(--space-lg);
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-footer {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-lg);
+    border-top: 1px solid var(--border-color);
+    justify-content: flex-end;
+}
+
+/* Settings Sections */
+.settings-section {
+    margin-bottom: var(--space-xl);
+}
+
+.settings-section:last-child {
+    margin-bottom: 0;
+}
+
+.settings-section h3 {
+    font-size: 1rem;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-md) 0;
+    padding-bottom: var(--space-sm);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.settings-item {
+    margin-bottom: var(--space-md);
+}
+
+.settings-item:last-child {
+    margin-bottom: 0;
+}
+
+.settings-label {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    cursor: pointer;
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    transition: background 0.2s ease;
+}
+
+.settings-label:hover {
+    background: var(--bg-secondary);
+}
+
+.settings-label input[type="checkbox"] {
+    margin-top: 2px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--nvidia-green);
+}
+
+.settings-text {
+    flex: 1;
+}
+
+.settings-title {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.settings-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
 }
 
 /* ===== Responsive Design ===== */
-
-/* Future: Mobile hamburger menu button */
-.hamburger-btn {
-    display: none;
-}
-
-/* Future: Session list backdrop for mobile overlay */
-.session-list-backdrop {
-    display: none;
-    position: fixed;
-    top: 64px;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.5);
-    z-index: 999;
-    transition: opacity 0.3s ease;
-}
-
-.session-list-backdrop.visible {
-    display: block;
-}
-
-/* Tablet breakpoint */
-@media (max-width: 1024px) {
+@media (max-width: 1200px) {
     .container {
-        grid-template-columns: 200px 1fr;
+        grid-template-columns: 240px 1fr;
+        grid-template-areas:
+            "sidebar config"
+            "sidebar timeline";
     }
-    
-    .content-area {
-        grid-template-columns: 1fr;
-    }
-    
+
     .chat-panel {
         display: none;
     }
 }
 
-/* Mobile breakpoint - hamburger menu */
 @media (max-width: 768px) {
-    .hamburger-btn {
-        display: block;
-    }
-    
     .container {
         grid-template-columns: 1fr;
+        grid-template-areas:
+            "config"
+            "timeline";
     }
-    
+
     .session-list {
-        position: fixed;
-        left: -280px; /* Hidden off-screen */
-        top: 64px;
-        bottom: 0;
-        width: 280px;
-        z-index: 1000;
-        transition: left 0.3s ease;
-        box-shadow: 2px 0 8px rgba(0,0,0,0.3);
-    }
-    
-    .session-list.open {
-        left: 0; /* Slide in */
-    }
-    
-    /* Collapse timeline by default on mobile */
-    .timeline-panel {
-        height: 40px;
-    }
-    
-    .timeline-panel.expanded {
-        height: 200px; /* Smaller on mobile */
+        display: none;
     }
 }

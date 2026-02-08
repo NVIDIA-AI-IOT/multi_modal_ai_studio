@@ -29,7 +29,9 @@ class ASRConfig:
         language: Language code (e.g., en-US)
         vad_start_threshold: Voice Activity Detection start threshold
         vad_stop_threshold: Voice Activity Detection stop threshold
-        speech_timeout_ms: Silence timeout in milliseconds
+        speech_pad_ms: Pre-speech padding in ms (Riva start_history). Higher values
+            help capture the beginning of utterances (e.g. avoid "Tell me a joke" → "a joke").
+        speech_timeout_ms: Silence duration in milliseconds before end-of-speech
         requires_restart: Whether changing config requires RIVA restart
     """
     scheme: Literal["riva", "openai-rest", "openai-realtime", "azure", "none"] = "riva"
@@ -40,7 +42,8 @@ class ASRConfig:
     language: str = "en-US"
     vad_start_threshold: float = 0.5
     vad_stop_threshold: float = 0.3
-    speech_timeout_ms: int = 500
+    speech_pad_ms: int = 500  # 500ms default to reduce leading-word loss (was 300)
+    speech_timeout_ms: int = 700
     requires_restart: bool = False
     
     def validate(self) -> List[str]:
@@ -87,6 +90,7 @@ class LLMConfig:
         model: Model identifier
         temperature: Sampling temperature (0.0-2.0)
         max_tokens: Maximum tokens to generate
+        minimal_output: If True, request minimal output only (e.g. single number); no reasoning (for Nemotron-style models)
         system_prompt: System prompt for the conversation
         top_p: Nucleus sampling parameter
         frequency_penalty: Frequency penalty (-2.0 to 2.0)
@@ -98,6 +102,7 @@ class LLMConfig:
     model: str = "llama3.2:3b"
     temperature: float = 0.7
     max_tokens: int = 512
+    minimal_output: bool = False
     system_prompt: str = "You are a helpful voice assistant."
     top_p: float = 1.0
     frequency_penalty: float = 0.0
@@ -320,14 +325,38 @@ class SessionConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SessionConfig':
         """Create from dictionary."""
+        asr_data = dict(data.get('asr', {}))
+        # Normalize frontend/legacy key for Riva server
+        if 'riva_server' in asr_data and 'server' not in asr_data:
+            asr_data['server'] = asr_data.pop('riva_server', None)
+        llm_data = dict(data.get('llm') or {})
+        if 'ollama_url' in llm_data and 'api_base' not in llm_data:
+            base = (llm_data.get('ollama_url') or '').rstrip('/')
+            llm_data['api_base'] = f"{base}/v1" if base else "http://localhost:11434/v1"
+        llm_data = {k: v for k, v in llm_data.items() if k in LLMConfig.__dataclass_fields__}
+        tts_data = dict(data.get('tts', {}))
+        if 'riva_server' in tts_data and 'server' not in tts_data:
+            tts_data['server'] = tts_data.pop('riva_server', None)
+        if 'backend' in tts_data and 'scheme' not in tts_data:
+            tts_data['scheme'] = tts_data.pop('backend', 'riva')
+        tts_data = {k: v for k, v in tts_data.items() if k in TTSConfig.__dataclass_fields__}
+        devices_data = dict(data.get('devices', {}))
+        if 'camera' in devices_data and 'video_source' not in devices_data:
+            devices_data['video_source'] = devices_data.pop('camera', 'browser')
+        if 'microphone' in devices_data and 'audio_input_source' not in devices_data:
+            devices_data['audio_input_source'] = devices_data.pop('microphone', 'browser')
+        if 'speaker' in devices_data and 'audio_output_source' not in devices_data:
+            devices_data['audio_output_source'] = devices_data.pop('speaker', 'browser')
+        devices_data = {k: v for k, v in devices_data.items() if k in DeviceConfig.__dataclass_fields__}
+        app_data = {k: v for k, v in (data.get('app') or {}).items() if k in AppConfig.__dataclass_fields__}
         return cls(
             name=data.get('name', 'New Session'),
             description=data.get('description', ''),
-            asr=ASRConfig(**data.get('asr', {})),
-            llm=LLMConfig(**data.get('llm', {})),
-            tts=TTSConfig(**data.get('tts', {})),
-            devices=DeviceConfig(**data.get('devices', {})),
-            app=AppConfig(**data.get('app', {}))
+            asr=ASRConfig(**{k: v for k, v in asr_data.items() if k in ASRConfig.__dataclass_fields__}),
+            llm=LLMConfig(**llm_data),
+            tts=TTSConfig(**tts_data),
+            devices=DeviceConfig(**devices_data),
+            app=AppConfig(**app_data)
         )
     
     @classmethod
@@ -406,6 +435,8 @@ class SessionConfig:
             args.append(f"--llm-model {self.llm.model}")
             args.append(f"--llm-temperature {self.llm.temperature}")
             args.append(f"--llm-max-tokens {self.llm.max_tokens}")
+            if self.llm.minimal_output:
+                args.append("--llm-minimal-output")
         
         # TTS args
         if self.tts.scheme != "none":
