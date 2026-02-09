@@ -1,0 +1,3357 @@
+{
+  "session_id": "91ed50ce-88b4-496a-84b2-26ca6240ed70",
+  "name": "Basic Math Conversations",
+  "created_at": "2026-02-09T08:53:11.519879Z",
+  "config": {
+    "name": "New Session",
+    "description": "",
+    "asr": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "model": "parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer",
+      "language": "en-US",
+      "vad_start_threshold": 0.5,
+      "vad_stop_threshold": 0.3,
+      "speech_pad_ms": 500,
+      "speech_timeout_ms": 700,
+      "requires_restart": false
+    },
+    "llm": {
+      "scheme": "openai",
+      "api_base": "http://localhost:11434/v1",
+      "api_key": "",
+      "model": "llama3.2:3b",
+      "temperature": 0.7,
+      "max_tokens": 2048,
+      "minimal_output": false,
+      "system_prompt": "You are a helpful AI assistant.",
+      "extra_request_body": "",
+      "top_p": 1.0,
+      "frequency_penalty": 0.0,
+      "presence_penalty": 0.0
+    },
+    "tts": {
+      "scheme": "riva",
+      "server": "localhost:50051",
+      "api_base": null,
+      "api_key": null,
+      "voice": "",
+      "riva_model_name": "magpie_tts_ensemble-Magpie-Multilingual",
+      "model": null,
+      "sample_rate": 22050,
+      "speed": 1.0,
+      "response_format": "pcm"
+    },
+    "devices": {
+      "video_source": "browser",
+      "video_device": null,
+      "audio_input_source": "browser",
+      "audio_input_device": null,
+      "audio_output_source": "browser",
+      "audio_output_device": null
+    },
+    "app": {
+      "barge_in_enabled": false,
+      "timeline_position": "right",
+      "session_auto_save": true,
+      "session_output_dir": "./sessions",
+      "theme": "dark",
+      "auto_restart_riva": false
+    },
+    "device_labels": {
+      "mic": "Microphone Array (Intel\u00ae Smart Sound Technology for MIPI SoundWire\u00ae Audio)",
+      "camera": "Integrated Webcam (0c45:672e)",
+      "speaker": "Browser WebRTC"
+    },
+    "device_types": {
+      "mic": "browser",
+      "camera": "browser",
+      "speaker": "browser"
+    },
+    "asr_model_name": "parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer",
+    "llm_model_name": "llama3.2:3b",
+    "tts_model_name": "magpie_tts_ensemble-Magpie-Multilingual"
+  },
+  "timeline": [
+    {
+      "timestamp": 2.6226043701171875e-06,
+      "event_type": "session_start",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 0.22859501838684082,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.2334494798990014,
+      "source": "user"
+    },
+    {
+      "timestamp": 0.3478095531463623,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.7143203913803515,
+      "source": "user"
+    },
+    {
+      "timestamp": 0.47629475593566895,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.15424876508948585,
+      "source": "user"
+    },
+    {
+      "timestamp": 0.6126871109008789,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.6674807127210436,
+      "source": "user"
+    },
+    {
+      "timestamp": 0.7382314205169678,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.4359866260573366,
+      "source": "user"
+    },
+    {
+      "timestamp": 0.8656013011932373,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.03767387757848614,
+      "source": "user"
+    },
+    {
+      "timestamp": 0.9881703853607178,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.034675209958093214,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.1192409992218018,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 32.464067934657606,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.2511186599731445,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 32.21184545330883,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.2874691486358643,
+      "event_type": "vad_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 1.2881698608398438,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what",
+        "confidence": 0.06046339124441147
+      }
+    },
+    {
+      "timestamp": 1.3776092529296875,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 17.513799904874038,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.4150214195251465,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is",
+        "confidence": 0.3158465623855591
+      }
+    },
+    {
+      "timestamp": 1.5081846714019775,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 32.088875697222505,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.6412861347198486,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 9.850808394004414,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.679619312286377,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one",
+        "confidence": 0.23461821675300598
+      }
+    },
+    {
+      "timestamp": 1.7684247493743896,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 24.79086183863194,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.808284044265747,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one percent",
+        "confidence": 0.1617329865694046
+      }
+    },
+    {
+      "timestamp": 1.8964810371398926,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 3.553100736395863,
+      "source": "user"
+    },
+    {
+      "timestamp": 1.933610200881958,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus",
+        "confidence": 0.1863713413476944
+      }
+    },
+    {
+      "timestamp": 2.0283572673797607,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 24.337120476527634,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.0683531761169434,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus one",
+        "confidence": 0.24300752580165863
+      }
+    },
+    {
+      "timestamp": 2.1495721340179443,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 14.468665788982646,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.277998924255371,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.3860534705455865,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.3193886280059814,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus one",
+        "confidence": 0.24300752580165863
+      }
+    },
+    {
+      "timestamp": 2.418802499771118,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.022062364378469153,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.461144208908081,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus one",
+        "confidence": 0.24300752580165863
+      }
+    },
+    {
+      "timestamp": 2.5397181510925293,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.021616980138248306,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.5841522216796875,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus one",
+        "confidence": 0.24300752580165863
+      }
+    },
+    {
+      "timestamp": 2.668931722640991,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.012190069394764325,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.71441912651062,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus one",
+        "confidence": 0.2429126799106598
+      }
+    },
+    {
+      "timestamp": 2.788034439086914,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.011554030999016335,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.91638445854187,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.01117020940431414,
+      "source": "user"
+    },
+    {
+      "timestamp": 2.9666695594787598,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "what is one plus one",
+        "confidence": 0.24300752580165863
+      }
+    },
+    {
+      "timestamp": 3.0492794513702393,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.014667374569341592,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.093979835510254,
+      "event_type": "vad_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 3.093989133834839,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "What is one plus one?",
+        "confidence": 0.24300752580165863
+      }
+    },
+    {
+      "timestamp": 3.093993663787842,
+      "event_type": "vad_segment",
+      "lane": "audio",
+      "data": {
+        "confidence": 0.95
+      },
+      "start_time": 1.2874691486358643,
+      "end_time": 3.093979835510254
+    },
+    {
+      "timestamp": 3.093998670578003,
+      "event_type": "asr_segment",
+      "lane": "speech",
+      "data": {
+        "confidence": 0.24300752580165863,
+        "text": "What is one plus one?"
+      },
+      "start_time": 1.2874691486358643,
+      "end_time": 3.093989133834839
+    },
+    {
+      "timestamp": 3.095116138458252,
+      "event_type": "user_speech_end",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 3.095357894897461,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.2037179470062256,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.015178259301797148,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.313817024230957,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.015468644448995515,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.408419370651245,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 3.4266912937164307,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.013091937367044542,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.5181527137756348,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {
+        "text": "One plus one equals two!"
+      }
+    },
+    {
+      "timestamp": 3.5184667110443115,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.518568754196167,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {
+        "text": "One plus one equals two!"
+      }
+    },
+    {
+      "timestamp": 3.562037944793701,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.010982171570418484,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.6713123321533203,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.6714444160461426,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 3.6717731952667236,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.0057527045300163,
+      "source": "tts"
+    },
+    {
+      "timestamp": 3.6875081062316895,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.014901752460193336,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.746354103088379,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 7.115639389314376,
+      "source": "tts"
+    },
+    {
+      "timestamp": 3.8028407096862793,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.7563229505516653,
+      "source": "tts"
+    },
+    {
+      "timestamp": 3.815880537033081,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.009927378600824818,
+      "source": "user"
+    },
+    {
+      "timestamp": 3.8702239990234375,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.28661416675870366,
+      "source": "tts"
+    },
+    {
+      "timestamp": 3.9243686199188232,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.758323497094345,
+      "source": "tts"
+    },
+    {
+      "timestamp": 3.952150821685791,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005898920858074995,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.010134220123291,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.048404994089483,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.070788860321045,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.00614879620354266,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.082103490829468,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.346111668641919,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.1452271938323975,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.6050788535894824,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.1973958015441895,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.006517859888016424,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.211624383926392,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 4.8929547814444305,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.276422739028931,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.3582338158799105,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.3261330127716064,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.00593006008772679,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.342411518096924,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.5167970608908803,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.407781362533569,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.6504337563544698,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.46114182472229,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.006210243379182577,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.473442316055298,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.9342603549864812,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.5317840576171875,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 3.0794562711726576,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.5936665534973145,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.5846938268593572,
+      "source": "tts"
+    },
+    {
+      "timestamp": 4.594837665557861,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.594849586486816,
+      "event_type": "tts_segment",
+      "lane": "tts",
+      "data": {
+        "voice": "",
+        "text": "One plus one equals two!"
+      },
+      "start_time": 3.6713123321533203,
+      "end_time": 4.594837665557861
+    },
+    {
+      "timestamp": 4.5950751304626465,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 4.595696210861206,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.006461451406989475,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.70805025100708,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.011363340630475331,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.838689804077148,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.03860255233331529,
+      "source": "user"
+    },
+    {
+      "timestamp": 4.969238758087158,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.027021482869697255,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.0999157428741455,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.015695115162852345,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.229576349258423,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.02197665850296598,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.357968091964722,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.05074994698213167,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.487977981567383,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.008942953460708742,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.6225426197052,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.01302298063091191,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.748234987258911,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.02212586073180689,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.866199016571045,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.023665154816960653,
+      "source": "user"
+    },
+    {
+      "timestamp": 5.997151136398315,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.030268907688782105,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.126775741577148,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.030003782274271057,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.2562096118927,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.028294972143530456,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.38663911819458,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.02890388465600357,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.5067572593688965,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.03682634087345871,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.644598007202148,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.021481712437770348,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.76699161529541,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.03192915284048906,
+      "source": "user"
+    },
+    {
+      "timestamp": 6.8966875076293945,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.032316616021774866,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.026612043380737,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.03184522609107018,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.157444953918457,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.27014313561686554,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.277947187423706,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 19.893698890096097,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.408246755599976,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 23.003586817476023,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.442076683044434,
+      "event_type": "vad_start",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 7.4425108432769775,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "he",
+        "confidence": 0.09784843772649765
+      }
+    },
+    {
+      "timestamp": 7.543330669403076,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 16.307668761234588,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.5768091678619385,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about",
+        "confidence": 0.1843024045228958
+      }
+    },
+    {
+      "timestamp": 7.667619705200195,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 11.823420525750054,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.7020039558410645,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how much",
+        "confidence": 0.20312285423278809
+      }
+    },
+    {
+      "timestamp": 7.7873711585998535,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 19.879327626725864,
+      "source": "user"
+    },
+    {
+      "timestamp": 7.822076320648193,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two",
+        "confidence": 0.17513585090637207
+      }
+    },
+    {
+      "timestamp": 7.916680097579956,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 15.622438042430915,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.049634456634521,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 15.111532156441642,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.086334943771362,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus",
+        "confidence": 0.12894169986248016
+      }
+    },
+    {
+      "timestamp": 8.182292222976685,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.5133220908681043,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.220083475112915,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus",
+        "confidence": 0.11602545529603958
+      }
+    },
+    {
+      "timestamp": 8.307427406311035,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 23.86412188518593,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.34663724899292,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus two",
+        "confidence": 0.18797621130943298
+      }
+    },
+    {
+      "timestamp": 8.430366516113281,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 8.251596858043996,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.46839714050293,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus two",
+        "confidence": 0.19086825847625732
+      }
+    },
+    {
+      "timestamp": 8.55729341506958,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.04497906617985496,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.687981128692627,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.023197723436115775,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.727595090866089,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus two",
+        "confidence": 0.19094279408454895
+      }
+    },
+    {
+      "timestamp": 8.81834864616394,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.022712870575790783,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.859717607498169,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus two",
+        "confidence": 0.19086825847625732
+      }
+    },
+    {
+      "timestamp": 8.950058698654175,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.010954808346061462,
+      "source": "user"
+    },
+    {
+      "timestamp": 8.992230892181396,
+      "event_type": "asr_partial",
+      "lane": "speech",
+      "data": {
+        "text": "how about two plus two",
+        "confidence": 0.19075652956962585
+      }
+    },
+    {
+      "timestamp": 9.067895412445068,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.011318832588444955,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.197254657745361,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.010156743402714986,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.326361656188965,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.010717067621947443,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.383843898773193,
+      "event_type": "vad_end",
+      "lane": "audio",
+      "data": {}
+    },
+    {
+      "timestamp": 9.38385820388794,
+      "event_type": "asr_final",
+      "lane": "speech",
+      "data": {
+        "text": "How about two plus two?",
+        "confidence": 0.1908310204744339
+      }
+    },
+    {
+      "timestamp": 9.38386845588684,
+      "event_type": "vad_segment",
+      "lane": "audio",
+      "data": {
+        "confidence": 0.95
+      },
+      "start_time": 7.442076683044434,
+      "end_time": 9.383843898773193
+    },
+    {
+      "timestamp": 9.383875370025635,
+      "event_type": "asr_segment",
+      "lane": "speech",
+      "data": {
+        "confidence": 0.1908310204744339,
+        "text": "How about two plus two?"
+      },
+      "start_time": 7.442076683044434,
+      "end_time": 9.38385820388794
+    },
+    {
+      "timestamp": 9.385010719299316,
+      "event_type": "user_speech_end",
+      "lane": "system",
+      "data": {}
+    },
+    {
+      "timestamp": 9.3851900100708,
+      "event_type": "llm_start",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.482036590576172,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.009802686505025995,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.596980571746826,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.009754554613076076,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.689755916595459,
+      "event_type": "llm_first_token",
+      "lane": "llm",
+      "data": {}
+    },
+    {
+      "timestamp": 9.707594633102417,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.00831503380803578,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.83719539642334,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.012464162125202911,
+      "source": "user"
+    },
+    {
+      "timestamp": 9.885426759719849,
+      "event_type": "llm_complete",
+      "lane": "llm",
+      "data": {
+        "text": "Another math question!\n\nTwo plus two equals four!"
+      }
+    },
+    {
+      "timestamp": 9.88576602935791,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 9.885871171951294,
+      "event_type": "tts_start",
+      "lane": "tts",
+      "data": {
+        "text": "Another math question!\n\nTwo plus two equals four!"
+      }
+    },
+    {
+      "timestamp": 10.006326675415039,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.006553649902344,
+      "event_type": "tts_first_audio",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 10.006951332092285,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 3.213455645863238,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.014816761016846,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.00884504009298473,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.07436728477478,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 10.060453300896267,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.096529006958008,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.009995853537180998,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.138999223709106,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.472268204925053,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.195708990097046,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 4.209106677528774,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.231257915496826,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.007923248815345658,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.252296924591064,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 4.923516968269879,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.307217359542847,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 3.8054010869709596,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.347527742385864,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.0057801633082144414,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.363352060317993,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.3335042172710746,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.415795087814331,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.22576093823518661,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.479890584945679,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005731574707533538,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.482993364334106,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.1233295970451032,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.548518419265747,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.1957038397056752,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.601040363311768,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.7045056957919908,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.608876943588257,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.007822164410300626,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.670717000961304,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.03546809533441655,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.735072612762451,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005930443500916195,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.737011909484863,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.0051832879034809844,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.800877571105957,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.187839060871638,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.863864183425903,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 3.2938363064292595,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.865079879760742,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.0047396750029713355,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.921674489974976,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.40241833417680606,
+      "source": "tts"
+    },
+    {
+      "timestamp": 10.98598027229309,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.007633863570702608,
+      "source": "user"
+    },
+    {
+      "timestamp": 10.987083911895752,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 4.936859589987296,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.049331665039062,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.691523166565402,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.113220691680908,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.4378845269364087,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.118695497512817,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005341427598930529,
+      "source": "user"
+    },
+    {
+      "timestamp": 11.17914342880249,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 4.100229675039266,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.240189552307129,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.0048959471482934,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.246852159500122,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.01105295778584396,
+      "source": "user"
+    },
+    {
+      "timestamp": 11.304556608200073,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.1821387620827454,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.369163513183594,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 3.123621086617097,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.376981735229492,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005327361651777006,
+      "source": "user"
+    },
+    {
+      "timestamp": 11.431550741195679,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 1.7142203865282046,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.495233058929443,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.5621124168815737,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.50938081741333,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.015150070310494437,
+      "source": "user"
+    },
+    {
+      "timestamp": 11.567691087722778,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 2.8546522451024026,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.628135681152344,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.019002304768050846,
+      "source": "user"
+    },
+    {
+      "timestamp": 11.63007664680481,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.3740806925998556,
+      "source": "tts"
+    },
+    {
+      "timestamp": 11.630856275558472,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 11.630865097045898,
+      "event_type": "tts_segment",
+      "lane": "tts",
+      "data": {
+        "voice": "",
+        "text": "Another math question!\n\nTwo plus two equals four!"
+      },
+      "start_time": 10.006326675415039,
+      "end_time": 11.630856275558472
+    },
+    {
+      "timestamp": 11.630994081497192,
+      "event_type": "tts_complete",
+      "lane": "tts",
+      "data": {}
+    },
+    {
+      "timestamp": 11.758426427841187,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.012114667144626692,
+      "source": "user"
+    },
+    {
+      "timestamp": 11.887154340744019,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.004887057485702117,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.0174880027771,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005049523142258489,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.148980379104614,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.009096973283148563,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.266980171203613,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.021085801678741193,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.398823022842407,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.012976630688790432,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.527429580688477,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005002474059831008,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.65684986114502,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.007212703857875456,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.787808895111084,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.008264566056554144,
+      "source": "user"
+    },
+    {
+      "timestamp": 12.906426668167114,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.005962180844187376,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.037304401397705,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.010610028591476283,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.166803359985352,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.004874479365411013,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.297012090682983,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.0055738980088052585,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.426664590835571,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.012475102640614811,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.546408891677856,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.016674580212976933,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.680962800979614,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.04032480780826274,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.814712762832642,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.013005159830436635,
+      "source": "user"
+    },
+    {
+      "timestamp": 13.938154458999634,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.009164457880050573,
+      "source": "user"
+    },
+    {
+      "timestamp": 14.071582794189453,
+      "event_type": "audio_amplitude",
+      "lane": "audio",
+      "data": {},
+      "amplitude": 0.016284669635671167,
+      "source": "user"
+    }
+  ],
+  "turns": [
+    {
+      "turn_id": 1,
+      "user_transcript": "What is one plus one?",
+      "ai_response": "One plus one equals two!",
+      "user_confidence": 0.24300752580165863,
+      "start_time": 3.093998670578003,
+      "end_time": 4.5950751304626465,
+      "latencies": {
+        "tts_latency": 0.15315961837768555,
+        "ttl": 1.306
+      }
+    },
+    {
+      "turn_id": 2,
+      "user_transcript": "How about two plus two?",
+      "ai_response": "Another math question!\n\nTwo plus two equals four!",
+      "user_confidence": 0.1908310204744339,
+      "start_time": 9.383875370025635,
+      "end_time": 11.630994081497192,
+      "latencies": {
+        "tts_latency": 0.12089991569519043,
+        "ttl": 1.494
+      }
+    }
+  ],
+  "metrics": {
+    "total_turns": 2,
+    "avg_ttl": 1.4,
+    "min_ttl": 1.306,
+    "max_ttl": 1.494,
+    "avg_asr_latency": 0.0,
+    "avg_llm_latency": 0.0,
+    "avg_tts_latency": 0.137029767036438,
+    "session_duration": 14.071582794189453,
+    "active_duration": 14.071582794189453
+  },
+  "system_stats": [
+    {
+      "t": 0.22499990463256836,
+      "cpu": 2.9,
+      "gpu": 0
+    },
+    {
+      "t": 0.372999906539917,
+      "cpu": 0,
+      "gpu": 94
+    },
+    {
+      "t": 0.4830000400543213,
+      "cpu": 0,
+      "gpu": 28
+    },
+    {
+      "t": 0.5880000591278076,
+      "cpu": 2.8,
+      "gpu": 5
+    },
+    {
+      "t": 0.693000078201294,
+      "cpu": 0,
+      "gpu": 1
+    },
+    {
+      "t": 0.7979998588562012,
+      "cpu": 4.2,
+      "gpu": 0
+    },
+    {
+      "t": 0.9029998779296875,
+      "cpu": 5.6,
+      "gpu": 0
+    },
+    {
+      "t": 1.0090000629425049,
+      "cpu": 1.5,
+      "gpu": 4
+    },
+    {
+      "t": 1.124000072479248,
+      "cpu": 2.9,
+      "gpu": 74
+    },
+    {
+      "t": 1.2289998531341553,
+      "cpu": 2.8,
+      "gpu": 4
+    },
+    {
+      "t": 1.3369998931884766,
+      "cpu": 2.8,
+      "gpu": 0
+    },
+    {
+      "t": 1.441999912261963,
+      "cpu": 1.5,
+      "gpu": 1
+    },
+    {
+      "t": 1.5550000667572021,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 1.6619999408721924,
+      "cpu": 4.3,
+      "gpu": 13
+    },
+    {
+      "t": 1.7709999084472656,
+      "cpu": 1.4,
+      "gpu": 77
+    },
+    {
+      "t": 1.878999948501587,
+      "cpu": 0,
+      "gpu": 6
+    },
+    {
+      "t": 1.9869999885559082,
+      "cpu": 2.9,
+      "gpu": 1
+    },
+    {
+      "t": 2.0939998626708984,
+      "cpu": 2.9,
+      "gpu": 1
+    },
+    {
+      "t": 2.2049999237060547,
+      "cpu": 4.3,
+      "gpu": 1
+    },
+    {
+      "t": 2.312999963760376,
+      "cpu": 5.7,
+      "gpu": 3
+    },
+    {
+      "t": 2.4240000247955322,
+      "cpu": 1.4,
+      "gpu": 82
+    },
+    {
+      "t": 2.5369999408721924,
+      "cpu": 0,
+      "gpu": 58
+    },
+    {
+      "t": 2.6440000534057617,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 2.753000020980835,
+      "cpu": 2.8,
+      "gpu": 0
+    },
+    {
+      "t": 2.8610000610351562,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 2.9809999465942383,
+      "cpu": 14.1,
+      "gpu": 0
+    },
+    {
+      "t": 3.1449999809265137,
+      "cpu": 10.4,
+      "gpu": 3
+    },
+    {
+      "t": 3.193000078201294,
+      "cpu": 17.1,
+      "gpu": 5
+    },
+    {
+      "t": 3.299999952316284,
+      "cpu": 8.8,
+      "gpu": 5
+    },
+    {
+      "t": 3.4129998683929443,
+      "cpu": 5.6,
+      "gpu": 85
+    },
+    {
+      "t": 3.5959999561309814,
+      "cpu": 1.5,
+      "gpu": 11
+    },
+    {
+      "t": 3.621999979019165,
+      "cpu": 5.9,
+      "gpu": 34
+    },
+    {
+      "t": 3.7300000190734863,
+      "cpu": 15.1,
+      "gpu": 40
+    },
+    {
+      "t": 3.8439998626708984,
+      "cpu": 11.6,
+      "gpu": 71
+    },
+    {
+      "t": 3.9619998931884766,
+      "cpu": 12.9,
+      "gpu": 78
+    },
+    {
+      "t": 4.049999952316284,
+      "cpu": 8.7,
+      "gpu": 70
+    },
+    {
+      "t": 4.158999919891357,
+      "cpu": 13.2,
+      "gpu": 60
+    },
+    {
+      "t": 4.263999938964844,
+      "cpu": 8.7,
+      "gpu": 70
+    },
+    {
+      "t": 4.371000051498413,
+      "cpu": 8.8,
+      "gpu": 46
+    },
+    {
+      "t": 4.48199987411499,
+      "cpu": 17.1,
+      "gpu": 93
+    },
+    {
+      "t": 4.5899999141693115,
+      "cpu": 8.7,
+      "gpu": 62
+    },
+    {
+      "t": 4.694000005722046,
+      "cpu": 1.4,
+      "gpu": 1
+    },
+    {
+      "t": 4.812000036239624,
+      "cpu": 2.8,
+      "gpu": 0
+    },
+    {
+      "t": 4.921000003814697,
+      "cpu": 2.8,
+      "gpu": 0
+    },
+    {
+      "t": 5.023000001907349,
+      "cpu": 4.2,
+      "gpu": 0
+    },
+    {
+      "t": 5.13100004196167,
+      "cpu": 7.4,
+      "gpu": 2
+    },
+    {
+      "t": 5.23799991607666,
+      "cpu": 4.2,
+      "gpu": 31
+    },
+    {
+      "t": 5.3480000495910645,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 5.4670000076293945,
+      "cpu": 0,
+      "gpu": 3
+    },
+    {
+      "t": 5.57699990272522,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 5.682999849319458,
+      "cpu": 9.7,
+      "gpu": 0
+    },
+    {
+      "t": 5.79200005531311,
+      "cpu": 1.5,
+      "gpu": 0
+    },
+    {
+      "t": 5.9070000648498535,
+      "cpu": 5.6,
+      "gpu": 1
+    },
+    {
+      "t": 6.013000011444092,
+      "cpu": 5.6,
+      "gpu": 0
+    },
+    {
+      "t": 6.125,
+      "cpu": 2.9,
+      "gpu": 62
+    },
+    {
+      "t": 6.233999967575073,
+      "cpu": 2.9,
+      "gpu": 5
+    },
+    {
+      "t": 6.3420000076293945,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 6.460000038146973,
+      "cpu": 2.9,
+      "gpu": 0
+    },
+    {
+      "t": 6.575000047683716,
+      "cpu": 7.5,
+      "gpu": 0
+    },
+    {
+      "t": 6.688999891281128,
+      "cpu": 0,
+      "gpu": 1
+    },
+    {
+      "t": 6.806999921798706,
+      "cpu": 2.9,
+      "gpu": 2
+    },
+    {
+      "t": 6.927000045776367,
+      "cpu": 2.9,
+      "gpu": 14
+    },
+    {
+      "t": 7.039999961853027,
+      "cpu": 4.3,
+      "gpu": 91
+    },
+    {
+      "t": 7.1519999504089355,
+      "cpu": 4.4,
+      "gpu": 46
+    },
+    {
+      "t": 7.257999897003174,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 7.365000009536743,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 7.478999853134155,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 7.598999977111816,
+      "cpu": 2.9,
+      "gpu": 0
+    },
+    {
+      "t": 7.704999923706055,
+      "cpu": 2.9,
+      "gpu": 0
+    },
+    {
+      "t": 7.816999912261963,
+      "cpu": 5.7,
+      "gpu": 2
+    },
+    {
+      "t": 7.924999952316284,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 8.037999868392944,
+      "cpu": 4.3,
+      "gpu": 6
+    },
+    {
+      "t": 8.144999980926514,
+      "cpu": 7.1,
+      "gpu": 0
+    },
+    {
+      "t": 8.25600004196167,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 8.363999843597412,
+      "cpu": 4.3,
+      "gpu": 0
+    },
+    {
+      "t": 8.468999862670898,
+      "cpu": 5.8,
+      "gpu": 1
+    },
+    {
+      "t": 8.57800006866455,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 8.69700002670288,
+      "cpu": 4.2,
+      "gpu": 82
+    },
+    {
+      "t": 8.815000057220459,
+      "cpu": 0,
+      "gpu": 37
+    },
+    {
+      "t": 8.925999879837036,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 9.03499984741211,
+      "cpu": 1.4,
+      "gpu": 1
+    },
+    {
+      "t": 9.162999868392944,
+      "cpu": 5.9,
+      "gpu": 0
+    },
+    {
+      "t": 9.2739999294281,
+      "cpu": 2.9,
+      "gpu": 1
+    },
+    {
+      "t": 9.42199993133545,
+      "cpu": 8.6,
+      "gpu": 1
+    },
+    {
+      "t": 9.496000051498413,
+      "cpu": 13.2,
+      "gpu": 81
+    },
+    {
+      "t": 9.611000061035156,
+      "cpu": 11.6,
+      "gpu": 91
+    },
+    {
+      "t": 9.721999883651733,
+      "cpu": 4.2,
+      "gpu": 71
+    },
+    {
+      "t": 9.832000017166138,
+      "cpu": 2.9,
+      "gpu": 93
+    },
+    {
+      "t": 9.950000047683716,
+      "cpu": 7.2,
+      "gpu": 32
+    },
+    {
+      "t": 10.046000003814697,
+      "cpu": 13,
+      "gpu": 56
+    },
+    {
+      "t": 10.148000001907349,
+      "cpu": 24.3,
+      "gpu": 45
+    },
+    {
+      "t": 10.25600004196167,
+      "cpu": 47.3,
+      "gpu": 53
+    },
+    {
+      "t": 10.363999843597412,
+      "cpu": 23.2,
+      "gpu": 93
+    },
+    {
+      "t": 10.473999977111816,
+      "cpu": 11.3,
+      "gpu": 64
+    },
+    {
+      "t": 10.57800006866455,
+      "cpu": 8.8,
+      "gpu": 58
+    },
+    {
+      "t": 10.681999921798706,
+      "cpu": 10,
+      "gpu": 65
+    },
+    {
+      "t": 10.793999910354614,
+      "cpu": 12.9,
+      "gpu": 65
+    },
+    {
+      "t": 10.908999919891357,
+      "cpu": 10,
+      "gpu": 53
+    },
+    {
+      "t": 11.009000062942505,
+      "cpu": 14.3,
+      "gpu": 57
+    },
+    {
+      "t": 11.113999843597412,
+      "cpu": 11.4,
+      "gpu": 53
+    },
+    {
+      "t": 11.224999904632568,
+      "cpu": 10.1,
+      "gpu": 52
+    },
+    {
+      "t": 11.32800006866455,
+      "cpu": 8.7,
+      "gpu": 44
+    },
+    {
+      "t": 11.432999849319458,
+      "cpu": 10,
+      "gpu": 58
+    },
+    {
+      "t": 11.549000024795532,
+      "cpu": 18.1,
+      "gpu": 48
+    },
+    {
+      "t": 11.65499997138977,
+      "cpu": 12.9,
+      "gpu": 2
+    },
+    {
+      "t": 11.76199984550476,
+      "cpu": 8.6,
+      "gpu": 0
+    },
+    {
+      "t": 11.868000030517578,
+      "cpu": 1.4,
+      "gpu": 5
+    },
+    {
+      "t": 11.977999925613403,
+      "cpu": 2.8,
+      "gpu": 1
+    },
+    {
+      "t": 12.08899998664856,
+      "cpu": 4.2,
+      "gpu": 0
+    },
+    {
+      "t": 12.197999954223633,
+      "cpu": 8.7,
+      "gpu": 0
+    },
+    {
+      "t": 12.305999994277954,
+      "cpu": 4.3,
+      "gpu": 0
+    },
+    {
+      "t": 12.414999961853027,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 12.52999997138977,
+      "cpu": 1.4,
+      "gpu": 82
+    },
+    {
+      "t": 12.644999980926514,
+      "cpu": 1.4,
+      "gpu": 4
+    },
+    {
+      "t": 12.75,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 12.855999946594238,
+      "cpu": 2.8,
+      "gpu": 0
+    },
+    {
+      "t": 12.964999914169312,
+      "cpu": 2.9,
+      "gpu": 0
+    },
+    {
+      "t": 13.072999954223633,
+      "cpu": 9.9,
+      "gpu": 1
+    },
+    {
+      "t": 13.181999921798706,
+      "cpu": 11.4,
+      "gpu": 25
+    },
+    {
+      "t": 13.292999982833862,
+      "cpu": 0,
+      "gpu": 66
+    },
+    {
+      "t": 13.407000064849854,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 13.513999938964844,
+      "cpu": 0,
+      "gpu": 0
+    },
+    {
+      "t": 13.621000051498413,
+      "cpu": 1.4,
+      "gpu": 0
+    },
+    {
+      "t": 13.734999895095825,
+      "cpu": 2.9,
+      "gpu": 1
+    },
+    {
+      "t": 13.842999935150146,
+      "cpu": 11.6,
+      "gpu": 7
+    },
+    {
+      "t": 13.950999975204468,
+      "cpu": 2.9,
+      "gpu": 51
+    }
+  ],
+  "tts_playback_segments": [
+    {
+      "startTime": 3.6440000534057617,
+      "endTime": 3.690439962702814,
+      "amplitude": 8.023176844459135
+    },
+    {
+      "startTime": 3.691999912261963,
+      "endTime": 3.738439821559015,
+      "amplitude": 27.167355918874627
+    },
+    {
+      "startTime": 3.738773208297971,
+      "endTime": 3.785213117595023,
+      "amplitude": 28.463044088107132
+    },
+    {
+      "startTime": 3.7848798281308973,
+      "endTime": 3.8313197374279495,
+      "amplitude": 11.317061382421699
+    },
+    {
+      "startTime": 3.8379862820243034,
+      "endTime": 3.8844261913213556,
+      "amplitude": 7.025390361594905
+    },
+    {
+      "startTime": 3.8840929018570023,
+      "endTime": 3.9305328111540545,
+      "amplitude": 5.551288057233574
+    },
+    {
+      "startTime": 3.925866148302248,
+      "endTime": 3.9723060575993,
+      "amplitude": 1.1464763856776048
+    },
+    {
+      "startTime": 3.972639444338256,
+      "endTime": 4.019079353635308,
+      "amplitude": 0.9206839454584136
+    },
+    {
+      "startTime": 4.014079304044344,
+      "endTime": 4.060519213341396,
+      "amplitude": 11.033504922721413
+    },
+    {
+      "startTime": 4.0648525485821665,
+      "endTime": 4.111292457879219,
+      "amplitude": 32.57578307329405
+    },
+    {
+      "startTime": 4.110292492211556,
+      "endTime": 4.1567324015086085,
+      "amplitude": 23.156836034349997
+    },
+    {
+      "startTime": 4.1603991635427064,
+      "endTime": 4.206839072839759,
+      "amplitude": 8.193741798932129
+    },
+    {
+      "startTime": 4.204505689915322,
+      "endTime": 4.250945599212375,
+      "amplitude": 6.296629343622004
+    },
+    {
+      "startTime": 4.251278985951558,
+      "endTime": 4.29771889524861,
+      "amplitude": 3.380276010119492
+    },
+    {
+      "startTime": 4.300385491343377,
+      "endTime": 4.346825400640429,
+      "amplitude": 9.384629278952406
+    },
+    {
+      "startTime": 4.346158621440054,
+      "endTime": 4.392598530737106,
+      "amplitude": 18.295590516839678
+    },
+    {
+      "startTime": 4.39259859558706,
+      "endTime": 4.439038504884112,
+      "amplitude": 14.227656648119874
+    },
+    {
+      "startTime": 4.436371870642461,
+      "endTime": 4.482811779939513,
+      "amplitude": 10.420504484728866
+    },
+    {
+      "startTime": 4.478478406551858,
+      "endTime": 4.52491831584891,
+      "amplitude": 5.830694539389159
+    },
+    {
+      "startTime": 4.524585026384557,
+      "endTime": 4.571024935681609,
+      "amplitude": 3.1005891280389717
+    },
+    {
+      "startTime": 4.5783581564814995,
+      "endTime": 4.624798065778552,
+      "amplitude": 19.5721637627964
+    },
+    {
+      "startTime": 4.621798142072521,
+      "endTime": 4.668238051369573,
+      "amplitude": 23.046918417357944
+    },
+    {
+      "startTime": 4.67090464746434,
+      "endTime": 4.717344556761392,
+      "amplitude": 1.4329564038888747
+    },
+    {
+      "startTime": 4.713677994998989,
+      "endTime": 4.760117904296041,
+      "amplitude": 1.622641967617842
+    },
+    {
+      "startTime": 4.766784448892395,
+      "endTime": 4.813224358189447,
+      "amplitude": 9.46471987879027
+    },
+    {
+      "startTime": 4.805891099242672,
+      "endTime": 4.852331008539724,
+      "amplitude": 10.067354761773968
+    },
+    {
+      "startTime": 4.858997688557793,
+      "endTime": 4.905437597854845,
+      "amplitude": 6.158486287329801
+    },
+    {
+      "startTime": 4.903437569244716,
+      "endTime": 4.949877478541768,
+      "amplitude": 6.60183475322199
+    },
+    {
+      "startTime": 4.947210844300116,
+      "endTime": 4.993650753597168,
+      "amplitude": 2.893317665753408
+    },
+    {
+      "startTime": 4.99931737067277,
+      "endTime": 5.0457572799698225,
+      "amplitude": 7.918220066265362
+    },
+    {
+      "startTime": 5.042423969524634,
+      "endTime": 5.0888638788216864,
+      "amplitude": 3.737096976934415
+    },
+    {
+      "startTime": 5.084863892173189,
+      "endTime": 5.131303801470241,
+      "amplitude": 8.761373542532858
+    },
+    {
+      "startTime": 5.1296370947493415,
+      "endTime": 5.176077004046394,
+      "amplitude": 12.31804530922269
+    },
+    {
+      "startTime": 5.181410369804553,
+      "endTime": 5.227850279101605,
+      "amplitude": 9.535893935900777
+    },
+    {
+      "startTime": 5.229517083097562,
+      "endTime": 5.275956992394614,
+      "amplitude": 5.801706565889548
+    },
+    {
+      "startTime": 5.2686235980261245,
+      "endTime": 5.315063507323177,
+      "amplitude": 2.338812391380262
+    },
+    {
+      "startTime": 9.983000040054321,
+      "endTime": 10.029439949351373,
+      "amplitude": 12.854070666570792
+    },
+    {
+      "startTime": 10.030439838725215,
+      "endTime": 10.076879748022266,
+      "amplitude": 34.573320609112635
+    },
+    {
+      "startTime": 10.076546561554778,
+      "endTime": 10.12298647085183,
+      "amplitude": 40.24243290999677
+    },
+    {
+      "startTime": 10.124319785111538,
+      "endTime": 10.17075969440859,
+      "amplitude": 14.712557383010019
+    },
+    {
+      "startTime": 10.167092959077536,
+      "endTime": 10.213532868374587,
+      "amplitude": 9.889223528766635
+    },
+    {
+      "startTime": 10.21319944348852,
+      "endTime": 10.259639352785571,
+      "amplitude": 13.664992693549472
+    },
+    {
+      "startTime": 10.258306135800467,
+      "endTime": 10.304746045097518,
+      "amplitude": 16.836704867475515
+    },
+    {
+      "startTime": 10.310412559176484,
+      "endTime": 10.356852468473535,
+      "amplitude": 24.6003435289333
+    },
+    {
+      "startTime": 10.356519282006047,
+      "endTime": 10.402959191303099,
+      "amplitude": 19.694456775570238
+    },
+    {
+      "startTime": 10.400959059696106,
+      "endTime": 10.447398968993157,
+      "amplitude": 20.15537671801602
+    },
+    {
+      "startTime": 10.449732449192197,
+      "endTime": 10.496172358489249,
+      "amplitude": 15.221832752197784
+    },
+    {
+      "startTime": 10.490838954584206,
+      "endTime": 10.537278863881257,
+      "amplitude": 4.50593160858614
+    },
+    {
+      "startTime": 10.533278980229397,
+      "endTime": 10.579718889526449,
+      "amplitude": 1.3340399341098117
+    },
+    {
+      "startTime": 10.585385403605187,
+      "endTime": 10.631825312902238,
+      "amplitude": 0.9126200595563523
+    },
+    {
+      "startTime": 10.634158793101506,
+      "endTime": 10.680598702398557,
+      "amplitude": 0.9030522193308101
+    },
+    {
+      "startTime": 10.67359855934751,
+      "endTime": 10.720038468644562,
+      "amplitude": 12.048686873914567
+    },
+    {
+      "startTime": 10.727371824866168,
+      "endTime": 10.77381173416322,
+      "amplitude": 7.218126976007136
+    },
+    {
+      "startTime": 10.777145006461296,
+      "endTime": 10.823584915758348,
+      "amplitude": 4.493387815057412
+    },
+    {
+      "startTime": 10.818251750271656,
+      "endTime": 10.864691659568708,
+      "amplitude": 3.2994898482657122
+    },
+    {
+      "startTime": 10.864358234682868,
+      "endTime": 10.91079814397992,
+      "amplitude": 4.826847232820911
+    },
+    {
+      "startTime": 10.912131458239628,
+      "endTime": 10.95857136753668,
+      "amplitude": 4.782899930786769
+    },
+    {
+      "startTime": 10.955238160088356,
+      "endTime": 11.001678069385408,
+      "amplitude": 4.404154387037262
+    },
+    {
+      "startTime": 11.000011362664509,
+      "endTime": 11.04645127196156,
+      "amplitude": 3.973350159308032
+    },
+    {
+      "startTime": 11.0527845652407,
+      "endTime": 11.09922447453775,
+      "amplitude": 2.818067643795654
+    },
+    {
+      "startTime": 11.091224539387667,
+      "endTime": 11.137664448684719,
+      "amplitude": 1.7556650068974233
+    },
+    {
+      "startTime": 11.137664410537582,
+      "endTime": 11.184104319834633,
+      "amplitude": 0.1418746072094993
+    },
+    {
+      "startTime": 11.186437561615321,
+      "endTime": 11.232877470912372,
+      "amplitude": 0.03569985654923965
+    },
+    {
+      "startTime": 11.232544284444884,
+      "endTime": 11.278984193741936,
+      "amplitude": 0.03300128624278459
+    },
+    {
+      "startTime": 11.27931734206254,
+      "endTime": 11.325757251359592,
+      "amplitude": 0.023722000339808834
+    },
+    {
+      "startTime": 11.325757213212682,
+      "endTime": 11.372197122509734,
+      "amplitude": 5.226595942431693
+    },
+    {
+      "startTime": 11.377863978003916,
+      "endTime": 11.424303887300967,
+      "amplitude": 8.75149359503625
+    },
+    {
+      "startTime": 11.422637180580068,
+      "endTime": 11.46907708987712,
+      "amplitude": 24.170806303992215
+    },
+    {
+      "startTime": 11.46507696780668,
+      "endTime": 11.511516877103732,
+      "amplitude": 27.27915299287479
+    },
+    {
+      "startTime": 11.520517075467978,
+      "endTime": 11.56695698476503,
+      "amplitude": 13.175547223119452
+    },
+    {
+      "startTime": 11.565623632358438,
+      "endTime": 11.61206354165549,
+      "amplitude": 1.0928976756419198
+    },
+    {
+      "startTime": 11.612063503508352,
+      "endTime": 11.658503412805404,
+      "amplitude": 1.6097005877551436
+    },
+    {
+      "startTime": 11.656170029881196,
+      "endTime": 11.702609939178247,
+      "amplitude": 16.79684298478883
+    },
+    {
+      "startTime": 11.700276659250676,
+      "endTime": 11.746716568547727,
+      "amplitude": 28.60361756840829
+    },
+    {
+      "startTime": 11.743716509419983,
+      "endTime": 11.790156418717034,
+      "amplitude": 19.747802038662993
+    },
+    {
+      "startTime": 11.79648984741766,
+      "endTime": 11.842929756714712,
+      "amplitude": 6.363477559879017
+    },
+    {
+      "startTime": 11.838596383327058,
+      "endTime": 11.88503629262411,
+      "amplitude": 6.766195320285153
+    },
+    {
+      "startTime": 11.884369513423962,
+      "endTime": 11.930809422721014,
+      "amplitude": 5.002535042307761
+    },
+    {
+      "startTime": 11.931476060777413,
+      "endTime": 11.977915970074465,
+      "amplitude": 4.46112578569004
+    },
+    {
+      "startTime": 11.984249501772183,
+      "endTime": 12.030689411069234,
+      "amplitude": 9.751685085038
+    },
+    {
+      "startTime": 12.028355892723084,
+      "endTime": 12.074795802020136,
+      "amplitude": 14.632133113186867
+    },
+    {
+      "startTime": 12.07246265751428,
+      "endTime": 12.11890256681133,
+      "amplitude": 24.636631313248735
+    },
+    {
+      "startTime": 12.119235715131936,
+      "endTime": 12.165675624428987,
+      "amplitude": 16.40117276747102
+    },
+    {
+      "startTime": 12.161342251041333,
+      "endTime": 12.207782160338384,
+      "amplitude": 8.160248099365598
+    },
+    {
+      "startTime": 12.20744887087426,
+      "endTime": 12.25388878017131,
+      "amplitude": 5.93522064339106
+    },
+    {
+      "startTime": 12.253555593703823,
+      "endTime": 12.299995503000874,
+      "amplitude": 8.019703612717418
+    },
+    {
+      "startTime": 12.309995390467293,
+      "endTime": 12.356435299764344,
+      "amplitude": 3.675697586200325
+    },
+    {
+      "startTime": 12.346768760889972,
+      "endTime": 12.393208670187024,
+      "amplitude": 0.7285646731880187
+    },
+    {
+      "startTime": 12.391875317780205,
+      "endTime": 12.438315227077256,
+      "amplitude": 4.1237310904933455
+    },
+    {
+      "startTime": 12.441648396378696,
+      "endTime": 12.488088305675747,
+      "amplitude": 13.006378851294894
+    },
+    {
+      "startTime": 12.488755046729011,
+      "endTime": 12.535194956026062,
+      "amplitude": 12.494731754583212
+    },
+    {
+      "startTime": 12.53752819780675,
+      "endTime": 12.583968107103802,
+      "amplitude": 7.211399947507113
+    },
+    {
+      "startTime": 12.585968162416975,
+      "endTime": 12.632408071714027,
+      "amplitude": 6.856983213547041
+    },
+    {
+      "startTime": 12.628074698326373,
+      "endTime": 12.674514607623424,
+      "amplitude": 3.885115341509165
+    },
+    {
+      "startTime": 12.674847994362608,
+      "endTime": 12.72128790365966,
+      "amplitude": 0.7907876396791015
+    },
+    {
+      "startTime": 12.726954656156977,
+      "endTime": 12.773394565454028,
+      "amplitude": 10.248641353422059
+    },
+    {
+      "startTime": 12.767061098606291,
+      "endTime": 12.813501007903342,
+      "amplitude": 13.437891982763645
+    },
+    {
+      "startTime": 12.820834364124948,
+      "endTime": 12.867274273422,
+      "amplitude": 11.207389859018807
+    },
+    {
+      "startTime": 12.860274368789305,
+      "endTime": 12.906714278086357,
+      "amplitude": 11.418764727691167
+    },
+    {
+      "startTime": 12.902380801702066,
+      "endTime": 12.948820710999117,
+      "amplitude": 5.950806130662252
+    },
+    {
+      "startTime": 12.951154191198157,
+      "endTime": 12.997594100495208,
+      "amplitude": 2.462721610944655
+    },
+    {
+      "startTime": 12.9982608415487,
+      "endTime": 13.04470075084575,
+      "amplitude": 1.4963456539467872
+    }
+  ],
+  "audio_amplitude_history": [
+    {
+      "timestamp": 0.15899991989135742,
+      "amplitude": 0.9364446586915272
+    },
+    {
+      "timestamp": 0.27900004386901855,
+      "amplitude": 2.8618128296397347
+    },
+    {
+      "timestamp": 0.40799999237060547,
+      "amplitude": 0.621110762962089
+    },
+    {
+      "timestamp": 0.5390000343322754,
+      "amplitude": 6.674717095093563
+    },
+    {
+      "timestamp": 0.6689999103546143,
+      "amplitude": 1.74784382161666
+    },
+    {
+      "timestamp": 0.7979998588562012,
+      "amplitude": 0.1553434471787767
+    },
+    {
+      "timestamp": 0.9200000762939453,
+      "amplitude": 0.14338675980284504
+    },
+    {
+      "timestamp": 1.0490000247955322,
+      "amplitude": 100
+    },
+    {
+      "timestamp": 1.178999900817871,
+      "amplitude": 100
+    },
+    {
+      "timestamp": 1.307999849319458,
+      "amplitude": 70.06004328763429
+    },
+    {
+      "timestamp": 1.438999891281128,
+      "amplitude": 100
+    },
+    {
+      "timestamp": 1.5709998607635498,
+      "amplitude": 39.40767461101435
+    },
+    {
+      "timestamp": 1.6989998817443848,
+      "amplitude": 99.17011844289725
+    },
+    {
+      "timestamp": 1.8280000686645508,
+      "amplitude": 14.216099448732447
+    },
+    {
+      "timestamp": 1.9579999446868896,
+      "amplitude": 97.35451103002949
+    },
+    {
+      "timestamp": 2.0789999961853027,
+      "amplitude": 57.880166347064375
+    },
+    {
+      "timestamp": 2.2079999446868896,
+      "amplitude": 9.549210973769592
+    },
+    {
+      "timestamp": 2.3380000591278076,
+      "amplitude": 0.09273394304077304
+    },
+    {
+      "timestamp": 2.4709999561309814,
+      "amplitude": 0.09090240739416844
+    },
+    {
+      "timestamp": 2.5980000495910645,
+      "amplitude": 0.05316733512290856
+    },
+    {
+      "timestamp": 2.7189998626708984,
+      "amplitude": 0.05089239841149242
+    },
+    {
+      "timestamp": 2.8480000495910645,
+      "amplitude": 0.04919823688188433
+    },
+    {
+      "timestamp": 2.9809999465942383,
+      "amplitude": 0.06301635178168158
+    },
+    {
+      "timestamp": 3.135999917984009,
+      "amplitude": 0.06538849447691733
+    },
+    {
+      "timestamp": 3.240999937057495,
+      "amplitude": 0.06641182417421002
+    },
+    {
+      "timestamp": 3.3580000400543213,
+      "amplitude": 0.05700135400598599
+    },
+    {
+      "timestamp": 3.493000030517578,
+      "amplitude": 0.04841355762588137
+    },
+    {
+      "timestamp": 3.618000030517578,
+      "amplitude": 0.06395764696252226
+    },
+    {
+      "timestamp": 3.747999906539917,
+      "amplitude": 0.04409378466707556
+    },
+    {
+      "timestamp": 3.878999948501587,
+      "amplitude": 0.02807367812305012
+    },
+    {
+      "timestamp": 3.999000072479248,
+      "amplitude": 0.029124472737040448
+    },
+    {
+      "timestamp": 4.128000020980835,
+      "amplitude": 0.030601410775736127
+    },
+    {
+      "timestamp": 4.257999897003174,
+      "amplitude": 0.02834583590402072
+    },
+    {
+      "timestamp": 4.391999959945679,
+      "amplitude": 0.029243005284206983
+    },
+    {
+      "timestamp": 4.523999929428101,
+      "amplitude": 0.030289962915338208
+    },
+    {
+      "timestamp": 4.638999938964844,
+      "amplitude": 0.049448270488925285
+    },
+    {
+      "timestamp": 4.767999887466431,
+      "amplitude": 0.15752554731395724
+    },
+    {
+      "timestamp": 4.898999929428101,
+      "amplitude": 0.11196119985966184
+    },
+    {
+      "timestamp": 5.0279998779296875,
+      "amplitude": 0.06741804303219637
+    },
+    {
+      "timestamp": 5.1579999923706055,
+      "amplitude": 0.09233269580035158
+    },
+    {
+      "timestamp": 5.289999961853027,
+      "amplitude": 0.2073260385827238
+    },
+    {
+      "timestamp": 5.417999982833862,
+      "amplitude": 0.040429400863498645
+    },
+    {
+      "timestamp": 5.547999858856201,
+      "amplitude": 0.056691798127493004
+    },
+    {
+      "timestamp": 5.678999900817871,
+      "amplitude": 0.09318255870801291
+    },
+    {
+      "timestamp": 5.797999858856201,
+      "amplitude": 0.09922125827876913
+    },
+    {
+      "timestamp": 5.927999973297119,
+      "amplitude": 0.1256647038057707
+    },
+    {
+      "timestamp": 6.059000015258789,
+      "amplitude": 0.12470222485397009
+    },
+    {
+      "timestamp": 6.187999963760376,
+      "amplitude": 0.11740253701378058
+    },
+    {
+      "timestamp": 6.318000078201294,
+      "amplitude": 0.11997767913834675
+    },
+    {
+      "timestamp": 6.437999963760376,
+      "amplitude": 0.1517444202643312
+    },
+    {
+      "timestamp": 6.568000078201294,
+      "amplitude": 0.09063403490492385
+    },
+    {
+      "timestamp": 6.697999954223633,
+      "amplitude": 0.13201746522971444
+    },
+    {
+      "timestamp": 6.828000068664551,
+      "amplitude": 0.13394004761012104
+    },
+    {
+      "timestamp": 6.95799994468689,
+      "amplitude": 0.1318563367177152
+    },
+    {
+      "timestamp": 7.079999923706055,
+      "amplitude": 1.0828810541649643
+    },
+    {
+      "timestamp": 7.208999872207642,
+      "amplitude": 79.5793741826214
+    },
+    {
+      "timestamp": 7.33899998664856,
+      "amplitude": 92.02039374744068
+    },
+    {
+      "timestamp": 7.468999862670898,
+      "amplitude": 65.23538169231455
+    },
+    {
+      "timestamp": 7.598999977111816,
+      "amplitude": 47.29705330759229
+    },
+    {
+      "timestamp": 7.7179999351501465,
+      "amplitude": 79.52260945566672
+    },
+    {
+      "timestamp": 7.8480000495910645,
+      "amplitude": 62.494094448523406
+    },
+    {
+      "timestamp": 7.978999853134155,
+      "amplitude": 60.45087600903071
+    },
+    {
+      "timestamp": 8.108999967575073,
+      "amplitude": 2.0569202874799797
+    },
+    {
+      "timestamp": 8.23799991607666,
+      "amplitude": 95.46234221274827
+    },
+    {
+      "timestamp": 8.358999967575073,
+      "amplitude": 33.01061451932294
+    },
+    {
+      "timestamp": 8.488999843597412,
+      "amplitude": 0.1834231210500268
+    },
+    {
+      "timestamp": 8.61899995803833,
+      "amplitude": 0.09775204722306884
+    },
+    {
+      "timestamp": 8.749000072479248,
+      "amplitude": 0.09546899815905466
+    },
+    {
+      "timestamp": 8.878999948501587,
+      "amplitude": 0.04841730334803404
+    },
+    {
+      "timestamp": 8.999000072479248,
+      "amplitude": 0.04993737385054477
+    },
+    {
+      "timestamp": 9.128000020980835,
+      "amplitude": 0.04522461938670752
+    },
+    {
+      "timestamp": 9.257999897003174,
+      "amplitude": 0.047336159118564855
+    },
+    {
+      "timestamp": 9.414000034332275,
+      "amplitude": 0.04381432950896103
+    },
+    {
+      "timestamp": 9.522000074386597,
+      "amplitude": 0.043722892340685285
+    },
+    {
+      "timestamp": 9.638999938964844,
+      "amplitude": 0.037787295453589304
+    },
+    {
+      "timestamp": 9.769000053405762,
+      "amplitude": 0.0544551462787713
+    },
+    {
+      "timestamp": 9.944999933242798,
+      "amplitude": 0.03975861406937275
+    },
+    {
+      "timestamp": 10.027999877929688,
+      "amplitude": 0.044506371058338864
+    },
+    {
+      "timestamp": 10.158999919891357,
+      "amplitude": 0.03631501988136799
+    },
+    {
+      "timestamp": 10.277999877929688,
+      "amplitude": 0.027516594717705133
+    },
+    {
+      "timestamp": 10.408999919891357,
+      "amplitude": 0.02733672138403898
+    },
+    {
+      "timestamp": 10.539999961853027,
+      "amplitude": 0.03559977878383807
+    },
+    {
+      "timestamp": 10.667999982833862,
+      "amplitude": 0.025141838350346835
+    },
+    {
+      "timestamp": 10.797999858856201,
+      "amplitude": 0.023175946845298067
+    },
+    {
+      "timestamp": 10.917999982833862,
+      "amplitude": 0.03491548263494179
+    },
+    {
+      "timestamp": 11.049000024795532,
+      "amplitude": 0.025717677158661748
+    },
+    {
+      "timestamp": 11.178999900817871,
+      "amplitude": 0.04859651679108865
+    },
+    {
+      "timestamp": 11.309000015258789,
+      "amplitude": 0.025729113915584537
+    },
+    {
+      "timestamp": 11.440999984741211,
+      "amplitude": 0.06487440479638397
+    },
+    {
+      "timestamp": 11.559000015258789,
+      "amplitude": 0.0806073689938539
+    },
+    {
+      "timestamp": 11.688999891281128,
+      "amplitude": 0.05236415827653988
+    },
+    {
+      "timestamp": 11.818000078201294,
+      "amplitude": 0.02372340603700116
+    },
+    {
+      "timestamp": 11.948999881744385,
+      "amplitude": 0.024533254333347052
+    },
+    {
+      "timestamp": 12.078999996185303,
+      "amplitude": 0.040308985916093186
+    },
+    {
+      "timestamp": 12.197999954223633,
+      "amplitude": 0.0890218433490194
+    },
+    {
+      "timestamp": 12.32800006866455,
+      "amplitude": 0.055880718854453004
+    },
+    {
+      "timestamp": 12.45799994468689,
+      "amplitude": 0.024431662251648792
+    },
+    {
+      "timestamp": 12.58899998664856,
+      "amplitude": 0.033199697403588885
+    },
+    {
+      "timestamp": 12.718999862670898,
+      "amplitude": 0.03737478312639223
+    },
+    {
+      "timestamp": 12.83899998664856,
+      "amplitude": 0.02825601430608764
+    },
+    {
+      "timestamp": 12.967999935150146,
+      "amplitude": 0.04683925042954132
+    },
+    {
+      "timestamp": 13.098000049591064,
+      "amplitude": 0.02376349475669
+    },
+    {
+      "timestamp": 13.227999925613403,
+      "amplitude": 0.026654255748023607
+    },
+    {
+      "timestamp": 13.358999967575073,
+      "amplitude": 0.05420236475246145
+    },
+    {
+      "timestamp": 13.477999925613403,
+      "amplitude": 0.0714893277147411
+    },
+    {
+      "timestamp": 13.608999967575073,
+      "amplitude": 0.16586156366049665
+    },
+    {
+      "timestamp": 13.740999937057495,
+      "amplitude": 0.05678379071881152
+    },
+    {
+      "timestamp": 13.868000030517578,
+      "amplitude": 0.041174967265088375
+    },
+    {
+      "timestamp": 13.999000072479248,
+      "amplitude": 0.0696083485869639
+    }
+  ],
+  "ttl_bands": [
+    {
+      "start": 2.3380000591278076,
+      "end": 3.6440000534057617,
+      "ttlMs": 1306
+    },
+    {
+      "start": 8.488999843597412,
+      "end": 9.983000040054321,
+      "ttlMs": 1494
+    }
+  ],
+  "app_version": "0.1.0"
+}

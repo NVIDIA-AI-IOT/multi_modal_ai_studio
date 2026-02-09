@@ -32,53 +32,68 @@ Multi-modal AI Studio is a next-generation conversational AI interface designed 
 
 ### Flexible Deployment
 - **WebUI Mode**: Rich browser interface (default)
-- **Headless Mode**: CLI-only for production/automation
-- **Device Flexibility**: Browser WebRTC or local USB devices
+- **Headless Mode**: CLI-only for production/automation (not yet implemented)
+- **Audio/Video devices**: **Currently supported:** browser devices via WebRTC (mic, speaker, camera through the browser). **Not yet supported:** local USB microphone, USB speaker, or USB webcam attached to the server machine.
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.8+
-- NVIDIA Riva (for Riva backend) - see [docs/setup.md](docs/setup.md)
+- **Audio/video**: Use the app in a browser; mic, speaker, and camera are accessed via WebRTC (browser devices). Local USB mic/speaker/webcam on the server are not supported yet.
+- NVIDIA Riva (for Riva backend) - see [INSTALL.md](INSTALL.md#nvidia-riva-setup-for-voice-asrtts)
 - OpenAI API key (for OpenAI backend) - optional
+- **Optional**: `jq` (e.g. `apt install jq` or `brew install jq`) for pretty-formatted LLM request/response logs in the server console; without it, logs use plain JSON
 
 ### Installation
+
+Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
 
 ```bash
 # Clone repository
 git clone https://github.com/yourusername/multi-modal-ai-studio.git
 cd multi-modal-ai-studio
 
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
 # Install in development mode
 pip install -e .
-
-# Or install dependencies directly
-pip install -r requirements.txt
 ```
+
+One-line setup (creates `.venv`, installs deps): `./scripts/setup_dev.sh`
+Full steps and troubleshooting: [INSTALL.md](INSTALL.md)
 
 ### Run WebUI
 
 ```bash
-# With Riva backend
+# View sessions and timeline (no backend required)
+multi-modal-ai-studio --port 8092
+
+# With Riva ASR/TTS (use --asr-server and --tts-server)
 multi-modal-ai-studio \
-  --port 8091 \
-  --riva-server localhost:50051 \
+  --port 8092 \
+  --asr-server localhost:50051 \
+  --tts-server localhost:50051 \
   --llm-api-base http://localhost:11434/v1 \
   --llm-model llama3.2:3b
 
 # With OpenAI Realtime API
 multi-modal-ai-studio \
-  --port 8091 \
+  --port 8092 \
   --asr-scheme openai-realtime \
   --tts-scheme openai-realtime \
-  --openai-api-key sk-...
+  --llm-api-key sk-...
 
 # With preset
 multi-modal-ai-studio --preset low-latency
 ```
 
-Open browser to `https://localhost:8091`
+Open **http://localhost:8092** in your browser.
+
+**Sessions and sample data**  
+By default the app loads and saves sessions in `sessions/`. To view or use the sample/mock session JSONs (e.g. in `mock_sessions/`), run with `--session-dir mock_sessions`. Open the app, then click a session in the sidebar to view its config and timeline.
 
 ### Run Headless
 

@@ -4,16 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-modal AI Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
     <!-- Header -->
     <header class="header">
         <div class="header-left">
-            <h1>🎙️ Multi-modal AI Studio</h1>
+            <h1 class="header-title"><i data-lucide="mic" class="lucide-inline header-title-icon"></i> Multi-modal AI Studio</h1>
         </div>
         <div class="header-right">
-            <button id="theme-toggle" class="icon-btn" title="Toggle theme">🌙</button>
+            <button id="settings-btn" class="icon-btn" title="UI Settings"><i data-lucide="settings" class="lucide-inline"></i></button>
+            <button id="theme-toggle" class="theme-toggle" title="Theme (Auto / Light / Dark)">
+                <span id="theme-icon"><i data-lucide="monitor"></i></span>
+                <span id="theme-text">Auto</span>
+            </button>
         </div>
     </header>
 
@@ -41,15 +49,16 @@
                 <section class="config-panel" id="config-panel">
                     <div class="config-header">
                         <h3>Configuration</h3>
+                        <button type="button" id="save-default-config-btn" class="config-save-default-btn" title="Save current configuration as default for new voice chats"><i data-lucide="chevrons-left" class="lucide-inline config-save-default-icon"></i> Save as default config</button>
                     </div>
                     <div class="config-content" id="config-content">
-                        <div class="config-tabs">
-                            <button class="config-tab active" data-tab="asr">ASR</button>
-                            <button class="config-tab" data-tab="llm">LLM</button>
-                            <button class="config-tab" data-tab="tts">TTS</button>
-                            <button class="config-tab" data-tab="device">Devices</button>
-                            <button class="config-tab" data-tab="app">App</button>
-                        </div>
+                        <nav class="config-tabs" role="tablist">
+                            <button type="button" class="config-tab active" role="tab" aria-selected="true" data-tab="asr"><i data-lucide="mic" class="lucide-inline config-tab-icon"></i> ASR</button>
+                            <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="llm"><i data-lucide="bot" class="lucide-inline config-tab-icon"></i> LLM</button>
+                            <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="tts"><i data-lucide="volume-2" class="lucide-inline config-tab-icon"></i> TTS</button>
+                            <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="device"><i data-lucide="monitor" class="lucide-inline config-tab-icon"></i> Devices</button>
+                            <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="app"><i data-lucide="settings" class="lucide-inline config-tab-icon"></i> App</button>
+                        </nav>
                         <div class="config-tab-content" id="config-tab-content">
                             <!-- Config details loaded via JS -->
                         </div>
@@ -58,90 +67,114 @@
 
                 <!-- Chat Panel (Always 3 sections in order) -->
                 <section class="chat-panel" id="chat-panel">
-                    <!-- 1. Session Meta (Title + Stats) -->
+                    <!-- 1. Session Meta (Title + Stats) – same info as session list button -->
                     <div class="session-meta-container" id="session-meta">
-                        <h2 class="session-title" id="session-title">Select a session</h2>
-                        <div class="session-stats" id="session-stats">
-                            <!-- Populated by JS: Date | Turns | TTL or LIVE/PREVIEW status -->
+                        <div class="session-meta-icon" aria-hidden="true"><i data-lucide="message-square" class="lucide-inline"></i></div>
+                        <div class="session-meta-content">
+                            <h2 class="session-title" id="session-title">Session</h2>
+                            <div class="session-meta-line2" id="session-meta-line2"><!-- Date & time, turns --></div>
+                            <div class="session-meta-line3 session-stats" id="session-stats"><!-- Avg TTL, TTFA, etc. --></div>
+                            <div class="session-meta-line4 session-filename" id="session-filename"><!-- Session filename (recorded only) --></div>
+                        </div>
+                        <div class="device-tags" id="device-tags" style="display: none;">
+                            <span class="device-tag"><i data-lucide="video" class="lucide-inline"></i> <span id="device-indicator-camera">—</span></span>
+                            <span class="device-tag"><i data-lucide="mic" class="lucide-inline"></i> <span id="device-indicator-mic">—</span></span>
+                            <span class="device-tag"><i data-lucide="volume-2" class="lucide-inline"></i> <span id="device-indicator-speaker">—</span></span>
                         </div>
                     </div>
-                    
+                    <!-- Pipeline config (devices + models); below session-meta, updates when config/devices change -->
+                    <div class="pipeline-config-container" id="pipeline-config" style="display: none;" aria-label="Session pipeline configuration"></div>
+                    <!-- Server health (Ollama + Riva) when in setup; visible only for new voice chat -->
+                    <div class="server-health-row" id="server-health-row" style="display: none;" aria-label="Server connectivity">
+                        <span id="server-health-status" class="server-health-status"></span>
+                        <button type="button" id="server-health-check-btn" class="btn-secondary server-health-check-btn" title="Check if Ollama and Riva servers are reachable">Check servers</button>
+                    </div>
+
                     <!-- 2. Session Image (Preview or Video) -->
                     <div class="session-image-container" id="session-image">
                         <!-- Historical: Static preview image -->
                         <img id="preview-image" class="session-preview-image" alt="Session preview" style="display: none;">
                         <div class="image-placeholder" id="image-placeholder">
-                            <span class="placeholder-icon">🎥</span>
+                            <span class="placeholder-icon"><i data-lucide="video" class="lucide-inline"></i></span>
                             <p class="placeholder-text">Multi-modal Session</p>
                             <p class="placeholder-subtext">Vision + Voice Analysis</p>
                         </div>
-                        
-                        <!-- Live: Video feed -->
-                        <video id="video-feed" class="session-video-feed" autoplay muted playsinline style="display: none;"></video>
-                    </div>
-                    
-                    <!-- Device Controls (live sessions only) -->
-                    <div class="device-controls-container" id="device-controls-container" style="display: none;">
-                        <div class="device-group">
-                            <div class="device-item">
-                                <label>🎥 Camera</label>
-                                <select id="camera-select" class="device-select">
-                                    <option value="browser">Browser WebRTC</option>
-                                    <option value="none">None</option>
-                                </select>
-                            </div>
-                            <div class="device-item">
-                                <label>🎤 Microphone</label>
-                                <select id="mic-select" class="device-select">
-                                    <option value="browser">Browser WebRTC</option>
-                                    <option value="none">None (text only)</option>
-                                </select>
-                                <div class="audio-level-indicator">
-                                    <div class="audio-level-bar" id="mic-level"></div>
-                                </div>
-                            </div>
-                            <div class="device-item">
-                                <label>🔊 Speaker</label>
-                                <select id="speaker-select" class="device-select">
-                                    <option value="browser">Browser WebRTC</option>
-                                    <option value="none">None (text only)</option>
-                                </select>
-                                <div class="audio-level-indicator">
-                                    <div class="audio-level-bar" id="speaker-level"></div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="session-control">
+                        <!-- START overlay: centered on placeholder so no vertical scroll needed -->
+                        <div class="start-session-overlay" id="start-session-overlay">
                             <button id="start-session-btn" class="start-btn">
-                                <span class="btn-icon">▶</span>
+                                <span class="btn-icon"><i data-lucide="play" class="lucide-inline"></i></span>
                                 START Session
                             </button>
-                            <button id="stop-session-btn" class="stop-btn" style="display: none;">
-                                <span class="btn-icon">⏸</span>
-                                STOP Session
-                            </button>
-                            <div class="session-status" id="session-status">
-                                <span class="status-indicator status-setup"></span>
-                                <span class="status-text">Setup Mode</span>
-                            </div>
+                        </div>
+                        <!-- Live: Video feed -->
+                        <video id="video-feed" class="session-video-feed" autoplay muted playsinline style="display: none;"></video>
+                        <!-- Mic amplitude: last 200ms dotted waveform at bottom of preview -->
+                        <div class="mic-waveform-overlay" id="mic-waveform-overlay" style="display: none;" aria-hidden="true">
+                            <canvas id="mic-waveform-canvas"></canvas>
                         </div>
                     </div>
                     
+                    <!-- STOP button when recording (no Setup Mode / PREVIEW) -->
+                    <div class="device-controls-container" id="device-controls-container" style="display: none;">
+                        <div class="session-control">
+                            <button id="stop-session-btn" class="stop-btn" style="display: none;">
+                                <span class="btn-icon"><i data-lucide="square" class="lucide-inline"></i></span>
+                                STOP Session
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Live ASR label (updated on every partial; like Live RIVA WebUI) -->
+                    <div class="live-asr-label-wrap" id="live-asr-label-wrap" style="display: none;">
+                        <span class="live-asr-prefix">Listening: </span><span id="live-asr-text"></span>
+                    </div>
                     <!-- 3. Chat History -->
                     <div class="chat-history" id="chat-history">
                         <div class="empty-state">
                             <p>👈 Select a session from the sidebar</p>
                         </div>
                     </div>
+
+                    <!-- Voice / LLM message log (JSON, like Live RIVA WebUI) -->
+                    <div class="voice-debug-panel" id="voice-debug-panel" style="display: none;">
+                        <div class="voice-debug-header">
+                            <span>Voice pipeline messages (JSON)</span>
+                            <button type="button" class="icon-btn voice-debug-toggle" id="voice-debug-toggle" title="Collapse">−</button>
+                        </div>
+                        <pre class="voice-debug-log" id="voice-debug-log"></pre>
+                    </div>
+                    
+                    <!-- Text input at bottom when Mic = None (Text Only), ChatGPT-style -->
+                    <div class="chat-input-container" id="chat-input-container" style="display: none;">
+                        <textarea id="chat-input" class="chat-input" rows="1" placeholder="Type a message..."></textarea>
+                        <button type="button" id="chat-send-btn" class="chat-send-btn" title="Send">
+                            <i data-lucide="send" class="lucide-inline"></i>
+                        </button>
+                    </div>
                 </section>
             </div>
 
             <!-- Timeline Panel -->
             <section class="timeline-panel" id="timeline-panel">
+                <div class="timeline-resize-handle" id="timeline-resize-handle"></div>
                 <div class="timeline-header">
                     <h3>Timeline</h3>
                     <div class="timeline-controls">
+                        <span class="timeline-gain-label" title="UI-only amplification for waveform">User:</span>
+                        <select id="timeline-user-audio-gain" class="timeline-gain-select" title="User (mic) waveform gain">
+                            <option value="1">×1</option>
+                            <option value="2">×2</option>
+                            <option value="4">×4</option>
+                        </select>
+                        <span class="timeline-gain-label" title="Amplitude 0–100: ≥ this = voice (silence detection, TTL); below = hide during TTS">User voice ≥</span>
+                        <input type="range" id="timeline-user-voice-threshold" class="timeline-ttl-threshold" min="0" max="30" step="1" value="5" title="User voice threshold (%)">
+                        <span id="timeline-user-voice-threshold-value" class="timeline-ttl-threshold-value">5</span><span class="timeline-ttl-threshold-unit">%</span>
+                        <span class="timeline-gain-label">AI:</span>
+                        <select id="timeline-ai-audio-gain" class="timeline-gain-select" title="AI (TTS) waveform gain">
+                            <option value="1">×1</option>
+                            <option value="2">×2</option>
+                            <option value="4">×4</option>
+                        </select>
                         <button id="timeline-zoom-out" class="icon-btn" title="Zoom out">-</button>
                         <button id="timeline-zoom-in" class="icon-btn" title="Zoom in">+</button>
                         <button id="timeline-reset" class="icon-btn" title="Reset view">⟲</button>
@@ -150,10 +183,147 @@
                 <div class="timeline-content" id="timeline-content">
                     <canvas id="timeline-canvas"></canvas>
                 </div>
+                <div class="timeline-scroll-bar" id="timeline-scroll-bar" style="display: none;">
+                    <div class="timeline-scroll-track" id="timeline-scroll-track">
+                        <div class="timeline-scroll-thumb" id="timeline-scroll-thumb"></div>
+                    </div>
+                </div>
                 <div class="timeline-metrics" id="timeline-metrics">
                     <!-- Metrics -->
                 </div>
             </section>
+        </div>
+    </div>
+
+    <!-- UI Settings Modal (2-pane: nav + content) -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content modal-content--settings">
+            <div class="modal-header">
+                <h2><i data-lucide="settings" class="lucide-inline"></i> UI Settings</h2>
+                <button class="modal-close" id="settings-modal-close">&times;</button>
+            </div>
+            <div class="modal-body settings-panes">
+                <nav class="settings-nav" aria-label="Settings categories">
+                    <button type="button" class="settings-nav-item active" data-pane="sessions">Sessions</button>
+                    <button type="button" class="settings-nav-item" data-pane="timeline">Timeline</button>
+                    <button type="button" class="settings-nav-item" data-pane="display">Display</button>
+                    <button type="button" class="settings-nav-item" data-pane="advanced">Advanced</button>
+                </nav>
+                <div class="settings-content">
+                    <!-- Sessions pane -->
+                    <div class="settings-pane active" id="settings-pane-sessions">
+                        <div class="settings-section">
+                            <h3>Sessions list &amp; actions</h3>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-show-pipeline-in-session-list">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Show Pipeline badge in each session item</div>
+                                        <div class="settings-desc">Show ASR | LLM | TTS summary under each session in the left Sessions list</div>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-show-new-chat-with-default-config">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Show &quot;+ New Chat with Default Config&quot; as default action button</div>
+                                        <div class="settings-desc">Use saved default config for the main new-session button; otherwise show &quot;+ New Voice Chat&quot;</div>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-show-session-thumbnails">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Show Session Thumbnails</div>
+                                        <div class="settings-desc">Display preview images in the session list sidebar</div>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-record-preview-in-session-history">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Record preview camera image in session history data</div>
+                                        <div class="settings-desc">When unchecked, preview camera image is not saved with session data</div>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Timeline pane -->
+                    <div class="settings-pane" id="settings-pane-timeline">
+                        <div class="settings-section">
+                            <h3>Timeline Visualization</h3>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-combine-speech-lanes">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Combine ASR/TTS into One Speech Lane</div>
+                                        <div class="settings-desc">When enabled, ASR and TTS events are shown in a single Speech lane (ASR top, TTS bottom)</div>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <div class="settings-title" style="margin-bottom: 8px;">Default timeline view height</div>
+                                <div class="settings-desc" style="margin-bottom: 8px;">Auto uses layout default; or set a fixed height (px).</div>
+                                <label class="settings-label settings-label-inline">
+                                    <input type="checkbox" id="ui-timeline-height-auto">
+                                    <span class="settings-text">Auto</span>
+                                </label>
+                                <div class="settings-slider-row">
+                                    <input type="range" id="ui-timeline-height-px" class="settings-slider" min="200" max="600" step="10" value="400">
+                                    <span id="ui-timeline-height-px-value" class="settings-slider-value">400</span> px
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Display pane -->
+                    <div class="settings-pane" id="settings-pane-display">
+                        <div class="settings-section">
+                            <h3>Display</h3>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-auto-scroll-chat">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Auto-scroll Chat</div>
+                                        <div class="settings-desc">Automatically scroll to the latest message in chat</div>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-show-timestamps">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Show Message Timestamps</div>
+                                        <div class="settings-desc">Display timestamps on chat messages</div>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Advanced pane -->
+                    <div class="settings-pane" id="settings-pane-advanced">
+                        <div class="settings-section">
+                            <h3>Advanced</h3>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-show-debug-info">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Show Debug Information</div>
+                                        <div class="settings-desc">Display additional debug info in the UI</div>
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary-btn" id="settings-reset-btn">Reset to Defaults</button>
+                <button class="primary-btn" id="settings-save-btn">Save & Close</button>
+            </div>
         </div>
     </div>
 

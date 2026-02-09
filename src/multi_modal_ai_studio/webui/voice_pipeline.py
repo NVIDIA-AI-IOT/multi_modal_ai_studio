@@ -24,8 +24,10 @@ from multi_modal_ai_studio.config.schema import (
     LLMConfig,
     TTSConfig,
 )
+from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.core.session import Session
 from multi_modal_ai_studio.core.timeline import Lane
+from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend
@@ -49,6 +51,8 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             tts["scheme"] = tts.pop("backend", "riva")
         if "riva_server" in tts and "server" not in tts:
             tts["server"] = tts.pop("riva_server")
+        if data.get("tts_model_name") and "riva_model_name" not in tts:
+            tts["riva_model_name"] = data["tts_model_name"]
         data["tts"] = tts
     if "llm" in data:
         llm = dict(data["llm"])
@@ -113,6 +117,7 @@ async def _run_voice_pipeline(
     await asr.start_stream()
     conversation_history = []
     stopped = asyncio.Event()
+    finals_queue: asyncio.Queue = asyncio.Queue()
 
     async def send_event(event_dict: Dict[str, Any]) -> None:
         try:
@@ -141,6 +146,11 @@ async def _run_voice_pipeline(
                             amp_history = obj.get("audio_amplitude_history")
                             if isinstance(amp_history, list):
                                 session.audio_amplitude_history = amp_history
+                            ttl_bands = obj.get("ttl_bands")
+                            if isinstance(ttl_bands, list):
+                                session.ttl_bands = ttl_bands
+                                session.apply_ttl_bands()  # single source of truth: metrics from bands (first audio_amplitude tts)
+                            session.app_version = __version__
                             stopped.set()
                             return
                     except json.JSONDecodeError:
@@ -191,11 +201,15 @@ async def _run_voice_pipeline(
         finally:
             stopped.set()
 
-    async def results_loop() -> None:
-        """Consume ASR results; on final -> LLM -> TTS; emit events and TTS audio."""
-        nonlocal conversation_history
+    async def asr_consumer() -> None:
+        """Independent ASR task: forward every partial/final to client immediately; enqueue finals for turn_executor.
+        Enables barge-in (turn_executor can be cancelled when new final arrives) and avoids phantom partial at tts_complete.
+        On stream end, if we had a partial but no final (e.g. user stopped before VAD), enqueue a synthetic final so one turn runs."""
         last_asr_final_text: Optional[str] = None
         last_asr_final_ts: Optional[float] = None
+        last_partial_text: Optional[str] = None
+        last_partial_ts: Optional[float] = None
+        asr_received_count = 0
         try:
             async for result in asr.receive_results():
                 if stopped.is_set():
@@ -203,53 +217,122 @@ async def _run_voice_pipeline(
                 if result is None:
                     break
 
+                asr_received_count += 1
+                if asr_received_count == 1:
+                    logger.info("[asr] First result received from Riva: is_final=%s text=%r", getattr(result, "is_final", True), (result.text or "").strip()[:80])
+
                 is_final = getattr(result, "is_final", True)
                 text = (result.text or "").strip()
                 if not text:
                     continue
 
-                # Use backend event time for asr_final so the timeline dot isn't tied to pipeline processing (e.g. same moment as tts_complete)
                 now_ts = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 ts = (getattr(result, "metadata", {}) or {}).get("event_timestamp")
                 if ts is None:
                     ts = now_ts
                 ev_type = "asr_partial" if not is_final else "asr_final"
 
-                # Skip duplicate asr_final (same text as last final, within 2s) to avoid repeated final_transcript
                 if is_final and last_asr_final_text is not None and text == last_asr_final_text:
                     if last_asr_final_ts is not None and abs(ts - last_asr_final_ts) < 2.0:
                         logger.debug("[asr] Skipping duplicate asr_final: %r", text[:50])
                         continue
-                # Skip phantom partials: (1) partial at or before last final timestamp; (2) late partial from same utterance (arrives after LLM/TTS, gets ts=now so appears at tts_complete)
                 if not is_final and last_asr_final_ts is not None:
                     if ts <= last_asr_final_ts:
                         logger.debug("[asr] Skipping stale asr_partial (ts=%.2f <= last_final=%.2f): %r", ts, last_asr_final_ts, text[:50])
                         continue
-                    # Same-utterance late partial: text matches or overlaps with last final (Riva sent partial after we already had final)
-                    if last_asr_final_text and (
+                    # Only treat as same-utterance phantom if within ~2.5s of last final.
+                    # Later partials are a new utterance (e.g. user said "Me a joke" then "Me again").
+                    same_utterance_window = 2.5
+                    if (ts - last_asr_final_ts) > same_utterance_window:
+                        pass  # New utterance; do not skip
+                    elif last_asr_final_text and (
                         text == last_asr_final_text
-                        or (text in last_asr_final_text or last_asr_final_text.startswith(text) or text.startswith(last_asr_final_text))
+                        or last_asr_final_text.startswith(text)
+                        or text.startswith(last_asr_final_text)
                     ):
                         logger.debug("[asr] Skipping phantom asr_partial (same utterance as last final): %r", text[:50])
                         continue
 
-                # Riva backend already adds asr_final to the timeline with correct timestamp; only add partials here
                 if not is_final:
+                    last_partial_text = text
+                    last_partial_ts = ts
                     session.timeline.add_event(ev_type, Lane.SPEECH, data={"text": text, "confidence": getattr(result, "confidence", 1.0)})
-                await send_event({
-                    "event_type": ev_type,
-                    "lane": "speech",
-                    "data": {"text": text, "confidence": getattr(result, "confidence", 1.0)},
-                    "timestamp": ts,
-                })
+                    # Fire-and-forget so we don't block on slow client; keeps asr_consumer able to receive 2nd turn
+                    asyncio.create_task(send_event({
+                        "event_type": ev_type,
+                        "lane": "speech",
+                        "data": {"text": text, "confidence": getattr(result, "confidence", 1.0)},
+                        "timestamp": ts,
+                    }))
+                else:
+                    await send_event({
+                        "event_type": ev_type,
+                        "lane": "speech",
+                        "data": {"text": text, "confidence": getattr(result, "confidence", 1.0)},
+                        "timestamp": ts,
+                    })
+                    last_asr_final_text = text
+                    last_asr_final_ts = ts
+                    finals_count = getattr(asr_consumer, "_finals_count", 0) + 1
+                    asr_consumer._finals_count = finals_count
+                    logger.info("[asr] asr_final #%d enqueued for LLM/TTS: %r", finals_count, text[:80])
+                    finals_queue.put_nowait(result)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception("asr_consumer error: %s", e)
+        finally:
+            logger.info("[asr] Stream ended; received %d ASR result(s) total", asr_received_count)
+            # Only create a synthetic final when the stream had no final at all (e.g. user stopped before
+            # VAD sent a final). Do NOT create one when we already had a final and the last partial is
+            # different (e.g. Riva sent early final "How about computer?" then partials "joke") — that
+            # would create a phantom extra turn; the partial is the tail of the same utterance.
+            if last_partial_text and last_asr_final_text is None:
+                try:
+                    now_ts = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                    syn_ts = last_partial_ts if last_partial_ts is not None else now_ts
+                    synthetic = ASRResult(
+                        text=last_partial_text,
+                        is_final=True,
+                        confidence=1.0,
+                        metadata={"event_timestamp": syn_ts},
+                    )
+                    logger.info("[asr] Stream ended with only partial; enqueueing synthetic final for LLM/TTS: %r", last_partial_text[:80])
+                    finals_queue.put_nowait(synthetic)
+                    # Add to timeline so replay/saved session has this final (use partial's time, not stream-end)
+                    session.timeline.add_event("asr_final", Lane.SPEECH, data={"text": last_partial_text, "confidence": 1.0})
+                    # Send asr_final to client so UI shows final_transcript (otherwise only partials were sent)
+                    await send_event({
+                        "event_type": "asr_final",
+                        "lane": "speech",
+                        "data": {"text": last_partial_text, "confidence": 1.0},
+                        "timestamp": syn_ts,
+                    })
+                except asyncio.QueueFull:
+                    pass
+                except Exception as e:
+                    logger.warning("Failed to send synthetic asr_final event: %s", e)
+            try:
+                finals_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
 
-                if not is_final:
+    async def turn_executor() -> None:
+        """Process ASR finals one at a time: LLM -> TTS. Waits on finals_queue (fed by asr_consumer).
+        Future: can be cancelled when new final arrives for barge-in."""
+        nonlocal conversation_history
+        turn_index = 0
+        try:
+            while not stopped.is_set():
+                result = await finals_queue.get()
+                if result is None:
+                    break
+                text = (result.text or "").strip()
+                if not text:
                     continue
 
-                last_asr_final_text = text
-                last_asr_final_ts = ts
-
-                logger.info("[timing] asr_final received (turn start)")
+                turn_index += 1
+                logger.info("[timing] turn #%d start (asr_final received): %r", turn_index, text[:80])
                 session.start_turn(user_transcript=text)
                 session.update_turn_transcript(text, confidence=getattr(result, "confidence", 1.0))
                 session.timeline.add_event("user_speech_end", Lane.SYSTEM)
@@ -315,7 +398,6 @@ async def _run_voice_pipeline(
                     session.end_turn()
                     continue
 
-                # Notify client that TTS is starting so it can resume AudioContext and schedule first chunk immediately
                 ts_tts_start = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 session.timeline.add_event("tts_start", Lane.TTS)
                 await send_event({
@@ -344,7 +426,6 @@ async def _run_voice_pipeline(
                                 "timestamp": ts_tts_first,
                             })
                             tts_first_sent = True
-                        # Record TTS amplitude for AUDIO lane (purple waveform in replay)
                         if session.timeline.start_time is not None and chunk.audio:
                             now = time.time() - session.timeline.start_time
                             if now - last_tts_amplitude_time >= tts_amplitude_interval:
@@ -374,25 +455,40 @@ async def _run_voice_pipeline(
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.exception("results_loop error: %s", e)
+            logger.exception("turn_executor error: %s", e)
 
     await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
 
     recv_task = asyncio.create_task(receive_loop())
-    results_task = asyncio.create_task(results_loop())
+    asr_task = asyncio.create_task(asr_consumer())
+    turn_task = asyncio.create_task(turn_executor())
 
     await stopped.wait()
     await asr.stop_stream()
     recv_task.cancel()
-    results_task.cancel()
+    asr_task.cancel()
+    # Do not cancel turn_task: asr_consumer's finally enqueues a synthetic final when stream
+    # ends with only partials (user stopped before Riva VAD sent a final). Let turn_executor
+    # drain finals_queue so it processes that synthetic final and runs LLM/TTS before we save.
     try:
         await recv_task
     except asyncio.CancelledError:
         pass
     try:
-        await results_task
+        await asr_task
     except asyncio.CancelledError:
         pass
+    try:
+        await asyncio.wait_for(turn_task, timeout=120.0)
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        logger.warning("turn_executor did not finish within 120s")
+        turn_task.cancel()
+        try:
+            await turn_task
+        except asyncio.CancelledError:
+            pass
 
     metrics = session.calculate_metrics()
 

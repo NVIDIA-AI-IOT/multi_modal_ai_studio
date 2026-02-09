@@ -40,8 +40,15 @@ Thumbs.db
 
 # Project specific
 docs/cursor/
+docs/*.md
+!docs/asr_model_for_multi_utterance.md
+!docs/audio_pipeline.md
 *.log
-sessions/
+# Session storage: ignore all except committed example sessions
+sessions/*
+!sessions/example_session.json
+!sessions/example_session_2.json
+# mock_sessions/ is not ignored so you can commit sample session JSONs (e.g. for alpha)
 *.session.json
 user_presets/
 

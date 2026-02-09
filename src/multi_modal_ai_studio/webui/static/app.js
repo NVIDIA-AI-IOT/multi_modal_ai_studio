@@ -25,6 +25,8 @@ const state = {
     liveTimelineEvents: [],
     /** Live session: chat turns [{ user, assistant }] for display */
     liveChatTurns: [],
+    /** Live session: current partial/interim ASR text (updated on every asr_partial; cleared on asr_final) */
+    liveAsrInterimText: '',
     /** Last N WebSocket messages (JSON strings) for voice debug panel */
     voiceMessageLog: [],
     /** AudioContext for TTS playback (created when needed) */
@@ -49,12 +51,29 @@ const state = {
     liveAudioAmplitudeHistory: [],
     /** Live session: TTS (AI) segments for purple waveform on AUDIO lane: { startTime, endTime, amplitude } */
     liveTtsAmplitudeHistory: [],
+    /** Live session: TTL bands from JS end-of-speech to first sound out: [{ start, end, ttlMs }] (times in session sec) */
+    liveTtlBands: [],
+    /** Live session: session time (sec) when JS confirmed silence (amplitude < threshold for 150ms); cleared when band closes */
+    liveTtlBandStartTime: null,
+    /** True when we have seen asr_partial this turn (gate for silence detection) */
+    voiceTurnActive: false,
+    /** Session time (sec) of last asr_partial; used as fallback for TTL band start when JS silence not detected */
+    lastAsrPartialTime: null,
+    /** Earliest TTS segment start (session sec) this response; band end = this so we lock onto first audio, not a later chunk */
+    firstTtsPlayTimeThisResponse: null,
+    /** Earliest TTS segment start this response with amplitude > 0 (any signal = AI voice start) */
+    earliestTtsPlayTimeAboveThreshold: null,
+    /** Session time (sec) when amplitude first went below threshold; used to confirm 150ms silence */
+    voiceSilenceCandidate: null,
     /** Live session: CPU/GPU samples for bottom timeline lane: { t, cpu, gpu } (t = session-relative sec) */
     liveSystemStats: [],
     /** Live session: interval id for system stats polling; cleared on disconnect */
     liveSystemStatsPollIntervalId: null,
     /** Live session: have we set initial 15s zoom once */
     liveTimelineInitialZoomSet: false,
+
+    /** Server health: { llm: null | { ok, error? }, riva: null | { ok, error? } } from /api/health/llm and /api/health/riva */
+    serverHealth: { llm: null, riva: null },
 
     // UI state (for future persistence)
     ui: {
@@ -71,10 +90,24 @@ const uiSettings = {
     autoScrollChat: true,
     showTimestamps: false,
     showDebugInfo: false,
+    /** Show pipeline (ASR | LLM | TTS) badge in each session item in the left Sessions list */
+    showPipelineInSessionList: false,
+    /** Show "+ New Chat with Default Config" as the default action button (else "+ New Voice Chat") */
+    showNewChatWithDefaultConfig: false,
+    /** When false, do not record/save preview camera image in session history data */
+    recordPreviewInSessionHistory: true,
+    /** When true, timeline panel height follows layout (auto); when false, use timelineHeightPx */
+    timelineHeightAuto: true,
+    /** Default timeline view height in px when timelineHeightAuto is false (200–600) */
+    timelineHeightPx: 400,
     /** UI-only gain for user (mic) waveform on timeline: 1, 2, or 4 */
     userAudioGain: 2,
     /** UI-only gain for AI (TTS) waveform on timeline: 1, 2, or 4 */
-    aiAudioGain: 2
+    aiAudioGain: 2,
+    /** User (mic) voice threshold 0–100: amplitude >= this = voice, below = silence (TTL end-of-speech, hide low user bars during TTS). Default 5. */
+    userVoiceThreshold: 5,
+    /** Session directory override: '' = default (sessions), 'mock_sessions' = sample data. Sent to server via PATCH /api/app/session-dir. */
+    sessionDirOverride: ''
 };
 
 // Load UI settings from localStorage
@@ -99,7 +132,15 @@ function saveUISettings() {
 async function loadSessions() {
     console.log('loadSessions() called');
     try {
-        // In development, load from mock_sessions
+        // Apply saved session directory override so server uses the right dir (e.g. mock_sessions)
+        const override = (typeof uiSettings.sessionDirOverride === 'string' && uiSettings.sessionDirOverride) ? uiSettings.sessionDirOverride : '';
+        const payload = override ? { session_dir: override } : { session_dir: null };
+        await fetch('/api/app/session-dir', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
         console.log('Fetching from /api/sessions...');
         const response = await fetch('/api/sessions');
         console.log('Response received:', response.status);
@@ -138,22 +179,107 @@ function renderSessionList() {
     container.innerHTML = state.sessions.map((session, index) => {
         const metrics = session.metrics || {};
         const isActive = state.selectedSession?.session_id === session.session_id;
+        const sid = escapeHtml(session.session_id);
+        const safeName = escapeHtml(session.name);
+        const pipelineSummary = uiSettings.showPipelineInSessionList && session.config ? getPipelineSummaryHtml(session.config) : '';
 
         return `
-            <div class="session-item ${isActive ? 'active' : ''}"
-                 onclick="selectSession(${index})">
-                <div class="session-item-name">${escapeHtml(session.name)}</div>
-                <div class="session-item-meta">
-                    <span>${formatDate(session.created_at)}</span>
-                    <span>${metrics.total_turns || 0} turns</span>
+            <div class="session-item ${isActive ? 'active' : ''}" data-session-index="${index}">
+                <div class="session-item-body" onclick="selectSession(${index})">
+                    <div class="session-item-name">${safeName}</div>
+                    <div class="session-item-meta">
+                        <span>${formatDate(session.created_at)}</span>
+                        <span>${metrics.total_turns || 0} turns</span>
+                    </div>
+                    <div class="session-item-metrics">
+                        <span class="metric-badge">TTL: ${formatLatency(metrics.avg_ttl)}</span>
+                        <span class="metric-badge">${session.timeline?.length || 0} events</span>
+                    </div>
+                    ${pipelineSummary ? `<div class="session-item-pipeline">${pipelineSummary}</div>` : ''}
                 </div>
-                <div class="session-item-metrics">
-                    <span class="metric-badge">TTL: ${formatLatency(metrics.avg_ttl)}</span>
-                    <span class="metric-badge">${session.timeline?.length || 0} events</span>
+                <button type="button" class="session-item-menu-btn" data-session-id="${sid}" data-session-index="${index}" title="Session menu" aria-label="Session menu">
+                    <i data-lucide="ellipsis-vertical" class="lucide-inline"></i>
+                </button>
+                <div class="session-item-dropdown" data-session-id="${sid}" role="menu" aria-hidden="true">
+                    <button type="button" role="menuitem" data-action="rename"><i data-lucide="pencil" class="lucide-inline"></i> Rename</button>
+                    <button type="button" role="menuitem" data-action="delete" class="session-menu-delete"><i data-lucide="trash-2" class="lucide-inline"></i> Delete</button>
                 </div>
             </div>
         `;
     }).join('');
+
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
+function toggleSessionMenu(ev, sessionId, index) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    var menu = document.querySelector('.session-item-dropdown[data-session-id="' + sessionId + '"]');
+    var open = document.querySelector('.session-item-dropdown.open');
+    if (open && open !== menu) open.classList.remove('open');
+    if (menu) {
+        menu.classList.toggle('open');
+        menu.setAttribute('aria-hidden', menu.classList.contains('open') ? 'false' : 'true');
+    }
+}
+
+function closeSessionMenus() {
+    document.querySelectorAll('.session-item-dropdown.open').forEach(function (el) {
+        el.classList.remove('open');
+        el.setAttribute('aria-hidden', 'true');
+    });
+}
+
+function renameSession(sessionId) {
+    closeSessionMenus();
+    var session = state.sessions.find(function (s) { return s.session_id === sessionId; });
+    if (!session) return;
+    var name = window.prompt('Rename session', session.name || '');
+    if (name == null) return;
+    name = (name || '').trim();
+    if (!name) return;
+    fetch('/api/sessions/' + encodeURIComponent(sessionId), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name })
+    })
+        .then(function (r) {
+            if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || 'Rename failed'); });
+            return r.json();
+        })
+        .then(function (updated) {
+            session.name = updated.name;
+            if (state.selectedSession && state.selectedSession.session_id === sessionId) state.selectedSession.name = updated.name;
+            renderSessionList();
+            renderSessionDetail();
+        })
+        .catch(function (e) {
+            alert('Could not rename: ' + e.message);
+        });
+}
+
+function deleteSession(sessionId) {
+    closeSessionMenus();
+    if (!window.confirm('Delete this session? This cannot be undone.')) return;
+    fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' })
+        .then(function (r) {
+            if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || 'Delete failed'); });
+            if (state.selectedSession && state.selectedSession.session_id === sessionId) {
+                state.selectedSession = null;
+                state.isLiveSession = false;
+                state.sessionState = 'stopped';
+            }
+            return loadSessions();
+        })
+        .then(function () {
+            renderSessionList();
+            renderSessionDetail();
+            renderTimeline();
+            updateLiveSessionUI();
+        })
+        .catch(function (e) {
+            alert('Could not delete: ' + e.message);
+        });
 }
 
 function selectSession(index) {
@@ -192,10 +318,13 @@ function renderSessionDetail() {
 function updateConfigPanelState() {
     const panel = document.getElementById('config-panel');
     if (!panel) return;
+    const saveDefaultBtn = document.getElementById('save-default-config-btn');
     if (state.isLiveSession) {
         panel.classList.add('config-panel--editable');
+        if (saveDefaultBtn) saveDefaultBtn.disabled = false;
     } else {
         panel.classList.remove('config-panel--editable');
+        if (saveDefaultBtn) saveDefaultBtn.disabled = true;
     }
 }
 
@@ -211,7 +340,10 @@ function renderConfig() {
         contentEl.innerHTML = renderEditableConfigForm(tab, currentConfig[configKey], false);
         if (tab === 'llm') setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
+        if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
         if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
+        // Preload ASR/TTS model names so pipeline shows them even when user hasn't opened those tabs
+        setTimeout(function () { preloadASRModelName(); preloadTTSModelName(); }, 0);
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         return;
     }
@@ -255,7 +387,8 @@ const defaultConfig = {
         max_tokens: 2048,
         minimal_output: false,
         stream: true,
-        system_prompt: 'You are a helpful AI assistant.'
+        system_prompt: 'You are a helpful AI assistant.',
+        extra_request_body: ''
     },
     tts: {
         backend: 'riva',
@@ -274,12 +407,48 @@ const defaultConfig = {
         auto_start_recording: false,
         show_interim_asr: true,
         enable_timeline: true,
+        barge_in_enabled: false,
         log_level: 'info'
     }
 };
 
 // Current editable configuration (for new session)
 let currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+
+// Default config saved by user (for "New Voice Chat with Default Configuration" later)
+const DEFAULT_VOICE_CHAT_CONFIG_KEY = 'defaultVoiceChatConfig';
+
+function getDefaultConfig() {
+    try {
+        const saved = localStorage.getItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+        if (!saved) return null;
+        const parsed = JSON.parse(saved);
+        return { ...defaultConfig, ...parsed };
+    } catch (e) {
+        console.warn('Failed to load saved default config:', e);
+        return null;
+    }
+}
+
+function saveDefaultConfig() {
+    if (!state.isLiveSession) return;
+    try {
+        localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(currentConfig));
+        const btn = document.getElementById('save-default-config-btn');
+        if (btn) {
+            const origHTML = btn.innerHTML;
+            btn.innerHTML = 'Saved';
+            btn.disabled = true;
+            setTimeout(() => {
+                btn.innerHTML = origHTML;
+                btn.disabled = false;
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+            }, 1500);
+        }
+    } catch (e) {
+        console.error('Failed to save default config:', e);
+    }
+}
 
 function renderConfigSection(title, data) {
     const rows = Object.entries(data).map(([key, value]) => {
@@ -337,17 +506,17 @@ function renderASRConfig(config, readonly = false) {
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
 
-            <!-- Backend Tabs -->
-            <div class="backend-tabs ${readonly ? 'disabled' : ''}">
-                <button class="backend-tab ${config.backend === 'riva' ? 'active' : ''}"
+            <!-- Backend Tabs (traditional style: RIVA | REST API | Realtime API) -->
+            <div class="backend-tabs speech-api-tabs ${readonly ? 'disabled' : ''}">
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'riva' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('asr', 'backend', 'riva')">NVIDIA Riva</button>
-                <button class="backend-tab ${config.backend === 'openai' ? 'active' : ''}"
+                        onclick="updateConfig('asr', 'backend', 'riva')">NVIDIA<br>RIVA</button>
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('asr', 'backend', 'openai')">OpenAI REST API</button>
-                <button class="backend-tab ${config.backend === 'openai-realtime' ? 'active' : ''}"
+                        onclick="updateConfig('asr', 'backend', 'openai')">OpenAI<br>REST API</button>
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-realtime' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('asr', 'backend', 'openai-realtime')">OpenAI Realtime API</button>
+                        onclick="updateConfig('asr', 'backend', 'openai-realtime')">OpenAI<br>Realtime API</button>
             </div>
 
             <!-- Riva Settings (Live RIVA WebUI format) -->
@@ -369,12 +538,13 @@ function renderASRConfig(config, readonly = false) {
                 <div class="form-group">
                     <label for="asr-model-select"><i data-lucide="cpu" class="lucide-inline"></i> ASR Model</label>
                     ${readonly
-                        ? `<input type="text" id="asrModel" value="${config.model || 'Server default'}" readonly class="readonly-config-input">`
+                        ? `<input type="text" id="asrModel" value="${config.model || 'Default'}" readonly class="readonly-config-input">`
                         : `<select id="asr-model-select" class="config-select" onchange="updateConfig('asr', 'model', this.value)">
-                               <option value="">Server default</option>
+                               <option value="">Loading...</option>
                            </select>`
                     }
                     <small class="config-deployment-hint"><i data-lucide="info" class="lucide-inline"></i> ${readonly ? 'Set during session' : 'Queried from Riva server'}</small>
+                    ${!readonly ? '<div id="asr-model-default-hint" class="input-hint" style="margin-top: 4px; color: var(--text-secondary);"></div>' : ''}
                 </div>
 
                 <!-- Advanced ASR Settings (Expandable) -->
@@ -571,12 +741,14 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div class="form-group">
-                <label>Model</label>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;">Model</label>
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                </div>
                 <select ${disabled} id="llm-model-select" onchange="updateConfig('llm', 'model', this.value)">
                     <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : 'Loading...'}</option>
                 </select>
-                ${!readonly ? '<button type="button" class="btn-secondary" style="margin-top: 6px;" onclick="refreshLLMModels()">Refresh models</button>' : ''}
-                <div class="input-hint">Fetched from API Base URL; use Refresh if you added a model</div>
+                <div class="input-hint">Fetched from API Base URL; use reload icon if you added a model</div>
             </div>
 
             <div class="form-group">
@@ -597,7 +769,7 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <label class="checkbox-label">
                     <input type="checkbox" ${disabled} id="llm-minimal-output" ${config.minimal_output ? 'checked' : ''}
-                           onchange="updateConfig('llm', 'minimal_output', this.checked)">
+                           onchange="onLLMMinimalOutputChange(this.checked)">
                     Minimal output (no reasoning)
                 </label>
                 ${!readonly ? '<span class="input-hint">For Nemotron etc.: answer with only a number or few tokens; system prompt + max_tokens are adjusted</span>' : ''}
@@ -612,12 +784,43 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div class="form-group">
-                <label>System Prompt</label>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;">System Prompt</label>
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) updateConfig(\'llm\', \'system_prompt\', el.value)" title="Save"><i data-lucide="save" class="lucide-inline"></i></button>' : ''}
+                </div>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
                           onchange="updateConfig('llm', 'system_prompt', this.value)">${config.system_prompt}</textarea>
             </div>
+
+            <div class="form-group">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;">Extra request body (JSON)</label>
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-extra-request-body\'); if(el) updateConfig(\'llm\', \'extra_request_body\', el.value)" title="Save"><i data-lucide="save" class="lucide-inline"></i></button>' : ''}
+                </div>
+                <textarea id="llm-extra-request-body" ${disabled} rows="4" placeholder='{"chat_template_kwargs": {"enable_thinking": false}}'
+                          onchange="updateConfig('llm', 'extra_request_body', this.value)">${escapeHtml(config.extra_request_body || '')}</textarea>
+                ${!readonly ? '<span class="input-hint">Merged into the chat completion request. Leave empty or valid JSON.</span>' : ''}
+            </div>
         </div>
     `;
+}
+
+function onLLMMinimalOutputChange(checked) {
+    updateConfig('llm', 'minimal_output', checked);
+    if (checked) {
+        const base = { chat_template_kwargs: { enable_thinking: false } };
+        let current = {};
+        try {
+            const raw = (currentConfig.llm.extra_request_body || '').trim();
+            if (raw) current = JSON.parse(raw);
+        } catch (_) {}
+        const merged = { ...current };
+        merged.chat_template_kwargs = { ...(merged.chat_template_kwargs || {}), enable_thinking: false };
+        const jsonStr = JSON.stringify(merged, null, 2);
+        currentConfig.llm.extra_request_body = jsonStr;
+        const el = document.getElementById('llm-extra-request-body');
+        if (el) { el.value = jsonStr; }
+    }
 }
 
 function renderTTSConfig(config, readonly = false) {
@@ -628,33 +831,74 @@ function renderTTSConfig(config, readonly = false) {
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
 
-            <!-- Backend Tabs -->
-            <div class="backend-tabs ${readonly ? 'disabled' : ''}">
-                <button class="backend-tab ${config.backend === 'riva' ? 'active' : ''}"
+            <!-- Backend Tabs (traditional style: RIVA | REST API | Realtime API) -->
+            <div class="backend-tabs speech-api-tabs ${readonly ? 'disabled' : ''}">
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'riva' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('tts', 'backend', 'riva')">NVIDIA Riva</button>
-                <button class="backend-tab ${config.backend === 'openai' ? 'active' : ''}"
+                        onclick="updateConfig('tts', 'backend', 'riva')">NVIDIA<br>RIVA</button>
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('tts', 'backend', 'openai')">OpenAI TTS API</button>
+                        onclick="updateConfig('tts', 'backend', 'openai')">OpenAI<br>REST API</button>
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-realtime' ? 'active' : ''}"
+                        ${disabled}
+                        onclick="updateConfig('tts', 'backend', 'openai-realtime')">OpenAI<br>Realtime API</button>
             </div>
 
             <!-- Riva Settings -->
             <div class="backend-content" style="display: ${config.backend === 'riva' ? 'block' : 'none'}">
                 <div class="form-group">
-                    <label>Riva Server</label>
-                    <input type="text" ${disabled} value="${config.riva_server || 'localhost:50051'}"
-                           onchange="updateConfig('tts', 'riva_server', this.value)">
+                    <label>RIVA server</label>
+                    <input type="text" ${disabled} id="tts-riva-server" value="${config.riva_server || 'localhost:50051'}"
+                           onchange="updateConfig('tts', 'riva_server', this.value); if(!${readonly}) fetchTTSVoices(this.value);">
+                </div>
+
+                <div class="form-group">
+                    <label>TTS Model</label>
+                    ${readonly
+                        ? `<input type="text" ${disabled} value="${config.riva_model_name || 'Default'}" readonly class="readonly-config-input">`
+                        : `<select id="tts-model-select" class="config-select" onchange="updateConfig('tts', 'riva_model_name', this.value); if(!${readonly}) refreshPipelineDisplay();">
+                               <option value="">Default</option>
+                               ${(config.riva_model_names || []).map(m => '<option value="' + escapeHtml(m) + '"' + (m === (config.riva_model_name || '') ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('')}
+                           </select>`
+                    }
+                    ${!readonly ? '<span class="input-hint">Queried from RIVA server</span>' : ''}
+                </div>
+
+                <div class="form-group">
+                    <label>Language</label>
+                    <select ${disabled} id="tts-riva-language" onchange="updateConfig('tts', 'language', this.value); if(!${readonly}) fetchTTSVoices(document.getElementById('tts-riva-server')?.value);">
+                        <option value="en-US" ${config.language === 'en-US' ? 'selected' : ''}>English (US)</option>
+                        <option value="en-GB" ${config.language === 'en-GB' ? 'selected' : ''}>English (UK)</option>
+                        <option value="es-ES" ${config.language === 'es-ES' ? 'selected' : ''}>Spanish</option>
+                        <option value="fr-FR" ${config.language === 'fr-FR' ? 'selected' : ''}>French</option>
+                        <option value="de-DE" ${config.language === 'de-DE' ? 'selected' : ''}>German</option>
+                        <option value="ja-JP" ${config.language === 'ja-JP' ? 'selected' : ''}>Japanese</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
                     <label>Voice</label>
-                    <input type="text" ${disabled} value="${config.voice}"
-                           onchange="updateConfig('tts', 'voice', this.value)">
-                    ${!readonly ? '<span class="input-hint">Leave empty for default voice</span>' : ''}
+                    ${readonly
+                        ? `<input type="text" ${disabled} value="${config.voice || 'Default'}" readonly class="readonly-config-input">`
+                        : `<select id="tts-voice-select" class="config-select" onchange="updateConfig('tts', 'voice', this.value); updateTTSVoiceDefaultHint();">
+                               <option value="">Default</option>
+                           </select>`
+                    }
+                    ${!readonly ? '<span class="input-hint">Queried from RIVA (language-specific voices)</span>' : ''}
+                    ${!readonly ? '<div id="tts-voice-default-hint" class="input-hint" style="margin-top: 4px; color: var(--text-secondary);"></div>' : ''}
                 </div>
+
+                ${!readonly ? `
+                <div class="form-group">
+                    <button type="button" class="btn-secondary tts-riva-reload-btn" onclick="var s=document.getElementById(\'tts-riva-server\'); var l=document.getElementById(\'tts-riva-language\'); if(s) fetchTTSVoices(s.value, l?l.value:null);" title="Reload TTS model and voices from RIVA server">
+                        <i data-lucide="refresh-cw" class="lucide-inline"></i> Reload from RIVA server
+                    </button>
+                    <div id="tts-riva-reload-hint" class="input-hint" style="color: var(--text-secondary); margin-top: 4px;"></div>
+                </div>
+                ` : ''}
             </div>
 
-            <!-- OpenAI TTS Settings -->
+            <!-- OpenAI REST TTS Settings -->
             <div class="backend-content" style="display: ${config.backend === 'openai' ? 'block' : 'none'}">
                 <div class="form-group">
                     <label>API Endpoint</label>
@@ -683,8 +927,20 @@ function renderTTSConfig(config, readonly = false) {
                 </div>
             </div>
 
-            <!-- Common Settings -->
-            <div class="form-group">
+            <!-- OpenAI Realtime TTS (same session as Realtime ASR; optional overrides) -->
+            <div class="backend-content" style="display: ${config.backend === 'openai-realtime' ? 'block' : 'none'}">
+                <div class="form-group">
+                    <p class="input-hint" style="margin: 0;">TTS for OpenAI Realtime uses the same session as Realtime ASR. Voice and model are typically configured in the Realtime session.</p>
+                </div>
+                <div class="form-group">
+                    <label>WebSocket / API base</label>
+                    <input type="text" ${disabled} value="${config.realtime_url || config.openai_url || 'wss://api.openai.com/v1/realtime'}"
+                           onchange="updateConfig('tts', 'realtime_url', this.value); updateConfig('tts', 'openai_url', this.value)">
+                </div>
+            </div>
+
+            <!-- Common Settings (Language only for non-RIVA backends) -->
+            <div class="form-group" style="display: ${config.backend === 'riva' ? 'none' : 'block'}">
                 <label>Language</label>
                 <select ${disabled} value="${config.language}" onchange="updateConfig('tts', 'language', this.value)">
                     <option value="en-US" ${config.language === 'en-US' ? 'selected' : ''}>English (US)</option>
@@ -787,42 +1043,48 @@ function onDeviceListChange(type, value) {
     }
     updateDeviceIndicators();
     updateChatInputVisibility();
+    refreshPipelineDisplay();
     if (state.isLiveSession && state.sessionState === 'setup') startPreviewStream();
 }
 
 function renderAppConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
+    const overrideVal = (typeof uiSettings.sessionDirOverride === 'string' && uiSettings.sessionDirOverride) ? uiSettings.sessionDirOverride : '';
 
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
-            <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} id="app-auto-start" ${config.auto_start_recording ? 'checked' : ''}
-                           onchange="updateConfig('app', 'auto_start_recording', this.checked)">
-                    Auto-start Recording After Device Setup
-                </label>
-            </div>
 
+            ${!readonly ? `
             <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} id="app-show-interim" ${config.show_interim_asr ? 'checked' : ''}
-                           onchange="updateConfig('app', 'show_interim_asr', this.checked)">
-                    Show Interim ASR Results
-                </label>
+                <label for="app-session-dir-override"><i data-lucide="folder" class="lucide-inline"></i> Session directory</label>
+                <select id="app-session-dir-override" class="config-select" onchange="applySessionDirOverride(this.value)">
+                    <option value="" ${overrideVal === '' ? 'selected' : ''}>Default (sessions)</option>
+                    <option value="mock_sessions" ${overrideVal === 'mock_sessions' ? 'selected' : ''}>mock_sessions (sample data)</option>
+                </select>
+                <div class="input-hint">Where to load and save session JSON files. Change applies immediately; session list will refresh.</div>
             </div>
+            ` : ''}
 
             <div class="form-group">
                 <label class="checkbox-label">
                     <input type="checkbox" ${disabled} id="app-enable-timeline" ${config.enable_timeline ? 'checked' : ''}
                            onchange="updateConfig('app', 'enable_timeline', this.checked)">
-                    Enable Timeline Visualization
+                    Show Timeline Visualization
                 </label>
             </div>
 
             <div class="form-group">
-                <label>Log Level</label>
+                <label class="checkbox-label">
+                    <input type="checkbox" ${disabled} id="app-enable-barge-in" ${config.barge_in_enabled ? 'checked' : ''}
+                           onchange="updateConfig('app', 'barge_in_enabled', this.checked)">
+                    Enable barge-in
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label><i data-lucide="scroll-text" class="lucide-inline"></i> Log Level</label>
                 <select id="app-log-level" ${disabled} value="${config.log_level}" onchange="updateConfig('app', 'log_level', this.value)">
                     <option value="debug" ${config.log_level === 'debug' ? 'selected' : ''}>Debug</option>
                     <option value="info" ${config.log_level === 'info' ? 'selected' : ''}>Info</option>
@@ -833,6 +1095,29 @@ function renderAppConfig(config, readonly = false) {
             </div>
         </div>
     `;
+}
+
+async function applySessionDirOverride(value) {
+    const payload = (value === '' || value === 'mock_sessions') ? (value ? { session_dir: value } : { session_dir: null }) : null;
+    if (payload === null) return;
+    uiSettings.sessionDirOverride = value;
+    saveUISettings();
+    try {
+        const r = await fetch('/api/app/session-dir', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            console.error('Session dir override failed:', err);
+            return;
+        }
+        await loadSessions();
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    } catch (e) {
+        console.error('applySessionDirOverride failed:', e);
+    }
 }
 
 /**
@@ -984,6 +1269,9 @@ function updateConfig(section, key, value) {
     if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) {
         setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
     }
+    if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) {
+        setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+    }
     if (section === 'devices') {
         updateDeviceIndicators();
         updateChatInputVisibility();
@@ -997,6 +1285,7 @@ function updateConfig(section, key, value) {
     if (section === 'app' && key === 'enable_timeline') {
         updateTimelinePanelVisibility();
     }
+    refreshPipelineDisplay();
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 
     // Visual feedback
@@ -1053,24 +1342,216 @@ function refreshLLMModels() {
 async function fetchASRModels(server) {
     if (!server) return;
     const select = document.getElementById('asr-model-select');
+    const hint = document.getElementById('asr-model-default-hint');
     if (!select) return;
     select.innerHTML = '<option value="">Loading...</option>';
+    if (hint) hint.textContent = '';
     try {
         const r = await fetch('/api/asr/models?server=' + encodeURIComponent(server));
-        const data = await r.json();
+        const data = await r.json().catch(function () { return {}; });
         const models = (data && data.models) ? data.models : [];
-        const current = currentConfig.asr.model || '';
-        select.innerHTML = '<option value="">Server default</option>' +
-            (models.length ? models.map(m => '<option value="' + escapeHtml(m) + '"' + (m === current ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('') : '');
-        if (models.length && current && !models.includes(current)) {
-            currentConfig.asr.model = models[0];
-            select.value = models[0];
-        } else if (models.length && !current) {
-            select.value = '';
+        const defaultModel = (data && data.default_model) || (models[0] || '');
+
+        if (!r.ok) {
+            const errMsg = (data && data.error) ? data.error : ('Request failed: ' + r.status);
+            select.innerHTML = '<option value="">' + escapeHtml(errMsg) + '</option>';
+            if (hint) hint.textContent = errMsg;
+            return;
+        }
+
+        if (!models.length) {
+            select.innerHTML = '<option value="">No models found</option>';
+            currentConfig.asr.model = '';
+            if (hint) hint.textContent = 'No ASR models returned from RIVA server.';
+            return;
+        }
+
+        var current = currentConfig.asr.model || '';
+        if (!current || !models.includes(current)) {
+            current = defaultModel && models.includes(defaultModel) ? defaultModel : models[0];
+            currentConfig.asr.model = current;
+        }
+        select.innerHTML = models.map(m => '<option value="' + escapeHtml(m) + '"' + (m === current ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('');
+        select.value = current;
+        if (hint && current === defaultModel) hint.textContent = 'Default model from RIVA server.';
+        refreshPipelineDisplay();
+    } catch (e) {
+        select.innerHTML = '<option value="">Error loading models</option>';
+        if (hint) hint.textContent = 'Network error: ' + (e.message || String(e));
+        console.error('fetchASRModels failed:', e);
+    }
+}
+
+async function fetchTTSVoices(server, language) {
+    if (!server) return;
+    language = language || currentConfig.tts.language || 'en-US';
+    const voiceSelect = document.getElementById('tts-voice-select');
+    const modelSelect = document.getElementById('tts-model-select');
+    const reloadHint = document.getElementById('tts-riva-reload-hint');
+    if (!voiceSelect) return;
+    voiceSelect.innerHTML = '<option value="">Loading...</option>';
+    if (modelSelect) modelSelect.innerHTML = '<option value="">Loading...</option>';
+    if (reloadHint) reloadHint.textContent = '';
+    try {
+        const r = await fetch('/api/tts/voices?server=' + encodeURIComponent(server) + '&language=' + encodeURIComponent(language));
+        const data = await r.json().catch(function () { return {}; });
+        const voices = (data && data.voices) ? data.voices : [];
+
+        if (!r.ok) {
+            const errMsg = (data && data.error) ? data.error : ('Request failed: ' + r.status);
+            voiceSelect.innerHTML = '<option value="">Default</option><option value="">' + escapeHtml(errMsg) + '</option>';
+            if (modelSelect) modelSelect.innerHTML = '<option value="">Default</option><option value="">' + escapeHtml(errMsg) + '</option>';
+            if (reloadHint) reloadHint.textContent = errMsg;
+            return;
+        }
+
+        // Derive model from first voice if API didn't return model_name (e.g. older Riva or different proto)
+        var modelName = data.model_name != null ? data.model_name : (data.model_names && data.model_names[0]) || null;
+        var modelNames = (data.model_names && data.model_names.length) ? data.model_names : (modelName ? [modelName] : []);
+        if (!modelName && voices.length && voices[0]) {
+            var v0 = voices[0];
+            modelName = (typeof v0 === 'object' && v0.model) ? v0.model : null;
+            if (modelName) modelNames = [modelName];
+        }
+
+        if (modelName != null || modelNames.length) {
+            currentConfig.tts.riva_model_name = modelName || modelNames[0] || null;
+            currentConfig.tts.riva_model_names = modelNames.length ? modelNames : (modelName ? [modelName] : []);
+        }
+
+        if (modelSelect && currentConfig.tts.riva_model_names && currentConfig.tts.riva_model_names.length) {
+            const currentModel = currentConfig.tts.riva_model_name || '';
+            modelSelect.innerHTML = '<option value="">Default</option>' +
+                currentConfig.tts.riva_model_names.map(m => '<option value="' + escapeHtml(m) + '"' + (m === currentModel ? ' selected' : '') + '>' + escapeHtml(m) + '</option>').join('');
+        } else if (modelSelect) {
+            modelSelect.innerHTML = '<option value="">Default</option>' +
+                (currentConfig.tts.riva_model_name ? '<option value="' + escapeHtml(currentConfig.tts.riva_model_name) + '" selected>' + escapeHtml(currentConfig.tts.riva_model_name) + '</option>' : '');
+        }
+        const current = currentConfig.tts.voice || '';
+        voiceSelect.innerHTML = '<option value="">Default</option>' +
+            voices.map(v => {
+                const name = (typeof v === 'string') ? v : (v.name || v.id || String(v));
+                return '<option value="' + escapeHtml(name) + '"' + (name === current ? ' selected' : '') + '>' + escapeHtml(name) + '</option>';
+            }).join('');
+        if (voices.length && current && !voices.some(v => ((typeof v === 'string') ? v : v.name) === current)) {
+            voiceSelect.value = '';
+            currentConfig.tts.voice = '';
+        } else if (!current) {
+            voiceSelect.value = '';
+        }
+        updateTTSVoiceDefaultHint();
+        refreshPipelineDisplay();
+    } catch (e) {
+        voiceSelect.innerHTML = '<option value="">Default</option><option value="">Error loading voices</option>';
+        if (modelSelect) modelSelect.innerHTML = '<option value="">Default</option><option value="">Error loading models</option>';
+        if (reloadHint) reloadHint.textContent = 'Network error: ' + (e.message || String(e));
+        console.error('fetchTTSVoices failed:', e);
+    }
+}
+
+/** Check Ollama (LLM) and Riva (ASR/TTS) server health; updates state.serverHealth and UI. */
+async function checkServersHealth() {
+    var apiBase = (currentConfig.llm && (currentConfig.llm.api_base || (currentConfig.llm.ollama_url && (currentConfig.llm.ollama_url.replace(/\/v1\/?$/, '') + '/v1')))) || 'http://localhost:11434/v1';
+    var rivaServer = (currentConfig.asr && (currentConfig.asr.server || currentConfig.asr.riva_server)) || (currentConfig.tts && (currentConfig.tts.server || currentConfig.tts.riva_server)) || 'localhost:50051';
+    state.serverHealth = { llm: null, riva: null };
+    updateServerHealthUI();
+    try {
+        var llmRes = await fetch(getApiBase() + '/api/health/llm?api_base=' + encodeURIComponent(apiBase));
+        var llmData = await llmRes.json().catch(function () { return { ok: false, error: 'Invalid response' }; });
+        state.serverHealth.llm = llmData.ok ? { ok: true } : { ok: false, error: llmData.error || 'Unknown error' };
+    } catch (e) {
+        state.serverHealth.llm = { ok: false, error: e.message || String(e) };
+    }
+    try {
+        var rivaRes = await fetch(getApiBase() + '/api/health/riva?server=' + encodeURIComponent(rivaServer));
+        var rivaData = await rivaRes.json().catch(function () { return { ok: false, error: 'Invalid response' }; });
+        state.serverHealth.riva = rivaData.ok ? { ok: true } : { ok: false, error: rivaData.error || 'Unknown error' };
+    } catch (e) {
+        state.serverHealth.riva = { ok: false, error: e.message || String(e) };
+    }
+    updateServerHealthUI();
+}
+
+function updateServerHealthUI() {
+    var row = document.getElementById('server-health-row');
+    var statusEl = document.getElementById('server-health-status');
+    if (!row || !statusEl) return;
+    var llm = state.serverHealth.llm;
+    var riva = state.serverHealth.riva;
+    var parts = [];
+    if (llm === null) parts.push('LLM: …');
+    else if (llm.ok) parts.push('LLM: ✓');
+    else parts.push('LLM: ✗ ' + (llm.error || '').slice(0, 40));
+    if (riva === null) parts.push('Riva: …');
+    else if (riva.ok) parts.push('Riva: ✓');
+    else parts.push('Riva: ✗ ' + (riva.error || '').slice(0, 40));
+    statusEl.textContent = parts.join('  ');
+}
+
+/** Preload ASR model name from API into currentConfig so pipeline shows it without opening ASR tab. */
+async function preloadASRModelName() {
+    if (!state.isLiveSession || !currentConfig.asr) return;
+    if (currentConfig.asr.backend !== 'riva' && currentConfig.asr.scheme !== 'riva') return;
+    var server = currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051';
+    if (!server) return;
+    try {
+        var r = await fetch('/api/asr/models?server=' + encodeURIComponent(server));
+        var data = await r.json().catch(function () { return {}; });
+        var models = (data && data.models) ? data.models : [];
+        var defaultModel = (data && data.default_model) || (models[0] || '');
+        if (!r.ok || !models.length) return;
+        var current = currentConfig.asr.model || '';
+        if (!current || !models.includes(current)) {
+            current = defaultModel && models.includes(defaultModel) ? defaultModel : models[0];
+            currentConfig.asr.model = current;
+        }
+        refreshPipelineDisplay();
+    } catch (e) {
+        // Silent; pipeline will show fallback label
+    }
+}
+
+/** Preload TTS model name from API into currentConfig so pipeline shows it without opening TTS tab. */
+async function preloadTTSModelName() {
+    if (!state.isLiveSession || !currentConfig.tts) return;
+    if (currentConfig.tts.backend !== 'riva' && currentConfig.tts.scheme !== 'riva') return;
+    var server = currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051';
+    if (!server) return;
+    var language = currentConfig.tts.language || 'en-US';
+    try {
+        var r = await fetch('/api/tts/voices?server=' + encodeURIComponent(server) + '&language=' + encodeURIComponent(language));
+        var data = await r.json().catch(function () { return {}; });
+        var voices = (data && data.voices) ? data.voices : [];
+        if (!r.ok) return;
+        var modelName = data.model_name != null ? data.model_name : (data.model_names && data.model_names[0]) || null;
+        var modelNames = (data.model_names && data.model_names.length) ? data.model_names : (modelName ? [modelName] : []);
+        if (!modelName && voices.length && voices[0]) {
+            var v0 = voices[0];
+            modelName = (typeof v0 === 'object' && v0.model) ? v0.model : null;
+            if (modelName) modelNames = [modelName];
+        }
+        if (modelName != null || modelNames.length) {
+            currentConfig.tts.riva_model_name = modelName || modelNames[0] || null;
+            currentConfig.tts.riva_model_names = modelNames.length ? modelNames : (modelName ? [modelName] : []);
+            refreshPipelineDisplay();
         }
     } catch (e) {
-        select.innerHTML = '<option value="">Server default</option><option value="">Error loading models</option>';
-        console.error('fetchASRModels failed:', e);
+        // Silent; pipeline will show fallback label
+    }
+}
+
+/** Show which voice is used when "Default" is selected, or "Using: X" when a specific voice is chosen. */
+function updateTTSVoiceDefaultHint() {
+    const sel = document.getElementById('tts-voice-select');
+    const hint = document.getElementById('tts-voice-default-hint');
+    if (!sel || !hint) return;
+    const val = sel.value;
+    if (val === '') {
+        var firstVoice = sel.options.length > 1 ? sel.options[1] : null;
+        hint.textContent = firstVoice ? 'Default voice: ' + firstVoice.text : '';
+    } else {
+        var chosen = sel.options[sel.selectedIndex];
+        hint.textContent = chosen ? 'Using: ' + chosen.text : '';
     }
 }
 
@@ -1144,12 +1625,9 @@ function renderChatHistory() {
                 ? `<span class="chat-meta">${formatTimestamp(msg.timestamp)}</span>`
                 : '';
             return `
-                <div class="chat-message ${isUser ? 'user' : 'ai'}">
+                <div class="chat-bubble ${isUser ? 'user' : 'ai'}">
                     <div class="chat-avatar">${isUser ? '<i data-lucide="user" class="lucide-inline"></i>' : '<i data-lucide="bot" class="lucide-inline"></i>'}</div>
-                    <div class="chat-bubble">
-                        <div class="chat-text">${escapeHtml(msg.content || '...')}</div>
-                        ${ts}
-                    </div>
+                    <div class="chat-content"><div class="chat-text">${escapeHtml(msg.content || '...')}</div>${ts}</div>
                 </div>
             `;
         }).join('');
@@ -1162,19 +1640,13 @@ function renderChatHistory() {
                 `<span class="chat-meta">TTL: ${formatLatency(turn.latencies.ttl)}</span>` : '';
 
             return `
-                <div class="chat-message user">
+                <div class="chat-bubble user">
                     <div class="chat-avatar"><i data-lucide="user" class="lucide-inline"></i></div>
-                    <div class="chat-bubble">
-                        <div class="chat-text">${escapeHtml(turn.user_transcript || '...')}</div>
-                        ${userConfidence}
-                    </div>
+                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.user_transcript || '...')}</div>${userConfidence}</div>
                 </div>
-                <div class="chat-message ai">
+                <div class="chat-bubble ai">
                     <div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div>
-                    <div class="chat-bubble">
-                        <div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>
-                        ${turnMetrics}
-                    </div>
+                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${turnMetrics}</div>
                 </div>
             `;
         }).join('');
@@ -1249,7 +1721,7 @@ function renderTimelineMetrics() {
     `;
 }
 
-/** Minimize or restore timeline panel based on Configuration > App > Enable Timeline Visualization. */
+/** Minimize or restore timeline panel based on Configuration > App > Show Timeline Visualization. */
 function updateTimelinePanelVisibility() {
     const panel = document.getElementById('timeline-panel');
     if (!panel) return;
@@ -1335,7 +1807,7 @@ function renderTimeline() {
     const PADDING_TOP = 20;
     const PADDING_LEFT = 100;
     const PADDING_RIGHT = 20;
-    const TIME_LABEL_HEIGHT = 25;
+    const TIME_LABEL_HEIGHT = 30; /* Space for x-axis line + time labels (0s, 1s, …) so they are not cut off */
 
     const laneColors = {
         system: getComputedStyle(document.documentElement).getPropertyValue('--timeline-system').trim() || '#9C27B0',
@@ -1365,8 +1837,16 @@ function renderTimeline() {
     const baseHeight = Math.max(20, (laneAreaHeight - totalGaps) / totalUnits);
     const LANE_HEIGHTS = laneUnits.map(u => u * baseHeight);
 
-    // Calculate time range with zoom
+    // Calculate time range with zoom (when stopped, include waveform data so we don't cut after last tts_complete)
     const maxTimeFromEvents = timeline.length ? Math.max(0.1, ...timeline.map(e => e.timestamp || e.end_time || 0)) : 0.1;
+    let maxTimeFromWaveforms = maxTimeFromEvents;
+    if (hasStoppedLiveData) {
+        const ah = state.liveAudioAmplitudeHistory || [];
+        const th = state.liveTtsAmplitudeHistory || [];
+        const fromAh = ah.length ? Math.max(...ah.map(s => s.timestamp != null ? s.timestamp : s[0])) : 0;
+        const fromTh = th.length ? Math.max(...th.map(s => s.endTime != null ? s.endTime : 0)) : 0;
+        maxTimeFromWaveforms = Math.max(maxTimeFromEvents, fromAh, fromTh, 0.1);
+    }
     const viewportWidth = width - PADDING_LEFT - PADDING_RIGHT;
     const LIVE_WINDOW_SEC = 15;
     let baseTimeScale, timeScale, visibleTimeWindow, maxTime;
@@ -1381,7 +1861,7 @@ function renderTimeline() {
         timeScale = baseTimeScale;
         visibleTimeWindow = LIVE_WINDOW_SEC;
     } else {
-        maxTime = maxTimeFromEvents;
+        maxTime = maxTimeFromWaveforms;
         state.timelineDuration = maxTime;
         baseTimeScale = viewportWidth / maxTime;
         timeScale = baseTimeScale * state.timelineZoom;
@@ -1419,15 +1899,6 @@ function renderTimeline() {
     const getLaneY = (i) => PADDING_TOP + laneYOffsets[i];
     const getLaneHeight = (i) => LANE_HEIGHTS[i];
 
-    // Draw lane labels
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
-    ctx.font = 'bold 11px sans-serif';
-    ctx.textAlign = 'right';
-    lanes.forEach((lane, i) => {
-        const y = getLaneY(i) + getLaneHeight(i) / 2;
-        ctx.fillText(laneLabels[lane], PADDING_LEFT - 10, y + 4);
-    });
-
     // Draw lane backgrounds (semi-transparent so grid lines show through)
     lanes.forEach((lane, i) => {
         const y = getLaneY(i);
@@ -1442,10 +1913,40 @@ function renderTimeline() {
     const liveTtsSegments = (inLive || hasStoppedLiveData) ? state.liveTtsAmplitudeHistory : null;
     const liveSystemStats = (inLive || hasStoppedLiveData) ? state.liveSystemStats : (state.selectedSession && state.selectedSession.system_stats) || null;
     const replayTtsSegments = (!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.tts_playback_segments) ? state.selectedSession.tts_playback_segments : null;
+    const rawReplayUserAmplitude = (!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.audio_amplitude_history) ? state.selectedSession.audio_amplitude_history : null;
+    const replayAudioAmplitudeHistory = rawReplayUserAmplitude;
+    const replayUserAmplitudeForTtl = (!inLive && !hasStoppedLiveData && state.selectedSession && timeline && timeline.length) ? buildMergedUserAmplitudeForReplay(rawReplayUserAmplitude || [], timeline) : rawReplayUserAmplitude;
     const liveSessionTime = (state.liveSessionStartTime > 0) ? (Date.now() / 1000 - state.liveSessionStartTime) : null;
     drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP, PADDING_LEFT,
                        PADDING_RIGHT, width, timeScale, state.timelineOffset, laneColors, combineSpeechLanes,
-                       inLive, hasStoppedLiveData, liveAmplitude, liveTtsSegments, liveSystemStats, replayTtsSegments, liveSessionTime);
+                       inLive, hasStoppedLiveData, liveAmplitude, liveTtsSegments, liveSystemStats, replayTtsSegments, replayAudioAmplitudeHistory, replayUserAmplitudeForTtl, liveSessionTime);
+
+    // Overlay over label strip (0..PADDING_LEFT): graph shows faintly behind; labels drawn once on top
+    const labelFadeWidth = PADDING_LEFT;
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+        (!document.documentElement.getAttribute('data-theme') && !window.matchMedia('(prefers-color-scheme: light)').matches);
+    const grad = ctx.createLinearGradient(0, 0, labelFadeWidth, 0);
+    if (isDark) {
+        grad.addColorStop(0, 'rgba(12,12,12,0.96)');
+        grad.addColorStop(0.75, 'rgba(18,18,18,0.92)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.5)');
+    } else {
+        grad.addColorStop(0, 'rgba(248,248,248,0.94)');
+        grad.addColorStop(0.75, 'rgba(252,252,252,0.88)');
+        grad.addColorStop(1, 'rgba(255,255,255,0.5)');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, PADDING_TOP, labelFadeWidth, totalLanesHeight);
+    // Draw lane labels once (white on dark theme, dark on light theme); extra padding so transition looks natural
+    const labelRightPadding = 24;
+    ctx.fillStyle = isDark ? 'rgba(255,255,255,0.95)' : 'rgba(28,28,28,0.92)';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    lanes.forEach((lane, i) => {
+        const y = getLaneY(i) + getLaneHeight(i) / 2;
+        ctx.fillText(laneLabels[lane], PADDING_LEFT - labelRightPadding, y);
+    });
 
     // Draw time axis at bottom of lanes
     ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border-color');
@@ -1471,6 +1972,24 @@ function renderTimeline() {
 
     // Update horizontal scrollbar
     updateTimelineScrollbar(maxTime, visibleTimeWindow);
+}
+
+// Merge session audio_amplitude_history with timeline user amplitude events so replay has full coverage (fixes trimmed history and consistent density)
+function buildMergedUserAmplitudeForReplay(history, timeline) {
+    if (!timeline || !timeline.length) return history || [];
+    const userEvents = timeline.filter(function (e) {
+        return e.event_type === 'audio_amplitude' && e.source !== 'tts' && e.source !== 'ai';
+    });
+    if (!userEvents.length) return history || [];
+    const fromTimeline = userEvents.map(function (e) {
+        var a = e.amplitude != null ? Number(e.amplitude) : 0;
+        if (a > 0 && a < 1) a = a * 100;
+        return { timestamp: e.timestamp != null ? Number(e.timestamp) : 0, amplitude: a };
+    });
+    const getT = function (s) { return s.timestamp != null ? s.timestamp : s[0]; };
+    const combined = (history && history.length ? history.slice() : []).concat(fromTimeline);
+    combined.sort(function (a, b) { return getT(a) - getT(b); });
+    return combined;
 }
 
 // Get amplitude at time t from live history (nearest sample or linear interpolate)
@@ -1501,11 +2020,136 @@ function getTtsAmplitudeAtTime(segments, t) {
     return 0;
 }
 
+/** Compute TTL bands from stored amplitude + TTS playback (for recorded session replay). End-of-speech constrained to between first partial and final (before LLM). AI voice start = first TTS segment with amplitude > 0 (any signal). */
+function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
+    if (!ttsSegments || !ttsSegments.length) return [];
+    const getT = (s) => (s.timestamp != null ? s.timestamp : s[0]);
+    const getA = (s) => (s.amplitude != null ? s.amplitude : s[1]);
+    const userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
+    const SILENCE_CONFIRM_SEC = 0.15;
+    const silenceStarts = [];
+    if (amplitudeHistory && amplitudeHistory.length) {
+        let lastVoiceTime = -1;
+        let runStartIdx = -1;
+        for (let i = 0; i < amplitudeHistory.length; i++) {
+            const t = getT(amplitudeHistory[i]);
+            const a = getA(amplitudeHistory[i]);
+            if (a >= userTh) {
+                lastVoiceTime = t;
+                runStartIdx = -1;
+                continue;
+            }
+            if (runStartIdx === -1) runStartIdx = i;
+            const runStartT = getT(amplitudeHistory[runStartIdx]);
+            if (t - runStartT >= SILENCE_CONFIRM_SEC && lastVoiceTime >= 0 && runStartT > lastVoiceTime) {
+                silenceStarts.push(runStartT);
+                lastVoiceTime = -1;
+                runStartIdx = -1;
+            }
+        }
+    }
+    // First playback time per turn (one per response): group by gap, then apply amplitude threshold
+    const segments = ttsSegments.slice().filter(function (s) { return typeof s.startTime === 'number' && typeof s.endTime === 'number'; }).sort(function (a, b) { return a.startTime - b.startTime; });
+    const GAP_BETWEEN_RESPONSES_SEC = 1.5;
+    const responseGroups = [];
+    let currentGroup = [];
+    for (let i = 0; i < segments.length; i++) {
+        const start = segments[i].startTime;
+        const prevEnd = i > 0 ? segments[i - 1].endTime : -1;
+        if (i === 0 || (start - prevEnd) >= GAP_BETWEEN_RESPONSES_SEC) {
+            if (currentGroup.length) { responseGroups.push(currentGroup); currentGroup = []; }
+        }
+        currentGroup.push(segments[i]);
+    }
+    if (currentGroup.length) responseGroups.push(currentGroup);
+    // Per-turn window: end-of-speech must be between first partial and final (before LLM / first AI voice)
+    const turnWindows = [];
+    if (timeline && timeline.length) {
+        const finals = timeline.filter(function (e) { return e.event_type === 'asr_final'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        const partials = timeline.filter(function (e) { return e.event_type === 'asr_partial'; });
+        for (let i = 0; i < finals.length; i++) {
+            const asrFinalTime = finals[i].timestamp != null ? Number(finals[i].timestamp) : null;
+            if (asrFinalTime == null || isNaN(asrFinalTime)) continue;
+            const prevFinalTime = i > 0 && finals[i - 1].timestamp != null ? Number(finals[i - 1].timestamp) : 0;
+            const turnPartials = partials.filter(function (p) {
+                const pt = p.timestamp != null ? Number(p.timestamp) : null;
+                return pt != null && !isNaN(pt) && pt > prevFinalTime && pt <= asrFinalTime;
+            });
+            const firstPartialTime = turnPartials.length ? Math.min.apply(null, turnPartials.map(function (p) { return Number(p.timestamp); })) : (asrFinalTime - 0.3);
+            turnWindows.push({ firstPartialTime: firstPartialTime, asrFinalTime: asrFinalTime });
+        }
+    }
+    // First TTS sound per turn: prefer timeline's first audio_amplitude (source tts) at 6.69s; else first segment with signal or first chunk
+    const firstTtsAmplitudeByTurn = [];
+    if (timeline && timeline.length && turnWindows.length) {
+        const ttsAmpEvents = timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        for (var ti = 0; ti < turnWindows.length; ti++) {
+            const win = turnWindows[ti];
+            const nextFinal = turnWindows[ti + 1] ? turnWindows[ti + 1].asrFinalTime : Infinity;
+            const firstInWindow = ttsAmpEvents.find(function (e) {
+                var t = e.timestamp != null ? Number(e.timestamp) : NaN;
+                return !isNaN(t) && t > win.asrFinalTime && t < nextFinal;
+            });
+            firstTtsAmplitudeByTurn.push(firstInWindow ? Number(firstInWindow.timestamp) : null);
+        }
+    }
+    // Segment-based fallback: first chunk with amplitude > 0 or first chunk
+    const firstPlayPerTurn = responseGroups.map(function (group, k) {
+        var firstChunkTime = group[0].startTime;
+        const withSignal = group.filter(function (s) { return (s.amplitude != null ? s.amplitude : 0) > 0; });
+        var segmentTime = withSignal.length ? Math.min(firstChunkTime, Math.min.apply(null, withSignal.map(function (s) { return s.startTime; }))) : firstChunkTime;
+        var timelineFirst = firstTtsAmplitudeByTurn[k];
+        return (timelineFirst != null && timelineFirst > 0) ? Math.min(timelineFirst, segmentTime) : segmentTime;
+    });
+    // One band per turn: S must be in (firstPartialTime, asrFinalTime]; if no timeline, use any S < T
+    const bands = [];
+    const usedSilence = {};
+    for (let k = 0; k < firstPlayPerTurn.length; k++) {
+        const T = firstPlayPerTurn[k];
+        const win = turnWindows[k];
+        const minS = win ? win.firstPartialTime : 0;
+        const maxS = win ? win.asrFinalTime : T;
+        let bestS = -1;
+        let bestJ = -1;
+        for (let j = 0; j < silenceStarts.length; j++) {
+            if (usedSilence[j]) continue;
+            const S = silenceStarts[j];
+            if (S < T && S > bestS && S > minS && S <= maxS) { bestS = S; bestJ = j; }
+        }
+        if (bestJ >= 0) {
+            usedSilence[bestJ] = true;
+            bands.push({ start: bestS, end: T, ttlMs: Math.round((T - bestS) * 1000) });
+        } else if (win && maxS < T) {
+            // Fallback: place band start between partial and final (e.g. 150ms before final)
+            const fallbackS = Math.max(minS, maxS - 0.15);
+            bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
+        } else {
+            // No turn window for this index (e.g. fewer asr_finals than TTS response groups) or maxS >= T: still show band so 2nd+ turns get a red band
+            const fallbackS = Math.max(0, T - 0.5);
+            bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
+        }
+    }
+    // If we have more turns (asr_finals) than TTS segment groups (e.g. first turn's segments were trimmed), add bands for the missing early turns from timeline so every turn gets a red band
+    if (turnWindows.length > bands.length && firstTtsAmplitudeByTurn.length >= turnWindows.length) {
+        var missingCount = turnWindows.length - bands.length;
+        for (var ti = 0; ti < missingCount; ti++) {
+            const T = firstTtsAmplitudeByTurn[ti];
+            const win = turnWindows[ti];
+            if (T == null || T <= 0 || !win) continue;
+            const fallbackS = Math.max(win.firstPartialTime, win.asrFinalTime - 0.15);
+            bands.unshift({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
+        }
+    }
+    return bands;
+}
+
 // Draw timeline events with support for rectangles, waveforms, and points
 function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP,
                             PADDING_LEFT, PADDING_RIGHT, width, timeScale, timelineOffset,
-                            laneColors, combineSpeechLanes, inLive, hasStoppedLiveData, liveAmplitudeHistory, liveTtsSegments, liveSystemStats, replayTtsSegments, liveSessionTime) {
+                            laneColors, combineSpeechLanes, inLive, hasStoppedLiveData, liveAmplitudeHistory, liveTtsSegments, liveSystemStats, replayTtsSegments, replayAudioAmplitudeHistory, replayUserAmplitudeForTtl, liveSessionTime) {
     if (replayTtsSegments === undefined) replayTtsSegments = null;
+    if (replayAudioAmplitudeHistory === undefined) replayAudioAmplitudeHistory = null;
+    if (replayUserAmplitudeForTtl === undefined) replayUserAmplitudeForTtl = replayAudioAmplitudeHistory;
     if (hasStoppedLiveData === undefined) hasStoppedLiveData = false;
     if (liveSessionTime === undefined) liveSessionTime = null;
     const drawLiveWaveforms = inLive || hasStoppedLiveData;
@@ -1620,11 +2264,11 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const speechEnd = speechEnds[turnIdx];
         const asrFinal = asrFinals[turnIdx];
 
-        // Find first and last partial for this turn
+        // Find first and last partial for this turn (sort by timestamp so first/last are correct)
         const turnPartials = asrPartials.filter(p =>
             p.timestamp >= speechStart.timestamp &&
             (!asrFinal || p.timestamp <= asrFinal.timestamp)
-        );
+        ).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         const firstPartial = turnPartials[0];
         const lastPartial = turnPartials[turnPartials.length - 1];
 
@@ -1664,23 +2308,17 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             return speechEnd;
         })();
 
-        if (firstPartial && (lastPartial || turnSpeechEnd)) {
-            // Phase 2: Active ASR (partials coming in, user still speaking)
-            const activeEnd = turnSpeechEnd ?
-                Math.min(turnSpeechEnd.timestamp, (lastPartial || firstPartial).timestamp) :
-                (lastPartial || firstPartial).timestamp;
-
-            if (activeEnd > firstPartial.timestamp) {
-                inferredRectangles.push({
-                    event_type: 'asr_active',
-                    lane: 'speech',
-                    start_time: firstPartial.timestamp,
-                    end_time: activeEnd,
-                    timestamp: firstPartial.timestamp,
-                    phase: 'active-asr',  // For styling
-                    inferred: true
-                });
-            }
+        // Phase 2: Blue = first partial → last partial (active ASR; partials coming in)
+        if (firstPartial && lastPartial && lastPartial.timestamp > firstPartial.timestamp) {
+            inferredRectangles.push({
+                event_type: 'asr_active',
+                lane: 'speech',
+                start_time: firstPartial.timestamp,
+                end_time: lastPartial.timestamp,
+                timestamp: firstPartial.timestamp,
+                phase: 'active-asr',
+                inferred: true
+            });
         }
 
         // Phase 3: Last partial → final transcript (light blue)
@@ -1752,16 +2390,18 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     });
 
-    // Debug logging
-    console.log('Timeline rendering:', {
-        totalEvents: timeline.length,
-        inferredRectangles: inferredRectangles.length,
-        explicitRectangles: rectangleEvents.length - inferredRectangles.length,
-        totalRectangles: rectangleEvents.length,
-        waveforms: waveformEvents.length,
-        points: pointEvents.length,
-        sampleInferred: inferredRectangles[0]
-    });
+    // Debug logging only when debug panel is on (avoid 60fps log spam during live session which blocks main thread and prevents ASR/timeline from updating)
+    if (uiSettings.showDebugInfo) {
+        console.log('Timeline rendering:', {
+            totalEvents: timeline.length,
+            inferredRectangles: inferredRectangles.length,
+            explicitRectangles: rectangleEvents.length - inferredRectangles.length,
+            totalRectangles: rectangleEvents.length,
+            waveforms: waveformEvents.length,
+            points: pointEvents.length,
+            sampleInferred: inferredRectangles[0]
+        });
+    }
 
     // 1. Draw rectangles first (background layer)
     rectangleEvents.forEach(event => {
@@ -1892,12 +2532,19 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         });
     }
 
+    // --- AUDIO lane: two rendering paths (same for live and saved session) ---
+    // Dense: bars at fixed tStep (0.025s) from amplitude history (user) or segment list (AI). Source: live = state
+    //   .liveAudioAmplitudeHistory / .liveTtsAmplitudeHistory; replay = session.audio_amplitude_history /
+    //   session.tts_playback_segments. User gain (×1/×2/×4) and AI gain apply to all dense and sparse bars.
+    // Sparse: one bar per timeline event that has amplitude or render_type === 'waveform' (waveformEvents).
+    // AI/TTS is primarily drawn from the dense segment list (live or replayed); sparse waveform events are an
+    // additional layer when the timeline contains point-style waveform events.
     // 2. Draw waveforms (audio lane visualization)
     // Replay: build TTS segments and ASR final times for smarter user (green) waveform visibility
     const ttsStartsSorted = timeline.filter(e => e.event_type === 'tts_start').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const ttsCompletesSorted = timeline.filter(e => e.event_type === 'tts_complete').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const ttsTimeRanges = ttsStartsSorted.map((s, i) => ({ start: s.timestamp || 0, end: (ttsCompletesSorted[i] && (ttsCompletesSorted[i].timestamp || 0)) || (s.timestamp || 0) }));
-    const USER_HIDE_DURING_TTS_THRESHOLD = 5;   // only hide user bar during TTS if amplitude is below this (0-100); show if >= so interruptions are visible
+    const userVoiceTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
     function isInsideTtsSegment(t) {
         for (let i = 0; i < ttsTimeRanges.length; i++) {
             const r = ttsTimeRanges[i];
@@ -1918,7 +2565,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
 
         if (!inLive && !hasStoppedLiveData && isUser) {
             // During TTS: hide only low user amplitude (ambient); show significant level (possible interruption)
-            if (inTts && amp < USER_HIDE_DURING_TTS_THRESHOLD) return;
+            if (inTts && amp < userVoiceTh) return;
             // NOTE: Near-full user amplitude with no nearby asr_final is NOT hidden here — it indicates a bug
             // (e.g. mic artifact, client sending wrong data, or server RMS). See docs/INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md
         }
@@ -1927,13 +2574,17 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const laneY = getLaneY(laneIndex);
         const laneH = getLaneHeight(laneIndex);
 
-        // Waveform bar height based on amplitude (0-100)
-        const amplitude = event.amplitude || 50;
+        // Waveform bar: amplitude 0–100 with UI gain (User ×1/×2/×4, AI same). Same gain as dense live/replay.
+        const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
+        const aiGain = (typeof uiSettings.aiAudioGain === 'number' ? uiSettings.aiAudioGain : 1);
+        const rawAmplitude = event.amplitude != null ? event.amplitude : 50;
+        const amplitude = isUser ? Math.min(100, rawAmplitude * userGain) : Math.min(100, rawAmplitude * aiGain);
         const barHeight = (amplitude / 100) * (laneH * 0.9);
         const y = laneY + laneH / 2 - barHeight / 2;
 
-        // Color by source: green for user, purple for AI
-        ctx.fillStyle = (event.source === 'tts' || event.source === 'ai') ? '#9C27B0' : '#76B900';
+        const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
+        const ttsColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-ai').trim() || '#9C27B0';
+        ctx.fillStyle = isUser ? audioColor : ttsColor;
         ctx.globalAlpha = 0.8;
         ctx.fillRect(x, y, 2, barHeight);
         ctx.globalAlpha = 1.0;
@@ -1953,30 +2604,17 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            const getSampleT = (s) => s.timestamp != null ? s.timestamp : s[0];
-            const getSampleA = (s) => s.amplitude != null ? s.amplitude : s[1];
-            // Green: mic (user) waveform — fine tStep (0.025) so it matches purple AI voice visual density and doesn't look coarser
+            // Green: mic (user) waveform — same density as purple TTS: interpolate amplitude at every tStep so no wide gaps
             if (liveAmplitudeHistory && liveAmplitudeHistory.length > 0) {
                 const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
                 ctx.fillStyle = audioColor;
                 ctx.globalAlpha = 0.85;
                 const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
                 const barWidthPx = 2;
-                const tStep = 0.025; // ~40 Hz so user waveform matches purple smoothness (was 0.05 and looked coarser)
+                const tStep = 0.025; // same as TTS (~40 Hz) for matching visual density
                 for (let t = visibleStart; t <= visibleEnd; t += tStep) {
-                    const tLo = t - tStep / 2;
-                    const tHi = t + tStep / 2;
-                    let maxAmp = 0;
-                    for (let i = 0; i < liveAmplitudeHistory.length; i++) {
-                        const s = liveAmplitudeHistory[i];
-                        const st = getSampleT(s);
-                        if (st >= tLo && st <= tHi) {
-                            const a = (getSampleA(s) || 0) * userGain;
-                            if (a > maxAmp) maxAmp = a;
-                        }
-                    }
-                    if (maxAmp <= 0) continue;
-                    const amp = Math.min(100, maxAmp);
+                    const amp = Math.min(100, getAmplitudeAtTime(liveAmplitudeHistory, t) * userGain);
+                    if (amp <= 0) continue;
                     const x = visibleLeft + (t - timelineOffset) * timeScale;
                     const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
                     const y1 = centerY - halfH;
@@ -1996,8 +2634,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 liveTtsSegments.forEach(function (seg) {
                     if (seg.endTime < visibleStart || seg.startTime > visibleEnd) return;
                     const amp = Math.min(100, (seg.amplitude || 0) * aiGain);
-                    if (amp <= 0) return;
-                    const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
+                    const ampForBar = Math.max(amp, 2); // small threshold so first/low-amplitude AI audio still shows purple
+                    const halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
                     const barHeight = Math.max(1, halfH * 2);
                     for (let t = Math.max(visibleStart, seg.startTime); t <= Math.min(visibleEnd, seg.endTime); t += tStep) {
                         const x = visibleLeft + (t - timelineOffset) * timeScale;
@@ -2011,8 +2649,45 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     }
 
-    // 2b2. Replay (saved session): draw persisted TTS playback segments on AUDIO lane (full playback duration, same as live)
-    if (!inLive && replayTtsSegments && replayTtsSegments.length > 0) {
+    // 2b1. Replay (saved session): draw persisted user (mic) waveform — only when t in data range and hide during TTS if below threshold (no green over AI when user silent)
+    if (!inLive && !hasStoppedLiveData && replayAudioAmplitudeHistory && replayAudioAmplitudeHistory.length > 0) {
+        const laneIndex = lanes.indexOf('audio');
+        if (laneIndex !== -1) {
+            const getT = (s) => s.timestamp != null ? s.timestamp : s[0];
+            const userT0 = getT(replayAudioAmplitudeHistory[0]);
+            const userT1 = getT(replayAudioAmplitudeHistory[replayAudioAmplitudeHistory.length - 1]);
+            const laneY = getLaneY(laneIndex);
+            const laneH = getLaneHeight(laneIndex);
+            const centerY = laneY + laneH / 2;
+            const maxBarHalf = (laneH * 0.65);
+            const visibleLeft = PADDING_LEFT;
+            const visibleRight = width - PADDING_RIGHT;
+            const visibleW = visibleRight - visibleLeft;
+            const visibleTimeWindow = visibleW / timeScale;
+            const visibleStart = timelineOffset - 0.05;
+            const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
+            const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
+            ctx.fillStyle = audioColor;
+            ctx.globalAlpha = 0.85;
+            const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
+            const barWidthPx = 2;
+            const tStep = 0.025;
+            for (let t = visibleStart; t <= visibleEnd; t += tStep) {
+                if (t < userT0 || t > userT1) continue;
+                const amp = Math.min(100, getAmplitudeAtTime(replayAudioAmplitudeHistory, t) * userGain);
+                if (amp <= 0) continue;
+                const x = visibleLeft + (t - timelineOffset) * timeScale;
+                const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
+                const y1 = centerY - halfH;
+                const barHeight = Math.max(1, halfH * 2);
+                ctx.fillRect(x, y1, barWidthPx, barHeight);
+            }
+            ctx.globalAlpha = 1.0;
+        }
+    }
+
+    // 2b2. Replay (saved session): draw TTS only from segments when we have them (no timeline fill = no strange decay). When no segments, fill from timeline in [ttsT0, ttsT1] only.
+    if (!inLive && !hasStoppedLiveData && ((replayTtsSegments && replayTtsSegments.length > 0) || (timeline && timeline.length))) {
         const laneIndex = lanes.indexOf('audio');
         if (laneIndex !== -1) {
             const laneY = getLaneY(laneIndex);
@@ -2022,26 +2697,59 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleLeft = PADDING_LEFT;
             const visibleRight = width - PADDING_RIGHT;
             const visibleW = visibleRight - visibleLeft;
+            const visibleTimeWindow = visibleW / timeScale;
+            const visibleStart = timelineOffset - 0.05;
+            const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
             const ttsColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-ai').trim() || '#9C27B0';
             ctx.fillStyle = ttsColor;
             ctx.globalAlpha = 0.9;
             const aiGain = (typeof uiSettings.aiAudioGain === 'number' ? uiSettings.aiAudioGain : 1);
-            for (let px = 0; px < visibleW; px += 1) {
-                const x = visibleLeft + px;
-                const t = timelineOffset + px / timeScale;
-                const amp = Math.min(100, getTtsAmplitudeAtTime(replayTtsSegments, t) * aiGain);
-                if (amp <= 0) continue;
-                const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
-                const y1 = centerY - halfH;
-                const y2 = centerY + halfH;
-                ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+            const barWidthPx = 2;
+            const tStep = 0.025;
+            if (replayTtsSegments && replayTtsSegments.length > 0) {
+                replayTtsSegments.forEach(function (seg) {
+                    if (seg.endTime < visibleStart || seg.startTime > visibleEnd) return;
+                    const amp = Math.min(100, (seg.amplitude || 0) * aiGain);
+                    const ampForBar = Math.max(amp, 2);
+                    const halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
+                    for (let t = Math.max(visibleStart, seg.startTime); t <= Math.min(visibleEnd, seg.endTime); t += tStep) {
+                        const x = visibleLeft + (t - timelineOffset) * timeScale;
+                        if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
+                        const y1 = centerY - halfH;
+                        ctx.fillRect(x, y1, barWidthPx, Math.max(1, halfH * 2));
+                    }
+                });
+            } else if (timeline && timeline.length) {
+                var ttsFromTimeline = [];
+                var ttsT0 = Infinity, ttsT1 = -Infinity;
+                timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).forEach(function (e) {
+                    var a = e.amplitude != null ? Number(e.amplitude) : 0;
+                    if (a > 0 && a < 1) a = a * 100;
+                    var ts = e.timestamp != null ? Number(e.timestamp) : 0;
+                    if (ts < ttsT0) ttsT0 = ts;
+                    if (ts > ttsT1) ttsT1 = ts;
+                    ttsFromTimeline.push({ timestamp: ts, amplitude: a });
+                });
+                ttsFromTimeline.sort(function (a, b) { return a.timestamp - b.timestamp; });
+                for (var t = visibleStart; t <= visibleEnd; t += tStep) {
+                    if (t < ttsT0 || t > ttsT1) continue;
+                    var ampTl = getAmplitudeAtTime(ttsFromTimeline, t);
+                    var amp = Math.min(100, ampTl * aiGain);
+                    if (amp <= 0) continue;
+                    var ampForBar = Math.max(amp, 2);
+                    var halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
+                    var x = visibleLeft + (t - timelineOffset) * timeScale;
+                    if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
+                    ctx.fillRect(x, centerY - halfH, barWidthPx, Math.max(1, halfH * 2));
+                }
             }
             ctx.globalAlpha = 1.0;
         }
     }
 
-    // 2c. Replay fallback: draw TTS segments from tts_first_audio+tts_complete only for saved sessions (not when we have live TTS data)
-    if (!inLive && !liveTtsSegments && (!replayTtsSegments || replayTtsSegments.length === 0)) {
+    // 2c. Replay fallback: when no dense TTS data and no timeline TTS amplitude, draw flat TTS blocks from tts_start→tts_complete.
+    var hasTimelineTts = timeline && timeline.some(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); });
+    if (!inLive && !hasStoppedLiveData && !liveTtsSegments && (!replayTtsSegments || replayTtsSegments.length === 0) && !hasTimelineTts) {
         const laneIndex = lanes.indexOf('audio');
         if (laneIndex !== -1) {
             const ttsSegments = rectangleEvents.filter(e => e.event_type === 'tts_segment');
@@ -2072,7 +2780,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         return s.slice(0, maxLen) + '\u2026';
     }
 
-    // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; llm_complete = dot + response text; speech lane only draws dots for asr_partial/asr_final (no phantom blue)
+    // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only
     pointEvents.forEach(event => {
         let targetLane = event.lane;
         if (targetLane === 'audio') return;
@@ -2102,7 +2810,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 dotColor = laneColors.speech || '#1976D2';
                 dotRadius = 4;
             } else {
-                dotRadius = 0; // e.g. user_speech_end: no dot, only TTL ring below
+                dotRadius = 0; // e.g. user_speech_end: no dot
             }
         } else {
             if (et === 'asr_partial') {
@@ -2111,6 +2819,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             } else if (et === 'asr_final') {
                 dotColor = laneColors.speech || '#1976D2';
                 dotRadius = 4;
+            } else if (targetLane === 'llm' || targetLane === 'tts') {
+                dotRadius = 0; // No dots on LLM/TTS lanes; TTS first audio is shown as thin pale magenta line
             }
         }
 
@@ -2119,15 +2829,6 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             ctx.beginPath();
             ctx.arc(x, centerY, dotRadius, 0, Math.PI * 2);
             ctx.fill();
-        }
-
-        // TTL highlight: ring around the two TTL boundaries (user stopped speaking → first AI audio)
-        if (et === 'user_speech_end' || et === 'tts_first_audio') {
-            ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--ttl-highlight') || '#FFEB3B';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(x, centerY, 7, 0, Math.PI * 2);
-            ctx.stroke();
         }
 
         // Final transcript label: draw text to the right of asr_final dot (final = blue dot)
@@ -2163,6 +2864,47 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     });
 
+    // 3b. TTL bands: transparent red from JS end-of-speech to first sound out (browser); ms label on TTL lane. Live: from state; replay: always recompute from segments when we have them so band end = first AI sound (~6.6s), not stored bands from old logic (~8s).
+    const ttlLaneIndex = lanes.indexOf('ttl');
+    const replayBands = (!inLive && !hasStoppedLiveData && state.selectedSession)
+        ? (replayTtsSegments && replayTtsSegments.length
+            ? computeTtlBandsFromReplay(replayUserAmplitudeForTtl || [], replayTtsSegments, timeline)
+            : (state.selectedSession.ttl_bands || []))
+        : [];
+    const hasLiveBands = drawLiveWaveforms && (state.liveTtlBands && state.liveTtlBands.length > 0 || state.liveTtlBandStartTime != null);
+    if (ttlLaneIndex !== -1 && (hasLiveBands || replayBands.length > 0)) {
+        const bandTop = getLaneY(0);
+        const bandBottom = getLaneY(lanes.length - 1) + getLaneHeight(lanes.length - 1);
+        const ttlLaneY = getLaneY(ttlLaneIndex);
+        const ttlLaneH = getLaneHeight(ttlLaneIndex);
+        const ttlLaneCenterY = ttlLaneY + ttlLaneH / 2;
+        const redFill = getComputedStyle(document.documentElement).getPropertyValue('--ttl-band-fill').trim() || 'rgba(200, 50, 50, 0.12)';
+        const bandsToDraw = [];
+        if (hasLiveBands) {
+            if (state.liveTtlBands) bandsToDraw.push(...state.liveTtlBands);
+            if (state.liveTtlBandStartTime != null && liveSessionTime != null)
+                bandsToDraw.push({ start: state.liveTtlBandStartTime, end: liveSessionTime, ttlMs: null });
+        }
+        if (replayBands.length > 0) bandsToDraw.push(...replayBands);
+        bandsToDraw.forEach(function (band) {
+            const x1 = PADDING_LEFT + (band.start - timelineOffset) * timeScale;
+            const x2 = PADDING_LEFT + (band.end - timelineOffset) * timeScale;
+            if (x2 <= PADDING_LEFT || x1 >= width - PADDING_RIGHT) return;
+            const drawX1 = Math.max(PADDING_LEFT, x1);
+            const drawX2 = Math.min(width - PADDING_RIGHT, x2);
+            ctx.fillStyle = redFill;
+            ctx.fillRect(drawX1, bandTop, drawX2 - drawX1, bandBottom - bandTop);
+            if (band.ttlMs != null && (drawX2 - drawX1) > 30) {
+                ctx.font = '11px sans-serif';
+                ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ttl-band-text').trim() || 'rgba(180, 40, 40, 0.95)';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const midX = (drawX1 + drawX2) / 2;
+                ctx.fillText(band.ttlMs + ' ms', midX, ttlLaneCenterY);
+            }
+        });
+    }
+
     // 4. System lane: CPU/GPU utilization as overlapping area chart (transparent fill below each line; overlap = darker)
     const systemLaneIndex = lanes.indexOf('system');
     const useSmoothCurves = true;
@@ -2188,6 +2930,33 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 }
                 return points;
             }
+            // Monotonic quadratic control point: smooth but never goes backward in time or overshoots (no hooks/lobes)
+            function smoothQuadraticCtrl(p0, p1, pPrev) {
+                if (pPrev == null) return { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+                var c = { x: p0.x + (p1.x - pPrev.x) * 0.25, y: p0.y + (p1.y - pPrev.y) * 0.25 };
+                c.x = Math.max(p0.x, Math.min(p1.x, c.x));
+                var yMin = Math.min(p0.y, p1.y), yMax = Math.max(p0.y, p1.y);
+                c.y = Math.max(yMin, Math.min(yMax, c.y));
+                return c;
+            }
+            // Monotonic cubic Bézier control points (Catmull-Rom style, clamped): smoother curve, no time-reversal or lobes
+            function smoothCubicBezierCtrl(pPrev, p0, p1, pNext) {
+                var tension = 1 / 3; // standard cubic Bézier from Catmull-Rom
+                var m0x = pPrev != null ? (p1.x - pPrev.x) * 0.5 : (p1.x - p0.x);
+                var m0y = pPrev != null ? (p1.y - pPrev.y) * 0.5 : (p1.y - p0.y);
+                var m1x = pNext != null ? (pNext.x - p0.x) * 0.5 : (p1.x - p0.x);
+                var m1y = pNext != null ? (pNext.y - p0.y) * 0.5 : (p1.y - p0.y);
+                var cp1 = { x: p0.x + m0x * tension, y: p0.y + m0y * tension };
+                var cp2 = { x: p1.x - m1x * tension, y: p1.y - m1y * tension };
+                var xMin = Math.min(p0.x, p1.x), xMax = Math.max(p0.x, p1.x);
+                var yMin = Math.min(p0.y, p1.y), yMax = Math.max(p0.y, p1.y);
+                cp1.x = Math.max(xMin, Math.min(xMax, cp1.x));
+                cp1.y = Math.max(yMin, Math.min(yMax, cp1.y));
+                cp2.x = Math.max(xMin, Math.min(xMax, cp2.x));
+                cp2.y = Math.max(yMin, Math.min(yMax, cp2.y));
+                return { cp1: cp1, cp2: cp2 };
+            }
+            var useCubicBezier = true; // cubic Bézier = smoother; false = monotonic quadratic
             function drawAreaAndLine(points, fillStyle, strokeStyle, fillAlpha) {
                 if (points.length === 0) return;
                 var x0 = points[0].x, xLast = points[points.length - 1].x;
@@ -2199,8 +2968,15 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                         if (k === 0) ctx.lineTo(points[0].x, points[0].y);
                         else {
                             var p0 = points[k - 1], p1 = points[k];
-                            var cpx = (p0.x + p1.x) / 2, cpy = (p0.y + p1.y) / 2;
-                            ctx.quadraticCurveTo(cpx, cpy, p1.x, p1.y);
+                            var prev = k >= 2 ? points[k - 2] : null;
+                            var next = k + 1 < points.length ? points[k + 1] : null;
+                            if (useCubicBezier) {
+                                var c = smoothCubicBezierCtrl(prev, p0, p1, next);
+                                ctx.bezierCurveTo(c.cp1.x, c.cp1.y, c.cp2.x, c.cp2.y, p1.x, p1.y);
+                            } else {
+                                var c = smoothQuadraticCtrl(p0, p1, prev);
+                                ctx.quadraticCurveTo(c.x, c.y, p1.x, p1.y);
+                            }
                         }
                     }
                 } else {
@@ -2218,8 +2994,15 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 if (useSmoothCurves && points.length > 1) {
                     for (var k = 1; k < points.length; k++) {
                         var p0 = points[k - 1], p1 = points[k];
-                        var cpx = (p0.x + p1.x) / 2, cpy = (p0.y + p1.y) / 2;
-                        ctx.quadraticCurveTo(cpx, cpy, p1.x, p1.y);
+                        var prev = k >= 2 ? points[k - 2] : null;
+                        var next = k + 1 < points.length ? points[k + 1] : null;
+                        if (useCubicBezier) {
+                            var c = smoothCubicBezierCtrl(prev, p0, p1, next);
+                            ctx.bezierCurveTo(c.cp1.x, c.cp1.y, c.cp2.x, c.cp2.y, p1.x, p1.y);
+                        } else {
+                            var c = smoothQuadraticCtrl(p0, p1, prev);
+                            ctx.quadraticCurveTo(c.x, c.y, p1.x, p1.y);
+                        }
                     }
                 } else {
                     for (var k = 1; k < points.length; k++) ctx.lineTo(points[k].x, points[k].y);
@@ -2237,9 +3020,15 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 var gpu = s.gpu != null ? Math.max(0, Math.min(100, s.gpu)) : null;
                 return gpu != null ? laneY + laneH * (1 - gpu / 100) : null;
             });
+            // Clip to lane bounds so quadratic curves never render below 0% (baseline)
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(visibleLeft, laneY, visibleRight - visibleLeft, laneH);
+            ctx.clip();
             // Draw CPU area first (transparent blue), then GPU area (transparent green); overlap blends darker
             drawAreaAndLine(cpuPoints, '#2196F3', '#2196F3', 0.45);
             drawAreaAndLine(gpuPoints, '#4CAF50', '#4CAF50', 0.45);
+            ctx.restore();
         }
     }
 }
@@ -2319,6 +3108,19 @@ function getDeviceDisplayLabel(kind) {
         return deviceValueToLabel(d.speaker, 'speaker');
     }
     return '—';
+}
+
+/** Device type for pipeline badge: 'browser' | 'usb' | null (null for n/a or text-only). */
+function getDeviceDisplayType(kind) {
+    var d = currentConfig.devices || {};
+    var v;
+    if (kind === 'mic') v = d.microphone ?? d.audio_input_source;
+    else if (kind === 'camera') v = d.camera ?? d.video_source;
+    else if (kind === 'speaker') v = d.speaker ?? d.audio_output_source;
+    else return null;
+    if (v == null || v === 'none') return null;
+    if (v === 'browser' || v === '') return 'browser';
+    return 'usb';
 }
 
 function updateDeviceIndicators() {
@@ -2558,8 +3360,23 @@ function startPreviewStream() {
         });
 }
 
+/** Update the live ASR label (Listening: &lt;partial text&gt;) from state.liveAsrInterimText. Call on every asr_partial and on asr_final (to clear). */
+function updateLiveAsrLabel() {
+    const wrap = document.getElementById('live-asr-label-wrap');
+    const textEl = document.getElementById('live-asr-text');
+    if (!wrap || !textEl) return;
+    textEl.textContent = state.liveAsrInterimText || '';
+}
+
 function updateLiveSessionUI() {
     updateConfigPanelState();
+    const liveAsrWrap = document.getElementById('live-asr-label-wrap');
+    if (liveAsrWrap) {
+        const showInterim = (currentConfig.app && currentConfig.app.show_interim_asr !== false);
+        liveAsrWrap.style.display = (state.isLiveSession && state.sessionState === 'live' && showInterim) ? 'block' : 'none';
+        if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
+        if (state.isLiveSession && state.sessionState === 'live' && showInterim) updateLiveAsrLabel();
+    }
     const deviceControls = document.getElementById('device-controls-container');
     const deviceTags = document.getElementById('device-tags');
     const videoFeed = document.getElementById('video-feed');
@@ -2567,7 +3384,9 @@ function updateLiveSessionUI() {
     const startOverlay = document.getElementById('start-session-overlay');
     const previewImage = document.getElementById('preview-image');
     const sessionTitle = document.getElementById('session-title');
+    const sessionMetaLine2 = document.getElementById('session-meta-line2');
     const sessionStats = document.getElementById('session-stats');
+    const pipelineConfigEl = document.getElementById('pipeline-config');
     const startBtn = document.getElementById('start-session-btn');
     const stopBtn = document.getElementById('stop-session-btn');
 
@@ -2577,10 +3396,31 @@ function updateLiveSessionUI() {
     if (state.isLiveSession) {
         deviceControls.style.display = 'flex';
         updateDeviceIndicators();
-        if (deviceTags) deviceTags.style.display = 'flex';
+        if (deviceTags) deviceTags.style.display = 'none'; // Pipeline table shows devices when visible
+        if (pipelineConfigEl) {
+            pipelineConfigEl.style.display = 'block';
+            pipelineConfigEl.classList.remove('condensed');
+            var deviceLabels = { mic: getDeviceDisplayLabel('mic'), camera: getDeviceDisplayLabel('camera'), speaker: getDeviceDisplayLabel('speaker') };
+            var deviceTypes = { mic: getDeviceDisplayType('mic'), camera: getDeviceDisplayType('camera'), speaker: getDeviceDisplayType('speaker') };
+            pipelineConfigEl.innerHTML = getPipelineTableHtml(currentConfig, { condensed: false, deviceLabels: deviceLabels, deviceTypes: deviceTypes });
+            if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+            requestAnimationFrame(function () { updatePipelineSegShapes(pipelineConfigEl); });
+        }
+        var serverHealthRow = document.getElementById('server-health-row');
+        if (serverHealthRow) {
+            serverHealthRow.style.display = (state.sessionState === 'setup') ? 'flex' : 'none';
+            if (state.sessionState === 'setup') {
+                updateServerHealthUI();
+                if (state.serverHealth.llm === null && state.serverHealth.riva === null) {
+                    setTimeout(function () { checkServersHealth(); }, 400);
+                }
+            }
+        }
 
-        const now = new Date();
-        sessionTitle.textContent = `Live Session - ${now.toLocaleTimeString()}`;
+        const turnCount = (state.liveChatTurns && state.liveChatTurns.length) || 0;
+        const dateTimeStr = state.liveSessionStartTime > 0 ? formatSessionDateTime(state.liveSessionStartTime) : new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        sessionTitle.textContent = state.liveSessionStartTime > 0 ? ('Session – ' + dateTimeStr) : ('Live Session – ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }));
+        if (sessionMetaLine2) sessionMetaLine2.textContent = dateTimeStr + ', ' + turnCount + ' turn' + (turnCount !== 1 ? 's' : '');
 
         if (state.sessionState === 'setup') {
             document.getElementById('new-session-btn')?.classList.add('new-session-btn--highlight');
@@ -2628,6 +3468,9 @@ function updateLiveSessionUI() {
         if (videoFeed) videoFeed.style.display = 'none';
         if (startOverlay) startOverlay.style.display = 'none';
         if (deviceTags) deviceTags.style.display = 'none';
+        if (pipelineConfigEl) pipelineConfigEl.style.display = 'none';
+        var serverHealthRow = document.getElementById('server-health-row');
+        if (serverHealthRow) serverHealthRow.style.display = 'none';
         updateChatInputVisibility();
     }
 }
@@ -2635,7 +3478,10 @@ function updateLiveSessionUI() {
 function updateHistoricalSessionPreview() {
     const sessionMeta = document.getElementById('session-meta');
     const sessionTitle = document.getElementById('session-title');
+    const sessionMetaLine2 = document.getElementById('session-meta-line2');
     const sessionStats = document.getElementById('session-stats');
+    const sessionFilenameEl = document.getElementById('session-filename');
+    const pipelineConfigEl = document.getElementById('pipeline-config');
     const previewImage = document.getElementById('preview-image');
     const imagePlaceholder = document.getElementById('image-placeholder');
     const videoFeed = document.getElementById('video-feed');
@@ -2653,32 +3499,50 @@ function updateHistoricalSessionPreview() {
 
         const session = state.selectedSession;
         const metrics = session.metrics || {};
-
-        // Update session title
-        sessionTitle.textContent = session.name || 'Unnamed Session';
-
-        // Update session stats (horizontal: Date | Turns | TTL) — parse as UTC, show local
-        const dateObj = parseSessionDate(session.created_at);
-        const date = dateObj ? dateObj.toLocaleDateString(undefined, { dateStyle: 'medium' }) : '';
         const turns = metrics.total_turns || 0;
-        const ttl = formatLatency(metrics.avg_ttl);
+        const dateTimeStr = formatSessionDateTime(session.created_at);
 
+        sessionTitle.textContent = session.name || 'Unnamed Session';
+        if (sessionMetaLine2) sessionMetaLine2.textContent = dateTimeStr + ', ' + turns + ' turn' + (turns !== 1 ? 's' : '');
+
+        const ttl = formatLatency(metrics.avg_ttl);
+        const ttfa = metrics.avg_ttfa != null ? formatLatency(metrics.avg_ttfa) : '—';
         sessionStats.innerHTML = `
-            <span class="session-stat-item">
-                <span class="stat-label">Date:</span>
-                <span class="stat-value">${date}</span>
-            </span>
-            <span class="session-stat-item">
-                <span class="stat-label">Turns:</span>
-                <span class="stat-value">${turns}</span>
-            </span>
             <span class="session-stat-item">
                 <span class="stat-label">Avg TTL:</span>
                 <span class="stat-value">${ttl}</span>
             </span>
+            <span class="session-stat-item">
+                <span class="stat-label">TTFA:</span>
+                <span class="stat-value">${ttfa}</span>
+            </span>
         `;
+        const sessionFileName = session.session_id ? (session.session_id + '.json') : '';
+        if (sessionFilenameEl) {
+            if (sessionFileName) {
+                sessionFilenameEl.innerHTML = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
+                sessionFilenameEl.style.display = '';
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(sessionFilenameEl);
+            } else {
+                sessionFilenameEl.innerHTML = '';
+                sessionFilenameEl.style.display = 'none';
+            }
+        }
 
-        // Hide session image area for recorded session to maximize chat history
+        if (pipelineConfigEl && session.config) {
+            pipelineConfigEl.style.display = 'block';
+            pipelineConfigEl.classList.remove('condensed');
+            var c = session.config;
+            var opts = { condensed: false };
+            if (c.device_labels && (c.device_labels.mic != null || c.device_labels.camera != null || c.device_labels.speaker != null)) opts.deviceLabels = c.device_labels;
+            if (c.device_types && (c.device_types.mic != null || c.device_types.camera != null || c.device_types.speaker != null)) opts.deviceTypes = c.device_types;
+            pipelineConfigEl.innerHTML = getPipelineTableHtml(c, opts);
+            if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+            requestAnimationFrame(function () { updatePipelineSegShapes(pipelineConfigEl); });
+        } else if (pipelineConfigEl) {
+            pipelineConfigEl.style.display = 'none';
+        }
+
         videoFeed.style.display = 'none';
         const sessionImageEl = document.getElementById('session-image');
         if (sessionImageEl) sessionImageEl.style.display = 'none';
@@ -2694,15 +3558,25 @@ function updateHistoricalSessionPreview() {
 
         sessionMeta.style.display = 'flex';
     } else if (!state.selectedSession) {
-        sessionTitle.textContent = 'Select a session';
+        sessionTitle.textContent = 'Session';
+        if (sessionMetaLine2) sessionMetaLine2.textContent = '';
         sessionStats.innerHTML = '';
-        previewImage.style.display = 'none';
-        videoFeed.style.display = 'none';
-        imagePlaceholder.style.display = 'flex';
+        if (sessionFilenameEl) { sessionFilenameEl.textContent = ''; sessionFilenameEl.style.display = 'none'; }
         const sessionImageEl = document.getElementById('session-image');
-        if (sessionImageEl) sessionImageEl.style.display = '';
+        if (state.isLiveSession) {
+            if (sessionImageEl) sessionImageEl.style.display = '';
+        } else {
+            if (pipelineConfigEl) {
+                pipelineConfigEl.style.display = 'none';
+                pipelineConfigEl.innerHTML = '';
+            }
+            previewImage.style.display = 'none';
+            videoFeed.style.display = 'none';
+            imagePlaceholder.style.display = 'flex';
+            if (sessionImageEl) sessionImageEl.style.display = '';
+        }
     } else {
-        // Live session or other: ensure session image area is visible
+        if (sessionFilenameEl) { sessionFilenameEl.textContent = ''; sessionFilenameEl.style.display = 'none'; }
         const sessionImageEl = document.getElementById('session-image');
         if (sessionImageEl) sessionImageEl.style.display = '';
     }
@@ -2714,8 +3588,12 @@ function startNewSession() {
     state.sessionState = 'setup';
     state.selectedSession = null;
 
-    // Reset config to defaults
-    currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+    if (uiSettings.showNewChatWithDefaultConfig) {
+        const saved = getDefaultConfig();
+        currentConfig = saved ? JSON.parse(JSON.stringify(saved)) : JSON.parse(JSON.stringify(defaultConfig));
+    } else {
+        currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+    }
 
     // Clear chat history
     document.getElementById('chat-history').innerHTML = `
@@ -2738,8 +3616,14 @@ function startNewSession() {
     setTimeout(function () {
         if (document.getElementById('device-microphone-list')) populateAllDeviceDropdowns();
     }, 0);
+    // Preload ASR/TTS model names so pipeline shows them without opening ASR/TTS tabs
+    setTimeout(function () {
+        preloadASRModelName();
+        preloadTTSModelName();
+    }, 100);
 
     updateLiveSessionUI();
+    updateHistoricalSessionPreview();
 
     console.log('New session created - Setup mode');
 }
@@ -2797,6 +3681,13 @@ function startSessionRecording() {
     state.ttsNextStartTime = 0;
     state.liveAudioAmplitudeHistory = [];
     state.liveTtsAmplitudeHistory = [];
+    state.liveTtlBands = [];
+    state.liveTtlBandStartTime = null;
+    state.voiceTurnActive = false;
+    state.voiceSilenceCandidate = null;
+    state.lastAsrPartialTime = null;
+    state.firstTtsPlayTimeThisResponse = null;
+    state.earliestTtsPlayTimeAboveThreshold = null;
     state.liveSystemStats = [];
     state.liveTimelineInitialZoomSet = false;
     state.sessionState = 'live';
@@ -2816,10 +3707,31 @@ function startSessionRecording() {
             llm: { ...currentConfig.llm },
             tts: { ...currentConfig.tts },
             devices: currentConfig.devices ? { ...currentConfig.devices } : {},
-            app: currentConfig.app ? { ...currentConfig.app } : {}
+            app: currentConfig.app ? { ...currentConfig.app } : {},
+            device_labels: {
+                mic: getDeviceDisplayLabel('mic'),
+                camera: getDeviceDisplayLabel('camera'),
+                speaker: getDeviceDisplayLabel('speaker')
+            },
+            device_types: {
+                mic: getDeviceDisplayType('mic'),
+                camera: getDeviceDisplayType('camera'),
+                speaker: getDeviceDisplayType('speaker')
+            },
+            asr_model_name: (currentConfig.asr && currentConfig.asr.model) ? String(currentConfig.asr.model).replace(/\(.*\)/, '').trim() : null,
+            llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
+            tts_model_name: (currentConfig.tts && (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model)) ? (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model) : null
         };
         if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
         if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
+        // Use dropdown value at send time so we capture the selected TTS model even when it was never written to currentConfig (e.g. user left first option selected after load)
+        var ttsModelSelect = document.getElementById('tts-model-select');
+        var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
+        var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
+        if (sentRivaModelName) {
+            config.tts.riva_model_name = sentRivaModelName;
+            config.tts_model_name = sentRivaModelName;  // so backend normalizer can set tts.riva_model_name when missing
+        }
         if (config.llm.ollama_url === undefined && config.llm.api_base) config.llm.ollama_url = (config.llm.api_base || '').replace(/\/v1\/?$/, '');
         ws.send(JSON.stringify({ type: 'config', config: config }));
         console.log('[Voice] Config sent, starting mic stream');
@@ -2830,9 +3742,11 @@ function startSessionRecording() {
         if (typeof ev.data === 'string') {
             try {
                 const msg = JSON.parse(ev.data);
-                // Debug: log every message type (and event_type for events), show as JSON in UI
-                const eventType = (msg.type === 'event' && msg.event && msg.event.event_type) ? msg.event.event_type : '';
-                console.log('[Voice] 📥', msg.type, eventType ? ' event_type=' + eventType : '', msg);
+                // Debug: log every message only when debug panel is on (avoid main-thread saturation during live)
+                if (uiSettings.showDebugInfo) {
+                    const eventType = (msg.type === 'event' && msg.event && msg.event.event_type) ? msg.event.event_type : '';
+                    console.log('[Voice] 📥', msg.type, eventType ? ' event_type=' + eventType : '', msg);
+                }
                 // For UI log, use summary for large payloads (tts_audio) so JSON stays readable
                 const toLog = (msg.type === 'tts_audio' && msg.data)
                     ? { type: 'tts_audio', sample_rate: msg.sample_rate, data_length: msg.data.length }
@@ -2855,11 +3769,34 @@ function startSessionRecording() {
                     }
                     state.liveTimelineEvents.push(ev);
                     renderTimeline();
-                    if (ev.event_type === 'asr_final') {
+                    if (ev.event_type === 'asr_partial') {
+                        state.voiceTurnActive = true; // Gate for JS end-of-speech: only detect silence after we have speech
+                        var pt = ev.timestamp != null ? Number(ev.timestamp) : null;
+                        if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
+                        state.liveAsrInterimText = (ev.data && ev.data.text != null) ? String(ev.data.text).trim() : '';
+                        updateLiveAsrLabel();
+                    } else if (ev.event_type === 'asr_final') {
+                        // Fallback: if JS never detected silence this turn, set TTL band start between first partial and final (before LLM)
+                        if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+                            var ft = ev.timestamp != null ? Number(ev.timestamp) : null;
+                            if (typeof ft === 'number' && !isNaN(ft))
+                                state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
+                        }
+                        state.liveAsrInterimText = '';
+                        updateLiveAsrLabel();
                         var userText = (ev.data && ev.data.text != null) ? String(ev.data.text).trim() : '';
                         if (userText) {
-                            state.liveChatTurns.push({ user: userText, assistant: '' });
+                            var last = state.liveChatTurns[state.liveChatTurns.length - 1];
+                            // If last turn has no assistant yet and this final looks like the same utterance (finalization), update it
+                            var sameUtterance = last && last.assistant === '' && last.user &&
+                                (userText === last.user || userText.indexOf(last.user) === 0 || last.user.indexOf(userText) === 0);
+                            if (sameUtterance) {
+                                last.user = userText;
+                            } else {
+                                state.liveChatTurns.push({ user: userText, assistant: '' });
+                            }
                             renderLiveChat();
+                            requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
                     } else if (ev.event_type === 'chat') {
                         var userText = ev.user != null ? String(ev.user) : (ev.data && ev.data.user != null ? String(ev.data.user) : null);
@@ -2872,9 +3809,12 @@ function startSessionRecording() {
                                 state.liveChatTurns.push({ user: userText, assistant: assistantText });
                             }
                             renderLiveChat();
+                            requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
                     }
                 } else if (msg.type === 'tts_start') {
+                    state.firstTtsPlayTimeThisResponse = null;
+                    state.earliestTtsPlayTimeAboveThreshold = null;
                     if (state.ttsAudioContext) {
                         if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
                     }
@@ -2927,8 +3867,8 @@ function appendLiveChatError(text) {
     const chatEl = document.getElementById('chat-history');
     if (!chatEl) return;
     const wrap = document.createElement('div');
-    wrap.className = 'chat-message ai';
-    wrap.innerHTML = '<div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div><div class="chat-bubble"><div class="chat-text error">' + escapeHtml(text) + '</div></div>';
+    wrap.className = 'chat-bubble ai';
+    wrap.innerHTML = '<div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div><div class="chat-content"><div class="chat-text error">' + escapeHtml(text) + '</div></div>';
     chatEl.appendChild(wrap);
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
@@ -2942,13 +3882,13 @@ function renderLiveChat() {
         chatEl.innerHTML = state.liveChatTurns.map(t => {
             var assistantDisplay = t.assistant ? escapeHtml(t.assistant) : '<span class="chat-placeholder">…</span>';
             return `
-            <div class="chat-message user">
+            <div class="chat-bubble user">
                 <div class="chat-avatar"><i data-lucide="user" class="lucide-inline"></i></div>
-                <div class="chat-bubble"><div class="chat-text">${escapeHtml(t.user)}</div></div>
+                <div class="chat-content"><div class="chat-text">${escapeHtml(t.user)}</div></div>
             </div>
-            <div class="chat-message ai">
+            <div class="chat-bubble ai">
                 <div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div>
-                <div class="chat-bubble"><div class="chat-text">${assistantDisplay}</div></div>
+                <div class="chat-content"><div class="chat-text">${assistantDisplay}</div></div>
             </div>
         `;
         }).join('');
@@ -3056,9 +3996,22 @@ function connectPcmToWs(stream) {
             const rms = Math.min(100, Math.sqrt(sumSq / input.length) * 400);
             const ts = (Date.now() / 1000) - state.liveSessionStartTime;
             state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: rms });
-            const maxSamples = 400;
-            if (state.liveAudioAmplitudeHistory.length > maxSamples)
-                state.liveAudioAmplitudeHistory = state.liveAudioAmplitudeHistory.slice(-maxSamples);
+            // No trimming: send full session on stop for consistent dense waveform (Option 1, AMPLITUDE_DATA_SOURCES.md)
+
+            // Browser-side end-of-speech: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
+            const userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
+            const SILENCE_CONFIRM_SEC = 0.15;
+            if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+                if (rms < userTh) {
+                    if (state.voiceSilenceCandidate == null) state.voiceSilenceCandidate = ts;
+                    else if ((ts - state.voiceSilenceCandidate) >= SILENCE_CONFIRM_SEC) {
+                        state.liveTtlBandStartTime = state.voiceSilenceCandidate;
+                        state.voiceSilenceCandidate = null;
+                    }
+                } else {
+                    state.voiceSilenceCandidate = null;
+                }
+            }
         }
     };
     src.connect(processor);
@@ -3119,9 +4072,28 @@ function playTtsChunk(base64Data, sampleRate) {
             endTime: actualEndSession,
             amplitude: rms
         });
-        var nowSession = nowSec - sessionStart;
-        while (state.liveTtsAmplitudeHistory.length > 0 && state.liveTtsAmplitudeHistory[0].endTime < nowSession - 20)
-            state.liveTtsAmplitudeHistory.shift();
+        // Lock onto earliest TTS start this response (first audio out), not whichever chunk triggers close
+        if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
+            state.firstTtsPlayTimeThisResponse = actualStartSession;
+        if (rms > 0) {
+            if (state.earliestTtsPlayTimeAboveThreshold == null || actualStartSession < state.earliestTtsPlayTimeAboveThreshold)
+                state.earliestTtsPlayTimeAboveThreshold = actualStartSession;
+        }
+        // Close TTL band: use earliest of (first chunk time, first segment with amplitude >= threshold) so we never pick 8s when first chunk is 6.5s
+        if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+            var bandStart = state.liveTtlBandStartTime;
+            var firstChunk = state.firstTtsPlayTimeThisResponse;
+            var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+            var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+            state.liveTtlBandStartTime = null;
+            state.voiceTurnActive = false;
+            state.lastAsrPartialTime = null;
+            state.firstTtsPlayTimeThisResponse = null;
+            state.earliestTtsPlayTimeAboveThreshold = null;
+            var ttlMs = Math.round((bandEnd - bandStart) * 1000);
+            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: ttlMs });
+        }
+        // No trimming: keep all TTS segments for full-session dense waveform on stop (Option 1, AMPLITUDE_DATA_SOURCES.md)
     }
 }
 
@@ -3139,10 +4111,12 @@ function stopSessionRecording() {
             type: 'stop',
             system_stats: state.liveSystemStats || [],
             tts_playback_segments: state.liveTtsAmplitudeHistory || [],
-            audio_amplitude_history: state.liveAudioAmplitudeHistory || []
+            audio_amplitude_history: state.liveAudioAmplitudeHistory || [],
+            ttl_bands: state.liveTtlBands || []
         }));
-        state.voiceWs.close();
-        state.voiceWs = null;
+        // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for
+        // the 2nd turn when the stream ended with only partials) and session_saved. Let the server
+        // close the connection when the pipeline finishes; ws.onclose will set state.voiceWs = null.
     }
     stopVoiceMicStream();
     stopPreviewStream();
@@ -3158,7 +4132,7 @@ function stopSessionRecording() {
     updateLiveSessionUI();
     loadSessions(); // Refresh session list so new recording appears
     renderTimeline(); // One frame so zoom/scroll is available
-    // Reload session list again after server has had time to write the file (client may close before session_saved is received)
+    // Reload again after server closes and sends session_saved (in case session_saved arrives after first load)
     setTimeout(function () { loadSessions(); }, 1500);
 }
 
@@ -3266,7 +4240,25 @@ function setupEventHandlers() {
             renderTimeline();
         });
     }
-
+    // User voice threshold (silence detection, TTL band start, hide low user during TTS)
+    const userVoiceThEl = document.getElementById('timeline-user-voice-threshold');
+    const userVoiceThValueEl = document.getElementById('timeline-user-voice-threshold-value');
+    if (userVoiceThEl) {
+        var uv = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
+        uv = Math.max(0, Math.min(30, uv));
+        userVoiceThEl.value = String(uv);
+        if (userVoiceThValueEl) userVoiceThValueEl.textContent = String(uv);
+        userVoiceThEl.addEventListener('input', function () {
+            var v = parseInt(userVoiceThEl.value, 10);
+            if (!isNaN(v)) {
+                v = Math.max(0, Math.min(30, v));
+                uiSettings.userVoiceThreshold = v;
+                if (userVoiceThValueEl) userVoiceThValueEl.textContent = String(v);
+                saveUISettings();
+                renderTimeline();
+            }
+        });
+    }
     // Timeline canvas scroll/pan when zoomed (allowed for selected session or just-stopped live session)
     const canvas = document.getElementById('timeline-canvas');
     canvas.addEventListener('wheel', (e) => {
@@ -3300,10 +4292,28 @@ function setupEventHandlers() {
         startNewSession();
     });
 
+    // Save as default config (enabled only when config panel is editable)
+    const saveDefaultConfigBtn = document.getElementById('save-default-config-btn');
+    if (saveDefaultConfigBtn) {
+        saveDefaultConfigBtn.addEventListener('click', saveDefaultConfig);
+        saveDefaultConfigBtn.disabled = !state.isLiveSession;
+    }
+
     // Start session recording
     document.getElementById('start-session-btn').addEventListener('click', () => {
         startSessionRecording();
     });
+    var serverHealthCheckBtn = document.getElementById('server-health-check-btn');
+    if (serverHealthCheckBtn) {
+        serverHealthCheckBtn.addEventListener('click', function () {
+            serverHealthCheckBtn.disabled = true;
+            checkServersHealth().then(function () {
+                serverHealthCheckBtn.disabled = false;
+            }).catch(function () {
+                serverHealthCheckBtn.disabled = false;
+            });
+        });
+    }
 
     // Stop session recording
     document.getElementById('stop-session-btn').addEventListener('click', () => {
@@ -3321,8 +4331,8 @@ function setupEventHandlers() {
             const emptyState = historyEl.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
             const msgEl = document.createElement('div');
-            msgEl.className = 'chat-message user';
-            msgEl.innerHTML = `<div class="message-content">${escapeHtml(text)}</div>`;
+            msgEl.className = 'chat-bubble user';
+            msgEl.innerHTML = `<div class="chat-content"><div class="chat-text">${escapeHtml(text)}</div></div>`;
             historyEl.appendChild(msgEl);
             historyEl.scrollTop = historyEl.scrollHeight;
             chatInput.value = '';
@@ -3337,51 +4347,6 @@ function setupEventHandlers() {
             }
         });
     }
-}
-
-// ===== Timeline Panel Resizing =====
-function initTimelineResize() {
-    const handle = document.getElementById('timeline-resize-handle');
-    const panel = document.getElementById('timeline-panel');
-    const mainPanel = panel.parentElement; // .main-panel
-
-    let isResizing = false;
-    let startY = 0;
-    let startHeight = 0;
-
-    handle.addEventListener('mousedown', (e) => {
-        isResizing = true;
-        startY = e.clientY;
-        startHeight = panel.offsetHeight;
-        handle.classList.add('dragging');
-        document.body.style.cursor = 'ns-resize';
-        document.body.style.userSelect = 'none';
-        e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!isResizing) return;
-
-        // Calculate new height (drag up = increase height, drag down = decrease height)
-        const deltaY = startY - e.clientY; // Inverted because timeline is at bottom
-        const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
-
-        panel.style.height = `${newHeight}px`;
-
-        // Re-render timeline to adjust canvas size
-        if (state.selectedSession) {
-            renderTimeline();
-        }
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (isResizing) {
-            isResizing = false;
-            handle.classList.remove('dragging');
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-        }
-    });
 }
 
 // ===== Timeline Panel Resizing =====
@@ -3602,6 +4567,197 @@ function formatDate(dateString) {
     return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+/** Full date and time for session meta line 2 (matches session list context). */
+function formatSessionDateTime(dateString) {
+    const date = typeof dateString === 'number' ? new Date(dateString * 1000) : parseSessionDate(dateString);
+    if (!date || isNaN(date.getTime())) return '';
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/** Truncate text for display; full text goes in title for tooltip. maxLen default 16. */
+function truncateWithTitle(text, maxLen) {
+    if (text == null || text === '') return { short: '', title: '' };
+    var s = String(text);
+    maxLen = maxLen || 16;
+    if (s.length <= maxLen) return { short: s, title: '' };
+    return { short: s.slice(0, maxLen - 3) + '...', title: s };
+}
+
+/**
+ * Build pipeline config HTML: grid with device slots (icon + name) + connected pipeline bar ( > ASR > LLM > TTS > ).
+ * @param {Object} config - Session config: { devices, asr, llm, tts }
+ * @param {{ condensed?: boolean, deviceLabels?: { mic?: string, camera?: string, speaker?: string }, deviceTypes?: { mic?: 'browser'|'usb'|null, camera?: 'browser'|'usb'|null, speaker?: 'browser'|'usb'|null } }} options - deviceLabels: when provided use for slot text; deviceTypes: when provided show small icon at end of name (globe=browser, usb=local)
+ */
+function getPipelineTableHtml(config, options) {
+    if (!config) return '';
+    const d = config.devices || {};
+    const mic = d.microphone ?? d.audio_input_source;
+    const cam = d.camera ?? d.video_source;
+    const spk = d.speaker ?? d.audio_output_source;
+    const isTextOnly = mic === 'none' || !mic;
+    const hasCamera = cam && cam !== 'none';
+    const hasSpeaker = spk && spk !== 'none';
+
+    var deviceLabelsOpt = options && options.deviceLabels;
+    function deviceLabel(v) {
+        if (v == null || v === 'none') return '—';
+        if (v === 'browser') return 'Browser';
+        return String(v).slice(0, 12);
+    }
+    var rawMic = isTextOnly ? '(text)' : (deviceLabelsOpt && deviceLabelsOpt.mic != null ? deviceLabelsOpt.mic : deviceLabel(mic));
+    var rawCam = hasCamera ? (deviceLabelsOpt && deviceLabelsOpt.camera != null ? deviceLabelsOpt.camera : deviceLabel(cam)) : '(n/a)';
+    var rawSpk = hasSpeaker ? (deviceLabelsOpt && deviceLabelsOpt.speaker != null ? deviceLabelsOpt.speaker : deviceLabel(spk)) : '(text)';
+    var micT = truncateWithTitle(rawMic, 16);
+    var camT = truncateWithTitle(rawCam, 16);
+    var spkT = truncateWithTitle(rawSpk, 16);
+
+    const asrModel = config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet');
+    const llmModel = config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—');
+    // When RIVA is selected, show RIVA TTS model name in pipeline-seg; fallback to "RIVA" if not loaded yet
+    const isRivaTts = config.tts && (config.tts.backend === 'riva' || config.tts.scheme === 'riva');
+    const ttsLabel = config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
+        : (config.tts && (config.tts.riva_model_name || config.tts.voice || config.tts.model))
+            ? (isRivaTts && config.tts.riva_model_name ? config.tts.riva_model_name : (config.tts.riva_model_name || config.tts.voice || config.tts.model))
+            : (config.tts ? (isRivaTts ? 'RIVA' : 'Default') : '—');
+    /* Segment label: model name only; tooltip shows "ASR: ..." / "VLM: ..." / "TTS: ..." on hover */
+    const asrLabel = isTextOnly ? 'n/a' : asrModel;
+    const midLabel = llmModel;
+    const ttsLabelVal = hasSpeaker ? ttsLabel : 'n/a';
+    const asrTooltip = isTextOnly ? 'n/a' : ('ASR: ' + asrModel);
+    const midTooltip = hasCamera ? ('VLM: ' + llmModel) : ('LLM: ' + llmModel);
+    const ttsTooltip = hasSpeaker ? ('TTS: ' + ttsLabel) : 'n/a';
+
+    var deviceTypesOpt = options && options.deviceTypes;
+    var fullLabel = function (short, full) { return full || short; };
+    function slot(icon, shortLabel, fullTitle, typeIcon) {
+        var titleAttr = fullTitle ? ' title="' + escapeHtml(fullTitle) + '"' : '';
+        var dataFull = ' data-full-label="' + escapeHtml(fullLabel(shortLabel, fullTitle)) + '"';
+        var typeIconHtml = typeIcon === 'browser' ? '<i data-lucide="globe" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : (typeIcon === 'usb' ? '<i data-lucide="usb" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : '');
+        return '<span class="pipeline-device-slot"' + titleAttr + dataFull + '><span class="pipeline-device-slot-icon"><i data-lucide="' + icon + '" class="lucide-inline"></i></span><span class="pipeline-device-slot-label"><span class="pipeline-device-slot-name">' + escapeHtml(shortLabel) + '</span>' + typeIconHtml + '</span></span>';
+    }
+    var micType = deviceTypesOpt && deviceTypesOpt.mic != null ? deviceTypesOpt.mic : null;
+    var camType = deviceTypesOpt && deviceTypesOpt.camera != null ? deviceTypesOpt.camera : null;
+    var spkType = deviceTypesOpt && deviceTypesOpt.speaker != null ? deviceTypesOpt.speaker : null;
+    const slots = slot('mic', micT.short, micT.title, micType) + slot('video', camT.short, camT.title, camType) + slot('volume-2', spkT.short, spkT.title, spkType);
+    function seg(type, labelText, tooltip) {
+        var titleAttr = tooltip ? ' title="' + escapeHtml(tooltip) + '"' : '';
+        var dataFull = ' data-full-label="' + escapeHtml(labelText) + '"';
+        return '<span class="pipeline-seg pipeline-seg-' + type + '"><svg class="pipeline-seg-shape" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true"><polygon class="pipeline-seg-poly" points="0,0 180,0 200,20 180,40 0,40 20,20"/></svg><span class="pipeline-seg-label"' + titleAttr + dataFull + '>' + escapeHtml(labelText) + '</span></span>';
+    }
+    const arrowRow = '<div class="pipeline-arrow-row" aria-hidden="true"><i data-lucide="chevron-down" class="lucide-inline pipeline-arrow-down"></i></div>';
+    const flowSegments = '<div class="pipeline-flow">' + seg('asr', asrLabel, asrTooltip) + seg('llm', midLabel, midTooltip) + seg('tts', ttsLabelVal, ttsTooltip) + '</div>';
+    const flowRow = '<div class="pipeline-flow-row">' + flowSegments + '</div>';
+    const cornerLeft = '<div class="pipeline-corner pipeline-corner-left" aria-hidden="true"><i data-lucide="corner-down-right" class="lucide-inline"></i></div>';
+    const cornerRight = '<div class="pipeline-corner pipeline-corner-right" aria-hidden="true"><i data-lucide="corner-right-up" class="lucide-inline"></i></div>';
+    return '<div class="pipeline-grid">' + slots + arrowRow + flowRow + cornerLeft + cornerRight + '</div>';
+}
+
+/** One-line pipeline summary for session list (e.g. "ASR: Parakeet | LLM: llama3:3b | TTS: Default"). */
+function getPipelineSummaryHtml(config) {
+    if (!config) return '';
+    const d = config.devices || {};
+    const mic = d.microphone ?? d.audio_input_source;
+    const cam = d.camera ?? d.video_source;
+    const spk = d.speaker ?? d.audio_output_source;
+    const isTextOnly = mic === 'none' || !mic;
+    const hasCamera = cam && cam !== 'none';
+    const hasSpeaker = spk && spk !== 'none';
+    const asrModel = config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet');
+    const llmModel = config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—');
+    const isRivaTtsSummary = config.tts && (config.tts.backend === 'riva' || config.tts.scheme === 'riva');
+    const ttsLabel = config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
+        : (config.tts && (config.tts.riva_model_name || config.tts.voice || config.tts.model))
+            ? (isRivaTtsSummary && config.tts.riva_model_name ? config.tts.riva_model_name : (config.tts.riva_model_name || config.tts.voice || config.tts.model))
+            : (config.tts ? (isRivaTtsSummary ? 'RIVA' : 'Default') : '—');
+    const asr = isTextOnly ? 'n/a' : ('ASR: ' + asrModel);
+    const mid = hasCamera ? ('VLM: ' + llmModel) : ('LLM: ' + llmModel);
+    const tts = hasSpeaker ? ('TTS: ' + ttsLabel) : 'n/a';
+    return escapeHtml(asr + ' | ' + mid + ' | ' + tts);
+}
+
+/** Update pipeline segment SVG and --seg-slant so slants stay 45°/135° at any size (inset = height/2). */
+function updatePipelineSegShapes(container) {
+    if (!container) return;
+    var segs = container.querySelectorAll('.pipeline-seg');
+    segs.forEach(function (seg) {
+        var w = seg.offsetWidth;
+        var h = seg.offsetHeight;
+        if (w <= 0 || h <= 0) return;
+        var s = Math.max(1, Math.floor(h / 2));
+        seg.style.setProperty('--seg-slant', s + 'px');
+        var svg = seg.querySelector('.pipeline-seg-shape');
+        var poly = seg.querySelector('.pipeline-seg-poly');
+        if (svg && poly) {
+            svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+            poly.setAttribute('points', '0,0 ' + (w - s) + ',0 ' + w + ',' + (h / 2) + ' ' + (w - s) + ',' + h + ' 0,' + h + ' ' + s + ',' + (h / 2));
+        }
+    });
+}
+
+/** Approximate chars that fit in a pixel width (monospace-ish). */
+var PX_PER_CHAR_DEVICE = 7;
+var PX_PER_CHAR_SEG = 6;
+var DEVICE_SLOT_NON_LABEL_PX = 52;
+
+/** Re-trim device badge and pipeline-seg labels based on current container width (call on resize). */
+function updatePipelineLabelTrimming(container) {
+    if (!container) return;
+    var grid = container.querySelector('.pipeline-grid');
+    if (!grid) return;
+
+    // Device slots: each slot gets ~1/3 of grid; reserve space for icon + padding
+    var slots = container.querySelectorAll('.pipeline-device-slot');
+    slots.forEach(function (slot) {
+        var nameEl = slot.querySelector('.pipeline-device-slot-name');
+        var full = slot.getAttribute('data-full-label');
+        if (!nameEl || full == null) return;
+        var w = slot.offsetWidth;
+        var labelPx = Math.max(0, w - DEVICE_SLOT_NON_LABEL_PX);
+        var maxLen = Math.max(2, Math.floor(labelPx / PX_PER_CHAR_DEVICE));
+        var t = truncateWithTitle(full, maxLen);
+        nameEl.textContent = t.short;
+        slot.setAttribute('title', t.title || '');
+    });
+
+    // Pipeline segments: each seg has flex:1; trim label to fit
+    var segs = container.querySelectorAll('.pipeline-seg');
+    segs.forEach(function (seg) {
+        var labelEl = seg.querySelector('.pipeline-seg-label');
+        var full = labelEl && labelEl.getAttribute('data-full-label');
+        if (!labelEl || full == null) return;
+        var w = seg.offsetWidth;
+        var labelPx = Math.max(0, w - 24);
+        var maxLen = Math.max(2, Math.floor(labelPx / PX_PER_CHAR_SEG));
+        var display = full.length <= maxLen ? full : full.slice(0, maxLen - 3) + '\u2026';
+        labelEl.textContent = display;
+    });
+}
+
+/** Refresh pipeline display when config or devices change (live session uses currentConfig and real device labels). */
+function refreshPipelineDisplay() {
+    const el = document.getElementById('pipeline-config');
+    if (!el) return;
+    if (state.isLiveSession) {
+        var deviceLabels = {
+            mic: getDeviceDisplayLabel('mic'),
+            camera: getDeviceDisplayLabel('camera'),
+            speaker: getDeviceDisplayLabel('speaker')
+        };
+        var deviceTypes = { mic: getDeviceDisplayType('mic'), camera: getDeviceDisplayType('camera'), speaker: getDeviceDisplayType('speaker') };
+        el.innerHTML = getPipelineTableHtml(currentConfig, { condensed: false, deviceLabels: deviceLabels, deviceTypes: deviceTypes });
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        requestAnimationFrame(function () { updatePipelineSegShapes(el); updatePipelineLabelTrimming(el); });
+    } else if (state.selectedSession && state.selectedSession.config) {
+        var c = state.selectedSession.config;
+        var opts = { condensed: false };
+        if (c.device_labels && (c.device_labels.mic != null || c.device_labels.camera != null || c.device_labels.speaker != null)) opts.deviceLabels = c.device_labels;
+        if (c.device_types && (c.device_types.mic != null || c.device_types.camera != null || c.device_types.speaker != null)) opts.deviceTypes = c.device_types;
+        el.innerHTML = getPipelineTableHtml(c, opts);
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        requestAnimationFrame(function () { updatePipelineSegShapes(el); updatePipelineLabelTrimming(el); });
+    }
+}
+
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
     console.log('DOMContentLoaded fired!');
@@ -3610,6 +4766,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
         loadUISettings();
         console.log('UI settings loaded:', uiSettings);
+        applyUISettingsToLayout();
     } catch (error) {
         console.error('Error loading UI settings:', error);
     }
@@ -3624,6 +4781,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 
+    var pipelineEl = document.getElementById('pipeline-config');
+    if (pipelineEl && typeof ResizeObserver !== 'undefined') {
+        var ro = new ResizeObserver(function () {
+            updatePipelineSegShapes(pipelineEl);
+            updatePipelineLabelTrimming(pipelineEl);
+        });
+        ro.observe(pipelineEl);
+    }
+
     console.log('Setting up modal handlers...');
     try {
         // Settings modal
@@ -3632,12 +4798,55 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('settings-save-btn').addEventListener('click', saveSettingsFromModal);
         document.getElementById('settings-reset-btn').addEventListener('click', resetUISettings);
 
+        // Session filename copy button (event delegation)
+        var sessionMetaEl = document.getElementById('session-meta');
+        if (sessionMetaEl) {
+            sessionMetaEl.addEventListener('click', function (e) {
+                var btn = e.target.closest('.session-filename-copy');
+                if (!btn || !btn.dataset.filename) return;
+                var filename = btn.dataset.filename;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(filename).then(function () {
+                        btn.setAttribute('aria-label', 'Copied');
+                        setTimeout(function () { btn.setAttribute('aria-label', 'Copy filename'); }, 1500);
+                    }).catch(function () {});
+                }
+            });
+        }
+
         // Close modal on backdrop click
         document.getElementById('settings-modal').addEventListener('click', (e) => {
             if (e.target.id === 'settings-modal') {
                 closeSettingsModal();
             }
         });
+
+        // Settings modal: pane navigation
+        document.querySelectorAll('.settings-nav-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pane = btn.getAttribute('data-pane');
+                document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                const content = document.getElementById('settings-pane-' + pane);
+                if (content) content.classList.add('active');
+            });
+        });
+
+        // Timeline height: Auto checkbox enables/disables slider and updates value display
+        const timelineHeightAutoEl = document.getElementById('ui-timeline-height-auto');
+        const timelineHeightPxEl = document.getElementById('ui-timeline-height-px');
+        const timelineHeightPxValueEl = document.getElementById('ui-timeline-height-px-value');
+        if (timelineHeightAutoEl && timelineHeightPxEl && timelineHeightPxValueEl) {
+            timelineHeightAutoEl.addEventListener('change', () => {
+                const auto = timelineHeightAutoEl.checked;
+                timelineHeightPxEl.disabled = auto;
+                timelineHeightPxValueEl.textContent = timelineHeightPxEl.value;
+            });
+            timelineHeightPxEl.addEventListener('input', () => {
+                timelineHeightPxValueEl.textContent = timelineHeightPxEl.value;
+            });
+        }
 
         // Voice debug panel collapse
         const voiceDebugToggle = document.getElementById('voice-debug-toggle');
@@ -3659,7 +4868,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (modal.classList.contains('show')) {
                     closeSettingsModal();
                 }
+                closeSessionMenus();
             }
+        });
+
+        // Session list: menu button and dropdown actions (delegation)
+        const sessionItems = document.getElementById('session-items');
+        if (sessionItems) {
+            sessionItems.addEventListener('click', (e) => {
+                const menuBtn = e.target.closest('.session-item-menu-btn');
+                const menuitem = e.target.closest('.session-item-dropdown [data-action]');
+                if (menuBtn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const sid = menuBtn.getAttribute('data-session-id');
+                    const idx = menuBtn.getAttribute('data-session-index');
+                    if (sid != null) toggleSessionMenu(e, sid, idx != null ? parseInt(idx, 10) : 0);
+                } else if (menuitem) {
+                    e.preventDefault();
+                    const dropdown = e.target.closest('.session-item-dropdown');
+                    const sid = dropdown && dropdown.getAttribute('data-session-id');
+                    if (sid && menuitem.getAttribute('data-action') === 'rename') renameSession(sid);
+                    if (sid && menuitem.getAttribute('data-action') === 'delete') deleteSession(sid);
+                }
+            });
+        }
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.session-item-menu-btn') && !e.target.closest('.session-item-dropdown')) closeSessionMenus();
         });
 
         console.log('Modal handlers set up successfully');
@@ -3771,12 +5006,25 @@ document.addEventListener('DOMContentLoaded', () => {
 function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
 
-    // Load current settings into checkboxes
+    // Load current settings into controls
     document.getElementById('ui-combine-speech-lanes').checked = uiSettings.combineSpeechLanes;
     document.getElementById('ui-show-session-thumbnails').checked = uiSettings.showSessionThumbnails;
+    document.getElementById('ui-show-pipeline-in-session-list').checked = uiSettings.showPipelineInSessionList;
+    document.getElementById('ui-show-new-chat-with-default-config').checked = uiSettings.showNewChatWithDefaultConfig;
+    document.getElementById('ui-record-preview-in-session-history').checked = uiSettings.recordPreviewInSessionHistory;
     document.getElementById('ui-auto-scroll-chat').checked = uiSettings.autoScrollChat;
     document.getElementById('ui-show-timestamps').checked = uiSettings.showTimestamps;
     document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
+
+    const timelineAuto = document.getElementById('ui-timeline-height-auto');
+    const timelinePx = document.getElementById('ui-timeline-height-px');
+    const timelinePxValue = document.getElementById('ui-timeline-height-px-value');
+    if (timelineAuto) timelineAuto.checked = uiSettings.timelineHeightAuto;
+    if (timelinePx) {
+        timelinePx.value = String(uiSettings.timelineHeightPx);
+        timelinePx.disabled = !!uiSettings.timelineHeightAuto;
+    }
+    if (timelinePxValue) timelinePxValue.textContent = String(uiSettings.timelineHeightPx);
 
     modal.classList.add('show');
 }
@@ -3786,24 +5034,53 @@ function closeSettingsModal() {
     modal.classList.remove('show');
 }
 
+/** Apply UI settings that affect layout (New Chat button label, timeline panel height). Call after loadUISettings or after saving. */
+function applyUISettingsToLayout() {
+    const newBtn = document.getElementById('new-session-btn');
+    if (newBtn) {
+        newBtn.textContent = uiSettings.showNewChatWithDefaultConfig ? '+ New Chat with Default Config' : '+ New Voice Chat';
+    }
+    const panel = document.getElementById('timeline-panel');
+    if (panel) {
+        if (uiSettings.timelineHeightAuto) {
+            panel.style.height = '';
+            panel.classList.add('timeline-panel--height-auto');
+        } else {
+            panel.classList.remove('timeline-panel--height-auto');
+            const px = Math.max(200, Math.min(600, uiSettings.timelineHeightPx || 400));
+            panel.style.height = px + 'px';
+        }
+    }
+    if (state.selectedSession) {
+        renderTimeline();
+    }
+}
+
 function saveSettingsFromModal() {
-    // Read values from checkboxes
+    // Read values from controls
     uiSettings.combineSpeechLanes = document.getElementById('ui-combine-speech-lanes').checked;
     uiSettings.showSessionThumbnails = document.getElementById('ui-show-session-thumbnails').checked;
+    uiSettings.showPipelineInSessionList = document.getElementById('ui-show-pipeline-in-session-list').checked;
+    uiSettings.showNewChatWithDefaultConfig = document.getElementById('ui-show-new-chat-with-default-config').checked;
+    uiSettings.recordPreviewInSessionHistory = document.getElementById('ui-record-preview-in-session-history').checked;
     uiSettings.autoScrollChat = document.getElementById('ui-auto-scroll-chat').checked;
     uiSettings.showTimestamps = document.getElementById('ui-show-timestamps').checked;
     uiSettings.showDebugInfo = document.getElementById('ui-show-debug-info').checked;
 
-    // Save to localStorage
-    saveUISettings();
+    const timelineAuto = document.getElementById('ui-timeline-height-auto');
+    const timelinePx = document.getElementById('ui-timeline-height-px');
+    uiSettings.timelineHeightAuto = timelineAuto ? timelineAuto.checked : true;
+    uiSettings.timelineHeightPx = timelinePx ? Math.max(200, Math.min(600, parseInt(timelinePx.value, 10) || 400)) : 400;
 
-    // Re-render timeline if speech lanes setting changed
+    saveUISettings();
+    applyUISettingsToLayout();
+
+    renderSessionList();
     if (state.selectedSession) {
         renderTimeline();
     }
     updateVoiceDebugPanel();
 
-    // Close modal
     closeSettingsModal();
 }
 
@@ -3814,23 +5091,48 @@ function resetUISettings() {
         uiSettings.autoScrollChat = true;
         uiSettings.showTimestamps = false;
         uiSettings.showDebugInfo = false;
+        uiSettings.showPipelineInSessionList = false;
+        uiSettings.showNewChatWithDefaultConfig = false;
+        uiSettings.recordPreviewInSessionHistory = true;
+        uiSettings.timelineHeightAuto = true;
+        uiSettings.timelineHeightPx = 400;
         uiSettings.userAudioGain = 2;
         uiSettings.aiAudioGain = 2;
+        uiSettings.userVoiceThreshold = 5;
 
         saveUISettings();
 
-        // Update checkboxes and gain selects
         document.getElementById('ui-combine-speech-lanes').checked = uiSettings.combineSpeechLanes;
         document.getElementById('ui-show-session-thumbnails').checked = uiSettings.showSessionThumbnails;
+        document.getElementById('ui-show-pipeline-in-session-list').checked = uiSettings.showPipelineInSessionList;
+        document.getElementById('ui-show-new-chat-with-default-config').checked = uiSettings.showNewChatWithDefaultConfig;
+        document.getElementById('ui-record-preview-in-session-history').checked = uiSettings.recordPreviewInSessionHistory;
         document.getElementById('ui-auto-scroll-chat').checked = uiSettings.autoScrollChat;
         document.getElementById('ui-show-timestamps').checked = uiSettings.showTimestamps;
         document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
+        const timelineAuto = document.getElementById('ui-timeline-height-auto');
+        const timelinePx = document.getElementById('ui-timeline-height-px');
+        const timelinePxValue = document.getElementById('ui-timeline-height-px-value');
+        if (timelineAuto) timelineAuto.checked = uiSettings.timelineHeightAuto;
+        if (timelinePx) {
+            timelinePx.value = String(uiSettings.timelineHeightPx);
+            timelinePx.disabled = !!uiSettings.timelineHeightAuto;
+        }
+        if (timelinePxValue) timelinePxValue.textContent = String(uiSettings.timelineHeightPx);
         const ug = document.getElementById('timeline-user-audio-gain');
         const ag = document.getElementById('timeline-ai-audio-gain');
         if (ug) ug.value = String(uiSettings.userAudioGain);
         if (ag) ag.value = String(uiSettings.aiAudioGain);
-
-        // Re-render timeline
+        const uvt = document.getElementById('timeline-user-voice-threshold');
+        const uvtVal = document.getElementById('timeline-user-voice-threshold-value');
+        if (uvt) {
+            var uv = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
+            uv = Math.max(0, Math.min(30, uv));
+            uvt.value = String(uv);
+            if (uvtVal) uvtVal.textContent = String(uv);
+        }
+        applyUISettingsToLayout();
+        renderSessionList();
         if (state.selectedSession || (state.isLiveSession && state.sessionState === 'stopped')) {
             renderTimeline();
         }

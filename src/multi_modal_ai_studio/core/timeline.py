@@ -29,20 +29,41 @@ class TimelineEvent:
         event_type: Type of event (e.g., "asr_start", "llm_token", "tts_audio")
         lane: Which lane this event belongs to (audio, speech, llm, tts)
         data: Event-specific data (flexible dict)
+        start_time: Optional start time for duration events (rectangles)
+        end_time: Optional end time for duration events (rectangles)
+        amplitude: Optional amplitude for waveform rendering (0-100)
+        source: Optional source identifier ('user', 'tts', 'ai')
+        render_type: Optional rendering hint ('point', 'rectangle', 'waveform')
     """
     timestamp: float
     event_type: str
     lane: Lane
     data: Dict[str, Any] = field(default_factory=dict)
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    amplitude: Optional[float] = None
+    source: Optional[str] = None
+    render_type: Optional[Literal['point', 'rectangle', 'waveform']] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        result = {
             "timestamp": self.timestamp,
             "event_type": self.event_type,
             "lane": self.lane.value,
             "data": self.data,
         }
+        # Include optional fields only if set
+        if self.start_time is not None:
+            result["start_time"] = self.start_time
+        if self.end_time is not None:
+            result["end_time"] = self.end_time
+        if self.amplitude is not None:
+            result["amplitude"] = self.amplitude
+        if self.source is not None:
+            result["source"] = self.source
+        # render_type is a UI preference, not persisted in session data
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TimelineEvent':
@@ -52,6 +73,11 @@ class TimelineEvent:
             event_type=data["event_type"],
             lane=Lane(data["lane"]),
             data=data.get("data", {}),
+            start_time=data.get("start_time"),
+            end_time=data.get("end_time"),
+            amplitude=data.get("amplitude"),
+            source=data.get("source"),
+            render_type=data.get("render_type"),
         )
 
 
@@ -78,7 +104,12 @@ class Timeline:
         self,
         event_type: str,
         lane: Lane,
-        data: Optional[Dict[str, Any]] = None
+        data: Optional[Dict[str, Any]] = None,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        amplitude: Optional[float] = None,
+        source: Optional[str] = None,
+        render_type: Optional[Literal['point', 'rectangle', 'waveform']] = None
     ) -> TimelineEvent:
         """Add event to timeline.
         
@@ -86,6 +117,11 @@ class Timeline:
             event_type: Event identifier (e.g., "asr_final", "llm_token")
             lane: Timeline lane
             data: Optional event-specific data
+            start_time: Optional start time for duration events (rectangles)
+            end_time: Optional end time for duration events (rectangles)
+            amplitude: Optional amplitude for waveform rendering (0-100)
+            source: Optional source identifier ('user', 'tts', 'ai')
+            render_type: Optional rendering hint ('point', 'rectangle', 'waveform')
         
         Returns:
             The created TimelineEvent
@@ -98,7 +134,12 @@ class Timeline:
             timestamp=timestamp,
             event_type=event_type,
             lane=lane,
-            data=data or {}
+            data=data or {},
+            start_time=start_time,
+            end_time=end_time,
+            amplitude=amplitude,
+            source=source,
+            render_type=render_type
         )
         
         self.events.append(event)
@@ -242,6 +283,110 @@ class Timeline:
             if e.event_type == event_type and e.timestamp > after_timestamp
         ]
         return matching[0] if matching else None
+    
+    def add_vad_segment(
+        self,
+        start_time: float,
+        end_time: float,
+        data: Optional[Dict[str, Any]] = None
+    ) -> TimelineEvent:
+        """Add a VAD (Voice Activity Detection) segment as a rectangle.
+        
+        Args:
+            start_time: Start time relative to session start
+            end_time: End time relative to session start
+            data: Optional metadata
+        
+        Returns:
+            The created TimelineEvent
+        """
+        return self.add_event(
+            event_type="vad_segment",
+            lane=Lane.AUDIO,
+            data=data,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    
+    def add_asr_segment(
+        self,
+        start_time: float,
+        end_time: float,
+        text: str = "",
+        data: Optional[Dict[str, Any]] = None
+    ) -> TimelineEvent:
+        """Add an ASR segment as a rectangle.
+        
+        Args:
+            start_time: Start time relative to session start
+            end_time: End time relative to session start
+            text: Transcribed text
+            data: Optional metadata
+        
+        Returns:
+            The created TimelineEvent
+        """
+        event_data = data or {}
+        event_data['text'] = text
+        return self.add_event(
+            event_type="asr_segment",
+            lane=Lane.SPEECH,
+            data=event_data,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    
+    def add_tts_segment(
+        self,
+        start_time: float,
+        end_time: float,
+        text: str = "",
+        data: Optional[Dict[str, Any]] = None
+    ) -> TimelineEvent:
+        """Add a TTS segment as a rectangle.
+        
+        Args:
+            start_time: Start time relative to session start
+            end_time: End time relative to session start
+            text: Text being synthesized
+            data: Optional metadata
+        
+        Returns:
+            The created TimelineEvent
+        """
+        event_data = data or {}
+        event_data['text'] = text
+        return self.add_event(
+            event_type="tts_segment",
+            lane=Lane.TTS,
+            data=event_data,
+            start_time=start_time,
+            end_time=end_time,
+        )
+    
+    def add_audio_amplitude(
+        self,
+        amplitude: float,
+        source: str = 'user',
+        data: Optional[Dict[str, Any]] = None
+    ) -> TimelineEvent:
+        """Add an audio amplitude sample for waveform visualization.
+        
+        Args:
+            amplitude: Audio amplitude (0-100 scale)
+            source: Audio source ('user' or 'tts'/'ai')
+            data: Optional metadata
+        
+        Returns:
+            The created TimelineEvent
+        """
+        return self.add_event(
+            event_type="audio_amplitude",
+            lane=Lane.AUDIO,
+            data=data,
+            amplitude=amplitude,
+            source=source,
+        )
     
     def get_summary(self) -> Dict[str, Any]:
         """Get timeline summary statistics.

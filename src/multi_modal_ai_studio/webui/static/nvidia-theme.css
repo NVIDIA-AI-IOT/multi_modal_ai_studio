@@ -10,7 +10,7 @@
     --nvidia-green-dark: #5a8f00;
     --nvidia-green-light: #8fd919;
     --nvidia-black: #000000;
-    
+
     /* Dark Mode Theme */
     --dark-bg-primary: #0a0a0a;
     --dark-bg-secondary: #1a1a1a;
@@ -21,7 +21,7 @@
     --dark-text-tertiary: #808080;
     --dark-border-color: #333333;
     --dark-border-hover: #4a4a4a;
-    
+
     /* Light Mode Theme - NVIDIA-inspired */
     --light-bg-primary: #ffffff;
     --light-bg-secondary: #f8f9fa;
@@ -34,32 +34,36 @@
     --light-border-hover: #adb5bd;
     --light-accent-bg: #f0f7e8;
     --light-accent-border: #d4e8c1;
-    
+    --light-chat-user-bg: #e5efe0;
+    --light-chat-user-border: #8fa87a;
+    --light-chat-ai-bg: #ebe5f0;
+    --light-chat-ai-border: #9b8bab;
+
     /* Accent Colors */
     --accent-primary: var(--nvidia-green);
     --accent-hover: var(--nvidia-green-light);
     --accent-active: var(--nvidia-green-dark);
-    
+
     /* Semantic Colors */
     --success: #76B900;
     --warning: #ff9500;
     --error: #ef4444;
     --info: #3b82f6;
-    
+
     /* Shadows & Effects */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-    
+
     /* NVIDIA Glow Effects */
     --glow-nvidia: 0 0 20px rgba(118, 185, 0, 0.3);
     --glow-nvidia-strong: 0 0 30px rgba(118, 185, 0, 0.5);
-    
+
     /* Typography */
     --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
     --font-mono: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
-    
+
     /* Spacing */
     --space-xs: 0.25rem;
     --space-sm: 0.5rem;
@@ -67,13 +71,13 @@
     --space-lg: 1.5rem;
     --space-xl: 2rem;
     --space-2xl: 3rem;
-    
+
     /* Border Radius */
     --radius-sm: 4px;
     --radius-md: 8px;
     --radius-lg: 12px;
     --radius-xl: 16px;
-    
+
     /* Transitions */
     --transition-fast: 150ms ease;
     --transition-base: 250ms ease;
@@ -106,13 +110,13 @@
     --text-tertiary: var(--light-text-tertiary);
     --border-color: var(--light-border-color);
     --border-hover: var(--light-border-hover);
-    
+
     /* Light mode specific tweaks */
     --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
     --shadow-md: 0 4px 8px -2px rgba(0, 0, 0, 0.12);
     --shadow-lg: 0 10px 20px -5px rgba(0, 0, 0, 0.15);
     --shadow-xl: 0 20px 30px -10px rgba(0, 0, 0, 0.18);
-    
+
     /* Subtle NVIDIA green glow for light mode */
     --glow-nvidia: 0 0 15px rgba(118, 185, 0, 0.15);
     --glow-nvidia-strong: 0 0 25px rgba(118, 185, 0, 0.25);
@@ -128,9 +132,19 @@
     background: var(--light-accent-bg);
 }
 
-[data-theme="light"] .chat-message.assistant {
-    background: var(--light-accent-bg);
-    border-left-color: var(--nvidia-green);
+[data-theme="light"] .chat-bubble.user {
+    background: var(--light-chat-user-bg);
+    color: var(--light-text-primary);
+    border-color: var(--light-chat-user-border);
+    border-right-color: var(--light-chat-user-border);
+}
+
+[data-theme="light"] .chat-bubble.ai,
+[data-theme="light"] .chat-bubble.assistant {
+    background: var(--light-chat-ai-bg);
+    color: var(--light-text-primary);
+    border-color: var(--light-chat-ai-border);
+    border-left-color: var(--light-chat-ai-border);
 }
 
 /* Enhance NVIDIA green visibility in light mode */
@@ -146,10 +160,20 @@
 }
 
 /* Light mode elevated surfaces */
-[data-theme="light"] .session-meta-container,
 [data-theme="light"] .device-controls-container {
     background: var(--bg-primary);
     box-shadow: var(--shadow-md);
+}
+[data-theme="light"] .session-meta-container {
+    background: rgba(0, 0, 0, 0.06);
+    border-top-color: rgba(0, 0, 0, 0.1);
+    border-right-color: rgba(0, 0, 0, 0.1);
+    border-bottom-color: rgba(0, 0, 0, 0.1);
+    border-left: 4px solid var(--accent-primary);
+    box-shadow: none;
+}
+[data-theme="light"] .pipeline-config-container {
+    background: transparent;
 }
 
 /* Light mode timeline with subtle green accent */
@@ -322,7 +346,8 @@ code, pre {
     margin-bottom: var(--space-sm);
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    border-left: 4px solid var(--accent-primary);
+    border-radius: 0;
     cursor: pointer;
     transition: all var(--transition-base);
 }
@@ -336,7 +361,8 @@ code, pre {
 .session-item.active {
     background: var(--bg-hover);
     border-color: var(--accent-primary);
-    box-shadow: inset 3px 0 0 var(--accent-primary), var(--shadow-md);
+    border-left-width: 4px;
+    box-shadow: var(--shadow-md);
 }
 
 .session-item-name {
@@ -509,30 +535,141 @@ code, pre {
     overflow-y: auto;
 }
 
+.pipeline-config-container {
+    flex-shrink: 0;
+    padding: var(--space-sm) 0;
+    margin-bottom: var(--space-sm);
+    background: transparent;
+    font-size: 0.75rem;
+    overflow: visible;
+}
+.pipeline-grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    row-gap: 0px;
+    column-gap: var(--space-sm);
+    align-items: center;
+    overflow: visible;
+}
+.pipeline-device-slot {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    min-width: 0;
+}
+.pipeline-device-slot-icon {
+    display: inline-flex;
+    align-items: center;
+    padding-right: 8px;
+    margin-right: 8px;
+    border-right: 1px solid var(--border-color);
+}
+.pipeline-device-slot-icon .lucide-inline { width: 12px; height: 12px; flex-shrink: 0; opacity: 0.9; }
+.pipeline-device-slot-label { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.pipeline-device-slot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pipeline-device-type-icon.lucide-inline { width: 10px; height: 10px; flex-shrink: 0; opacity: 0.7; }
+.pipeline-arrow-row { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; min-height: 8px; }
+.pipeline-arrow-down.lucide-inline { width: 12px; height: 12px; color: var(--text-tertiary, var(--text-secondary)); opacity: 0.7; }
+.pipeline-flow-row { grid-column: 1 / -1; margin: 0 28px; display: flex; overflow: visible; }
+.pipeline-corner { position: absolute; top: 50%; transform: translateY(0%); width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary, var(--text-secondary)); opacity: 0.8; pointer-events: none; }
+.pipeline-corner .lucide-inline { width: 30px; height: 30px; }
+.pipeline-corner-left { left: 0; }
+.pipeline-corner-right { right: 0; }
+.pipeline-flow {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    flex: 1;
+    min-height: 28px;
+    gap: 0;
+    overflow: visible;
+    font-size: 0.6875rem;
+}
+.pipeline-flow .pipeline-seg { font-size: inherit; }
+.pipeline-seg {
+    position: relative;
+    flex: 1;
+    min-width: 48px;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-align: center;
+    overflow: visible;
+}
+.pipeline-seg-shape { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.pipeline-seg-poly { fill: var(--bg-tertiary); stroke: var(--border-color); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.pipeline-seg-asr .pipeline-seg-poly { stroke: var(--timeline-asr, #1976D2); }
+.pipeline-seg-llm .pipeline-seg-poly { stroke: var(--timeline-llm, #FF9800); }
+.pipeline-seg-tts .pipeline-seg-poly { stroke: var(--timeline-tts, #EC407A); }
+.pipeline-seg-label {
+    position: relative;
+    z-index: 1;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    clip-path: polygon(0 0, calc(100% - var(--seg-slant, 20px)) 0, 100% 50%, calc(100% - var(--seg-slant, 20px)) 100%, 0 100%, var(--seg-slant, 20px) 50%);
+    -webkit-clip-path: polygon(0 0, calc(100% - var(--seg-slant, 20px)) 0, 100% 50%, calc(100% - var(--seg-slant, 20px)) 100%, 0 100%, var(--seg-slant, 20px) 50%);
+}
+.pipeline-seg:not(:first-of-type) { margin-left: 6px; }
+
 .session-meta-container {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
     background: var(--bg-elevated);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--space-lg) var(--space-xl);
+    border-left: 4px solid var(--accent-primary);
+    border-radius: 0;
+    padding: var(--space-sm) var(--space-md);
     flex-shrink: 0;
     box-shadow: var(--shadow-sm);
 }
-
+.session-meta-icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+.session-meta-icon .lucide-inline { width: 20px; height: 20px; }
+.session-meta-content { flex: 1; min-width: 0; }
 .session-title {
-    font-size: 1.25rem;
+    font-size: 1.1rem;
     font-weight: 600;
-    margin-bottom: var(--space-sm);
+    margin: 0 0 2px 0;
+    line-height: 1.3;
     background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
-
+.session-meta-line2 { font-size: 0.8rem; color: var(--text-tertiary); margin-bottom: 2px; }
 .session-stats {
     display: flex;
-    gap: var(--space-xl);
-    font-size: 0.875rem;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    font-size: 0.8rem;
 }
+.session-stats:empty { display: none; }
+.session-meta-line3.session-stats:empty { display: none; }
+.session-meta-line4.session-filename { font-size: 0.8rem; color: var(--text-tertiary); margin-top: 4px; display: flex; align-items: center; gap: var(--space-xs); }
+.session-filename-label { flex: 1; min-width: 0; overflow: hidden; }
+.session-filename-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-filename-copy { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: var(--space-xs); background: transparent; border: none; border-radius: 4px; color: var(--text-tertiary); cursor: pointer; transition: color var(--transition-fast), background-color var(--transition-fast); }
+.session-filename-copy:hover { color: var(--accent-primary, var(--text-secondary)); background: var(--bg-tertiary); }
+.session-filename-copy .lucide-inline { width: 14px; height: 14px; }
 
 .session-stat-item {
     display: flex;
@@ -716,7 +853,7 @@ code, pre {
     padding: 0 var(--space-xs);
 }
 
-.chat-message {
+.chat-bubble {
     display: flex;
     flex-direction: row;
     align-items: flex-start;
@@ -729,6 +866,25 @@ code, pre {
     animation: slideIn var(--transition-base);
 }
 
+.chat-bubble.user {
+    border-left: 1px solid #4a6b28;
+    border-right: 3px solid var(--info);
+    flex-direction: row-reverse;
+    background: #4a6b28;
+    color: rgba(255,255,255,0.95);
+    border-color: #4a6b28;
+    margin-left: 20%;
+}
+
+.chat-bubble.ai,
+.chat-bubble.assistant {
+    border-left: 3px solid var(--nvidia-green);
+    background: #5a4a6b;
+    color: rgba(255,255,255,0.95);
+    border-color: #5a4a6b;
+    margin-right: 0.5rem;
+}
+
 @keyframes slideIn {
     from {
         opacity: 0;
@@ -738,16 +894,6 @@ code, pre {
         opacity: 1;
         transform: translateY(0);
     }
-}
-
-.chat-message.user {
-    border-left: 3px solid var(--info);
-    flex-direction: row-reverse;
-}
-
-.chat-message.ai,
-.chat-message.assistant {
-    border-left: 3px solid var(--nvidia-green);
 }
 
 .chat-avatar {
@@ -763,19 +909,13 @@ code, pre {
     opacity: 0.9;
 }
 
-.chat-bubble {
+.chat-bubble .chat-content {
     flex: 1;
     min-width: 0;
-    padding: 0.35rem 0.6rem;
-    border-radius: var(--radius-md);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
 }
 
-.chat-message.user .chat-bubble {
-    background: var(--info);
-    color: white;
-    border-color: var(--info);
+.chat-bubble .chat-text {
+    line-height: 1.4;
 }
 
 .chat-text {
@@ -784,11 +924,13 @@ code, pre {
 }
 
 .chat-meta {
+    display: block;
     font-size: 0.65rem;
     color: var(--text-tertiary);
     opacity: 0.85;
     margin-top: 0.15rem;
     line-height: 1.2;
+    text-align: right;
 }
 
 .chat-placeholder {
@@ -1073,7 +1215,7 @@ code, pre {
             "sidebar config"
             "sidebar timeline";
     }
-    
+
     .chat-panel {
         display: none;
     }
@@ -1086,7 +1228,7 @@ code, pre {
             "config"
             "timeline";
     }
-    
+
     .session-list {
         display: none;
     }

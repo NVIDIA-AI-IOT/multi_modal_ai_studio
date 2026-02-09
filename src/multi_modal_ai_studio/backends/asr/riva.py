@@ -25,6 +25,9 @@ from multi_modal_ai_studio.core.timeline import Timeline, Lane
 
 logger = logging.getLogger(__name__)
 
+# Default ASR model when config does not set one (Silero VAD; same as Live RIVA WebUI).
+DEFAULT_ASR_MODEL = "parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer"
+
 
 def list_riva_asr_models_sync(server: str, use_ssl: bool = False, ssl_cert: Optional[str] = None) -> List[str]:
     """Query Riva server for available ASR model names (sync, for use from thread/executor).
@@ -48,41 +51,41 @@ def list_riva_asr_models_sync(server: str, use_ssl: bool = False, ssl_cert: Opti
 
 class RivaASRBackend(ASRBackend):
     """NVIDIA Riva ASR backend with streaming support.
-    
+
     Features:
     - Streaming recognition with partial and final results
     - Runtime VAD tuning (start/stop thresholds, timeouts)
     - Automatic punctuation
     - Confidence scores
     """
-    
+
     def __init__(self, config: ASRConfig, timeline: Optional[Timeline] = None):
         """Initialize Riva ASR backend.
-        
+
         Args:
             config: ASRConfig instance with Riva settings
             timeline: Optional Timeline instance for event recording
-        
+
         Raises:
             ConfigError: If configuration is invalid
         """
         super().__init__(config)
-        
+
         # Timeline for recording events (rectangle rendering, metrics)
         self.timeline = timeline
-        
+
         # Validate configuration
         if config.scheme != "riva":
             raise ConfigError(f"Expected scheme 'riva', got '{config.scheme}'")
-        
+
         if not config.server:
             raise ConfigError("Riva server address is required")
-        
+
         # Parse server address
         self.riva_server = config.server
         self.use_ssl = config.server.startswith("https://") or ":443" in config.server
         self.ssl_cert = None  # TODO: Add SSL cert support in config
-        
+
         # Initialize Riva client
         try:
             self.auth = riva.client.Auth(self.ssl_cert, self.use_ssl, self.riva_server)
@@ -90,27 +93,27 @@ class RivaASRBackend(ASRBackend):
             self.logger.info(f"Initialized Riva ASR: {self.riva_server}")
         except Exception as e:
             raise ConnectionError(f"Failed to initialize Riva ASR: {e}")
-        
+
         # Streaming state (sync queue so thread-pool generator can block on get)
         self._sync_audio_queue: Optional[queue.Queue] = None
         self.stream_task: Optional[asyncio.Task] = None
         self._results_queue: Optional[asyncio.Queue] = None
-        
+
         # VAD/ASR segment tracking for rectangle rendering
         self._speech_start_time: Optional[float] = None
         self._vad_start_time: Optional[float] = None
         # Dedupe repeated asr_final (Riva sometimes sends same final twice)
         self._last_final_text: Optional[str] = None
-    
+
     def _create_streaming_config(
         self,
         sample_rate: int = 16000
     ) -> riva.client.StreamingRecognitionConfig:
         """Create Riva streaming recognition config with VAD tuning.
-        
+
         Args:
             sample_rate: Audio sample rate in Hz
-        
+
         Returns:
             StreamingRecognitionConfig with VAD parameters
         """
@@ -121,13 +124,13 @@ class RivaASRBackend(ASRBackend):
             stop_history=self.config.speech_timeout_ms,               # Silence duration (ms) before end
             stop_threshold=self.config.vad_stop_threshold,            # End detection sensitivity
         )
-        
+
         self.logger.info(
             f"VAD config: speech_pad={self.config.speech_pad_ms}ms, "
             f"silence_duration={self.config.speech_timeout_ms}ms, "
             f"threshold={self.config.vad_start_threshold}"
         )
-        
+
         config = riva.client.StreamingRecognitionConfig(
             config=riva.client.RecognitionConfig(
                 encoding=riva.client.AudioEncoding.LINEAR_PCM,
@@ -146,69 +149,69 @@ class RivaASRBackend(ASRBackend):
         return config
 
     def _riva_model_for_config(self) -> Optional[str]:
-        """Return model name for Riva API, or None for server default."""
+        """Return model name for Riva API. Defaults to Silero VAD model to match Live RIVA WebUI."""
         m = (self.config.model or "").strip()
         if not m or m.lower() in ("conformer", "default", "parakeet 1.1b", "parakeet"):
-            return None
+            return DEFAULT_ASR_MODEL
         return m
 
     async def start_stream(self) -> None:
         """Start streaming recognition session.
-        
+
         Raises:
             ConnectionError: If unable to connect to Riva
         """
         if self._sync_audio_queue is not None:
             raise RuntimeError("Stream already started")
-        
+
         self._sync_audio_queue = queue.Queue()
         self._results_queue = asyncio.Queue()
-        
+
         # Start background task to stream audio to Riva
         self.stream_task = asyncio.create_task(self._stream_to_riva())
-        
+
         self.logger.info("Riva ASR stream started")
-    
+
     async def send_audio(self, audio_chunk: bytes) -> None:
         """Send audio chunk for recognition.
-        
+
         Args:
             audio_chunk: Raw PCM audio bytes (16kHz, 16-bit, mono)
-        
+
         Raises:
             RuntimeError: If stream not started
         """
         if self._sync_audio_queue is None:
             raise RuntimeError("Stream not started. Call start_stream() first.")
-        
+
         self._sync_audio_queue.put(audio_chunk)
-    
+
     async def receive_results(self) -> AsyncIterator[ASRResult]:
         """Yield recognition results as they become available.
-        
+
         Yields:
             ASRResult: Transcription results (both partial and final)
         """
         if self._results_queue is None:
             raise RuntimeError("Stream not started. Call start_stream() first.")
-        
+
         while True:
             result = await self._results_queue.get()
-            
+
             # None signals end of stream
             if result is None:
                 break
-            
+
             yield result
-    
+
     async def stop_stream(self) -> None:
         """Stop streaming recognition session."""
         if self._sync_audio_queue is None:
             return
-        
+
         # Signal end of stream (thread-safe; unblocks generator in executor)
         self._sync_audio_queue.put(None)
-        
+
         # Wait for stream task to finish
         if self.stream_task:
             try:
@@ -220,13 +223,13 @@ class RivaASRBackend(ASRBackend):
                     await self.stream_task
                 except asyncio.CancelledError:
                     pass
-        
+
         self._sync_audio_queue = None
         self._results_queue = None
         self.stream_task = None
-        
+
         self.logger.info("Riva ASR stream stopped")
-    
+
     async def _stream_to_riva(self) -> None:
         """Background task to stream audio to Riva and receive results.
 
@@ -261,6 +264,10 @@ class RivaASRBackend(ASRBackend):
             out = []
             if not response.results:
                 return out
+            # Log first time we get any response from Riva (diagnostic for "no ASR at all")
+            if not hasattr(process_response, "_logged_first"):
+                process_response._logged_first = True
+                self.logger.info("Riva ASR first response: %d result(s)", len(response.results))
             for result in response.results:
                 if not result.alternatives:
                     continue
@@ -284,7 +291,11 @@ class RivaASRBackend(ASRBackend):
                     },
                 )
                 if result.is_final:
-                    self.logger.info("Final transcript: %s (confidence=%.2f)", text, asr_result.confidence)
+                    finals_emitted = getattr(process_response, "_finals_emitted", 0) + 1
+                    process_response._finals_emitted = finals_emitted
+                    self.logger.info(
+                        "Final transcript #%d: %s (confidence=%.2f)", finals_emitted, text, asr_result.confidence
+                    )
                     if self.timeline and self._speech_start_time is not None:
                         # Skip duplicate asr_final (same text as last) to avoid repeated final_transcript in timeline
                         if text == self._last_final_text:
@@ -313,6 +324,9 @@ class RivaASRBackend(ASRBackend):
                             self._vad_start_time = None
                             asr_result.metadata["event_timestamp"] = asr_final_event.timestamp
                 else:
+                    if not getattr(process_response, "_logged_partial", False):
+                        process_response._logged_partial = True
+                        self.logger.info("Riva ASR first partial: %r", text[:80])
                     self.logger.debug("Partial transcript: %s", text)
                 out.append(asr_result)
             return out
