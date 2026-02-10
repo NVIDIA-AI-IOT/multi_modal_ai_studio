@@ -420,6 +420,7 @@ const defaultConfig = {
         system_prompt: 'You are a helpful AI assistant.',
         extra_request_body: '',
         enable_vision: false,
+        vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.',
         vision_detail: 'auto',
         vision_frames: 4,
         vision_quality: 0.7,
@@ -872,10 +873,11 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">System Prompt</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', currentConfig.llm.enable_vision ? \'vision_system_prompt\' : \'system_prompt\', el.value); pinLlmFieldToDefault(currentConfig.llm.enable_vision ? \'vision_system_prompt\' : \'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
                 </div>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
-                          onchange="updateConfig('llm', 'system_prompt', this.value)">${config.system_prompt}</textarea>
+                          onchange="updateConfig('llm', currentConfig.llm.enable_vision ? 'vision_system_prompt' : 'system_prompt', this.value)">${config.enable_vision ? (config.vision_system_prompt || 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.') : config.system_prompt}</textarea>
+                ${!readonly ? `<span class="input-hint">${config.enable_vision ? 'Vision system prompt (used when Enable Vision is checked)' : 'Text LLM system prompt'}</span>` : ''}
             </div>
 
             <div class="form-group">
@@ -912,8 +914,21 @@ function onLLMMinimalOutputChange(checked) {
 function toggleVlmSettings() {
     const vlmSettings = document.getElementById('vlm-settings');
     const enableVision = document.getElementById('llm-enable-vision');
+    const systemPrompt = document.getElementById('llm-system-prompt');
+    
     if (vlmSettings && enableVision) {
         vlmSettings.style.display = enableVision.checked ? 'block' : 'none';
+    }
+    
+    // Swap system prompt content based on vision state
+    if (systemPrompt && currentConfig.llm) {
+        if (enableVision.checked) {
+            // Switching to vision mode - show vision_system_prompt
+            systemPrompt.value = currentConfig.llm.vision_system_prompt || 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.';
+        } else {
+            // Switching to text mode - show system_prompt
+            systemPrompt.value = currentConfig.llm.system_prompt || 'You are a helpful voice assistant.';
+        }
     }
 }
 

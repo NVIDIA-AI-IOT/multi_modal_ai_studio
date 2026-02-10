@@ -99,6 +99,7 @@ class LLMConfig:
         frequency_penalty: Frequency penalty (-2.0 to 2.0)
         presence_penalty: Presence penalty (-2.0 to 2.0)
         enable_vision: If True, capture and send camera frames to VLM with each prompt
+        vision_system_prompt: System prompt used when vision is enabled (overrides system_prompt)
         vision_detail: Image detail level for VLM ("low", "high", "auto") - affects token usage
         vision_frames: Number of frames to capture per turn (1=single frame, 2-10=multi-frame during speech)
         vision_quality: JPEG quality for captured frames (0.3-1.0)
@@ -117,13 +118,18 @@ class LLMConfig:
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
+    
+    # -------------------------------------------------------------------------
     # Vision (VLM) settings - send camera frames with prompts
-    enable_vision: bool = False
-    vision_detail: Literal["low", "high", "auto"] = "auto"
-    vision_frames: int = 4  # Number of frames per turn (1-10)
-    vision_quality: float = 0.7  # JPEG quality (0.3-1.0)
-    vision_max_width: int = 640  # Max frame width in pixels
-    vision_buffer_fps: float = 3.0  # Ring buffer capture rate
+    # When enable_vision=True, camera frames are captured and sent with each prompt
+    # -------------------------------------------------------------------------
+    enable_vision: bool = False  # Set True for VLM models (Cosmos-Reason, LLaVA, GPT-4V, etc.)
+    vision_system_prompt: str = "You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations."
+    vision_detail: Literal["low", "high", "auto"] = "auto"  # OpenAI vision detail level
+    vision_frames: int = 4       # Frames per turn (1=single at speech end, 2-10=during speech)
+    vision_quality: float = 0.7  # JPEG quality (0.3=fast/small, 1.0=high quality)
+    vision_max_width: int = 640  # Max frame width in pixels (smaller=faster)
+    vision_buffer_fps: float = 3.0  # Ring buffer capture rate (fps)
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
