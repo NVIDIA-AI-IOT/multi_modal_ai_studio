@@ -194,7 +194,8 @@ class OpenAILLMBackend(LLMBackend):
         self,
         prompt: str,
         history: Optional[List[Dict[str, str]]] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        image_data_urls: Optional[List[str]] = None,
     ) -> AsyncIterator[LLMToken]:
         """Generate response tokens in streaming fashion.
 
@@ -203,6 +204,9 @@ class OpenAILLMBackend(LLMBackend):
             history: Conversation history in format:
                      [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
             system_prompt: Optional system prompt (overrides config if provided)
+            image_data_urls: Optional list of base64 image data URLs for VLM models.
+                            Format: ["data:image/jpeg;base64,...", ...]
+                            Images are sent in order (first = earliest frame).
 
         Yields:
             LLMToken: Generated tokens
@@ -225,8 +229,35 @@ class OpenAILLMBackend(LLMBackend):
         if history:
             messages.extend(history)
 
-        # Add current prompt
-        messages.append({"role": "user", "content": prompt})
+        # Add current prompt - with images if provided (VLM multi-modal format)
+        if image_data_urls and len(image_data_urls) > 0:
+            # Multi-modal message format (OpenAI Vision API compatible)
+            # Works with: GPT-4V, LLaVA, Cosmos-Reason, Qwen-VL, etc.
+            # Multiple images are sent in temporal order for video understanding
+            detail = getattr(self.config, "vision_detail", "auto")
+            user_content = []
+            
+            # Add all images first (in temporal order)
+            for img_url in image_data_urls:
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": img_url,
+                        "detail": detail,
+                    }
+                })
+            
+            # Add text prompt after images
+            user_content.append({
+                "type": "text",
+                "text": prompt,
+            })
+            
+            messages.append({"role": "user", "content": user_content})
+            self.logger.info("VLM request: %d image(s) + text prompt", len(image_data_urls))
+        else:
+            # Text-only message
+            messages.append({"role": "user", "content": prompt})
 
         # Prepare API request
         url = f"{self.api_base}/chat/completions"

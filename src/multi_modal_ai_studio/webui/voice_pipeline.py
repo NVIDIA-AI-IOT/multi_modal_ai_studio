@@ -176,6 +176,84 @@ async def _run_voice_pipeline(
         else:
             logger.info("Server mic capture thread started; waiting for first PCM chunk and user_amplitude")
 
+    # VLM: Multi-frame browser capture for vision models
+    # Frames are captured continuously in browser ring buffer, then selected on ASR final
+    vision_enabled = getattr(llm_config, "enable_vision", False)
+    vision_frames_count = getattr(llm_config, "vision_frames", 4)
+    vision_quality = getattr(llm_config, "vision_quality", 0.7)
+    vision_max_width = getattr(llm_config, "vision_max_width", 640)
+    vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
+    
+    # Multi-frame response handling
+    browser_frames_event = asyncio.Event()
+    browser_frames_data: dict = {"frames": [], "t_start": 0.0, "t_end": 0.0}
+    
+    # Track speech timing for frame selection
+    speech_start_time: Optional[float] = None  # Set on first asr_partial
+    
+    if vision_enabled:
+        logger.info(
+            "VLM vision enabled: n_frames=%d, quality=%.1f, max_width=%d, buffer_fps=%.1f",
+            vision_frames_count, vision_quality, vision_max_width, vision_buffer_fps
+        )
+    
+    async def start_vlm_capture() -> None:
+        """Tell browser to start capturing frames into ring buffer."""
+        if not vision_enabled:
+            return
+        try:
+            await ws.send_str(json.dumps({
+                "type": "vlm_start_capture",
+                "fps": vision_buffer_fps,
+                "quality": vision_quality,
+                "max_width": vision_max_width,
+            }))
+            logger.debug("[VLM] Started browser frame capture")
+        except Exception as e:
+            logger.warning("[VLM] Failed to start capture: %s", e)
+    
+    async def request_vlm_frames(t_start: float, t_end: float, n_frames: int, timeout: float = 3.0) -> list:
+        """Request n_frames from browser's ring buffer, evenly spaced between t_start and t_end.
+        
+        Returns list of frame data URLs, or empty list if unavailable.
+        """
+        if not vision_enabled:
+            return []
+        
+        browser_frames_event.clear()
+        browser_frames_data["frames"] = []
+        
+        try:
+            await ws.send_str(json.dumps({
+                "type": "vlm_get_frames",
+                "t_start": t_start,
+                "t_end": t_end,
+                "n_frames": n_frames,
+            }))
+            logger.info("[VLM] Requested %d frames from browser (t=%.2f to %.2f)", n_frames, t_start, t_end)
+        except Exception as e:
+            logger.warning("[VLM] Failed to request frames: %s", e)
+            return []
+        
+        try:
+            await asyncio.wait_for(browser_frames_event.wait(), timeout=timeout)
+            frames = browser_frames_data.get("frames", [])
+            logger.info("[VLM] Received %d frames from browser", len(frames))
+            return frames
+        except asyncio.TimeoutError:
+            logger.warning("[VLM] Timeout waiting for browser frames")
+            return []
+    
+    async def stop_vlm_capture() -> None:
+        """Tell browser to stop capturing frames."""
+        if not vision_enabled:
+            return
+        try:
+            await ws.send_str(json.dumps({"type": "vlm_stop_capture"}))
+            logger.debug("[VLM] Stopped browser frame capture")
+        except Exception as e:
+            logger.warning("[VLM] Failed to stop capture: %s", e)
+
     async def send_event(event_dict: Dict[str, Any]) -> None:
         try:
             await ws.send_str(json.dumps({"type": "event", "event": event_dict}))
@@ -219,6 +297,8 @@ async def _run_voice_pipeline(
                             if use_server_mic and not pipeline_live.is_set():
                                 session.start()
                                 await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
+                                # VLM: Start browser frame capture when session starts
+                                await start_vlm_capture()
                                 pipeline_live.set()
                                 logger.info("Voice pipeline: start_session received; capture now feeds ASR + timeline")
                         if obj.get("type") == "stop":
@@ -238,6 +318,26 @@ async def _run_voice_pipeline(
                             session.app_version = __version__
                             stopped.set()
                             return
+                        # VLM: handle multi-frame response from browser
+                        if obj.get("type") == "vlm_frames":
+                            frames = obj.get("frames", [])
+                            t_start = obj.get("t_start", 0.0)
+                            t_end = obj.get("t_end", 0.0)
+                            # Extract just the data URLs from frames
+                            frame_urls = []
+                            for f in frames:
+                                if isinstance(f, dict) and f.get("data") and f["data"].startswith("data:"):
+                                    frame_urls.append(f["data"])
+                                elif isinstance(f, str) and f.startswith("data:"):
+                                    frame_urls.append(f)
+                            browser_frames_data["frames"] = frame_urls
+                            browser_frames_data["t_start"] = t_start
+                            browser_frames_data["t_end"] = t_end
+                            browser_frames_event.set()
+                            if frame_urls:
+                                logger.info("[VLM] Received %d frames from browser (t=%.2f to %.2f)", len(frame_urls), t_start, t_end)
+                            else:
+                                logger.warning("[VLM] Browser frames response empty (no camera?)")
                     except json.JSONDecodeError:
                         pass
                     continue
@@ -343,6 +443,11 @@ async def _run_voice_pipeline(
                 if not is_final:
                     last_partial_text = text
                     last_partial_ts = ts
+                    # VLM: Track speech start time for frame synchronization
+                    nonlocal speech_start_time
+                    if speech_start_time is None and vision_enabled:
+                        speech_start_time = ts
+                        logger.debug("[VLM] Speech started at t=%.2f", ts)
                     session.timeline.add_event(ev_type, Lane.SPEECH, data={"text": text, "confidence": getattr(result, "confidence", 1.0)})
                     # Fire-and-forget so we don't block on slow client; keeps asr_consumer able to receive 2nd turn
                     asyncio.create_task(send_event({
@@ -407,7 +512,7 @@ async def _run_voice_pipeline(
     async def turn_executor() -> None:
         """Process ASR finals one at a time: LLM -> TTS. Waits on finals_queue (fed by asr_consumer).
         Future: can be cancelled when new final arrives for barge-in."""
-        nonlocal conversation_history
+        nonlocal conversation_history, speech_start_time
         turn_index = 0
         try:
             while not stopped.is_set():
@@ -433,6 +538,44 @@ async def _run_voice_pipeline(
                     "timestamp": ts_llm_start,
                 })
                 session.timeline.add_event("llm_start", Lane.LLM)
+                
+                # VLM: Request frames from browser's ring buffer (time-synchronized with speech)
+                image_data_urls: list = []
+                if vision_enabled:
+                    # Calculate speech time window
+                    t_end = ts_llm_start  # End time is now (ASR final arrived)
+                    # Use speech_start_time if tracked, otherwise use a default window
+                    t_start = speech_start_time if speech_start_time is not None else max(0, t_end - 3.0)
+                    speech_duration = t_end - t_start
+                    
+                    logger.info("[VLM] Requesting %d frames from browser (speech: %.2fs to %.2fs, duration=%.2fs)",
+                               vision_frames_count, t_start, t_end, speech_duration)
+                    
+                    ts_frame_request = time.time()
+                    image_data_urls = await request_vlm_frames(
+                        t_start=t_start,
+                        t_end=t_end,
+                        n_frames=vision_frames_count,
+                        timeout=3.0,
+                    )
+                    
+                    if image_data_urls:
+                        frame_latency_ms = (time.time() - ts_frame_request) * 1000
+                        logger.info("[VLM] Received %d frames, latency=%.0fms", len(image_data_urls), frame_latency_ms)
+                        session.timeline.add_event("vlm_frames_captured", Lane.LLM, data={
+                            "n_frames": len(image_data_urls),
+                            "t_start": round(t_start, 2),
+                            "t_end": round(t_end, 2),
+                            "speech_duration": round(speech_duration, 2),
+                            "latency_ms": round(frame_latency_ms),
+                            "source": "browser",
+                        })
+                    else:
+                        logger.warning("[VLM] Vision enabled but frame capture failed")
+                    
+                    # Reset speech start time for next turn
+                    speech_start_time = None
+                
                 full_response = ""
                 llm_first_token_sent = False
                 try:
@@ -440,6 +583,7 @@ async def _run_voice_pipeline(
                         prompt=text,
                         history=conversation_history,
                         system_prompt=llm_config.system_prompt,
+                        image_data_urls=image_data_urls if image_data_urls else None,
                     ):
                         if stopped.is_set():
                             break
@@ -573,6 +717,8 @@ async def _run_voice_pipeline(
 
     if not use_server_mic:
         await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
+        # VLM: Start browser frame capture when session starts
+        await start_vlm_capture()
 
     _user_amplitude_sent = False
     preview_start_time = time.time()
@@ -698,6 +844,9 @@ async def _run_voice_pipeline(
                 await turn_task
             except asyncio.CancelledError:
                 pass
+
+    # VLM: Stop browser frame capture
+    await stop_vlm_capture()
 
     if session.timeline.start_time is None:
         return None  # preview-only (Server USB) and client closed before start_session

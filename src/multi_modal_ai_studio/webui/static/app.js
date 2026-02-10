@@ -418,7 +418,13 @@ const defaultConfig = {
         minimal_output: false,
         stream: true,
         system_prompt: 'You are a helpful AI assistant.',
-        extra_request_body: ''
+        extra_request_body: '',
+        enable_vision: false,
+        vision_detail: 'auto',
+        vision_frames: 4,
+        vision_quality: 0.7,
+        vision_max_width: 640,
+        vision_buffer_fps: 3.0
     },
     tts: {
         backend: 'riva',
@@ -836,6 +842,34 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" ${disabled} id="llm-enable-vision" ${config.enable_vision ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'enable_vision', this.checked); toggleVlmSettings();">
+                    Enable Vision (VLM)
+                </label>
+                ${!readonly ? '<span class="input-hint">Send camera frames to VLM during speech (e.g. Cosmos-Reason, GPT-4V)</span>' : ''}
+            </div>
+
+            <div id="vlm-settings" class="form-group" style="display: ${config.enable_vision ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid var(--border-color);">
+                <label>Frames per Turn</label>
+                <input type="range" ${disabled} id="llm-vision-frames" min="1" max="10" step="1" value="${config.vision_frames || 4}"
+                       oninput="updateConfig('llm', 'vision_frames', parseInt(this.value)); document.getElementById('vision-frames-value').textContent = this.value;">
+                <span id="vision-frames-value" class="range-value">${config.vision_frames || 4}</span>
+                ${!readonly ? '<span class="input-hint">1 = single frame at end, 2-10 = multiple frames during speech</span>' : ''}
+
+                <label style="margin-top: 10px;">Frame Quality</label>
+                <input type="range" ${disabled} id="llm-vision-quality" min="0.3" max="1.0" step="0.1" value="${config.vision_quality || 0.7}"
+                       oninput="updateConfig('llm', 'vision_quality', parseFloat(this.value)); document.getElementById('vision-quality-value').textContent = this.value;">
+                <span id="vision-quality-value" class="range-value">${config.vision_quality || 0.7}</span>
+                ${!readonly ? '<span class="input-hint">JPEG quality: lower = smaller, higher = better</span>' : ''}
+
+                <label style="margin-top: 10px;">Max Frame Width</label>
+                <input type="range" ${disabled} id="llm-vision-max-width" min="320" max="1280" step="64" value="${config.vision_max_width || 640}"
+                       oninput="updateConfig('llm', 'vision_max_width', parseInt(this.value)); document.getElementById('vision-max-width-value').textContent = this.value + 'px';">
+                <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
+            </div>
+
+            <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">System Prompt</label>
                     ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
@@ -872,6 +906,14 @@ function onLLMMinimalOutputChange(checked) {
         currentConfig.llm.extra_request_body = jsonStr;
         const el = document.getElementById('llm-extra-request-body');
         if (el) { el.value = jsonStr; }
+    }
+}
+
+function toggleVlmSettings() {
+    const vlmSettings = document.getElementById('vlm-settings');
+    const enableVision = document.getElementById('llm-enable-vision');
+    if (vlmSettings && enableVision) {
+        vlmSettings.style.display = enableVision.checked ? 'block' : 'none';
     }
 }
 
@@ -4404,9 +4446,244 @@ function handleVoiceWsMessage(ev) {
         } else if (msg.type === 'error') {
             console.error('Voice pipeline error:', msg.error);
             appendLiveChatError(msg.error);
+        } else if (msg.type === 'request_frame') {
+            // VLM: Legacy single frame request (backwards compatibility)
+            console.log('[VLM] Server requested single frame');
+            captureAndSendVideoFrame();
+        } else if (msg.type === 'vlm_start_capture') {
+            // VLM: Start continuous frame capture into ring buffer
+            const fps = msg.fps || 3.0;
+            const quality = msg.quality || 0.7;
+            const maxWidth = msg.max_width || 640;
+            vlmStartCapture(fps, quality, maxWidth);
+        } else if (msg.type === 'vlm_get_frames') {
+            // VLM: Get frames from ring buffer
+            const tStart = msg.t_start || 0;
+            const tEnd = msg.t_end || 0;
+            const nFrames = msg.n_frames || 4;
+            vlmSendFrames(tStart, tEnd, nFrames);
+        } else if (msg.type === 'vlm_stop_capture') {
+            // VLM: Stop frame capture
+            vlmStopCapture();
         }
     } catch (e) {
         console.error('Parse WS message error:', e);
+    }
+}
+
+/**
+ * VLM Ring Buffer: Continuous frame capture for multi-frame VLM requests.
+ * Frames are stored with timestamps and selected based on speech timing.
+ */
+const vlmRingBuffer = {
+    frames: [],           // Array of {data: dataUrl, timestamp: sessionTime}
+    maxFrames: 60,        // ~20 seconds at 3 fps
+    captureInterval: null,
+    fps: 3.0,
+    quality: 0.7,
+    maxWidth: 640,
+    isCapturing: false
+};
+
+/**
+ * Start VLM frame capture into ring buffer.
+ * Called by server when session starts with vlm_start_capture message.
+ */
+function vlmStartCapture(fps, quality, maxWidth) {
+    if (vlmRingBuffer.isCapturing) {
+        console.log('[VLM] Capture already running');
+        return;
+    }
+    
+    vlmRingBuffer.fps = fps || 3.0;
+    vlmRingBuffer.quality = quality || 0.7;
+    vlmRingBuffer.maxWidth = maxWidth || 640;
+    vlmRingBuffer.frames = [];
+    vlmRingBuffer.isCapturing = true;
+    
+    const intervalMs = 1000 / vlmRingBuffer.fps;
+    vlmRingBuffer.captureInterval = setInterval(vlmCaptureFrame, intervalMs);
+    
+    console.log('[VLM] Started capture: fps=' + vlmRingBuffer.fps + ', quality=' + vlmRingBuffer.quality + ', maxWidth=' + vlmRingBuffer.maxWidth);
+}
+
+/**
+ * Stop VLM frame capture.
+ */
+function vlmStopCapture() {
+    if (vlmRingBuffer.captureInterval) {
+        clearInterval(vlmRingBuffer.captureInterval);
+        vlmRingBuffer.captureInterval = null;
+    }
+    vlmRingBuffer.isCapturing = false;
+    vlmRingBuffer.frames = [];
+    console.log('[VLM] Stopped capture');
+}
+
+/**
+ * Capture a single frame into the ring buffer.
+ */
+function vlmCaptureFrame() {
+    const videoFeed = document.getElementById('video-feed');
+    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
+        return; // No video available
+    }
+    
+    try {
+        const canvas = document.createElement('canvas');
+        const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
+        canvas.width = Math.min(videoFeed.videoWidth, vlmRingBuffer.maxWidth);
+        canvas.height = Math.round(canvas.width / aspectRatio);
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', vlmRingBuffer.quality);
+        const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
+        
+        // Add to ring buffer
+        vlmRingBuffer.frames.push({
+            data: dataUrl,
+            timestamp: sessionTime,
+            width: canvas.width,
+            height: canvas.height
+        });
+        
+        // Trim if over max
+        while (vlmRingBuffer.frames.length > vlmRingBuffer.maxFrames) {
+            vlmRingBuffer.frames.shift();
+        }
+    } catch (e) {
+        // Silently ignore capture errors
+    }
+}
+
+/**
+ * Get frames from ring buffer, evenly spaced between t_start and t_end.
+ */
+function vlmGetFrames(tStart, tEnd, nFrames) {
+    const frames = vlmRingBuffer.frames;
+    if (frames.length === 0 || nFrames <= 0) {
+        return [];
+    }
+    
+    // Filter frames within time range
+    const inRange = frames.filter(f => f.timestamp >= tStart && f.timestamp <= tEnd);
+    if (inRange.length === 0) {
+        // If no frames in range, return latest frame(s)
+        console.log('[VLM] No frames in range [' + tStart.toFixed(2) + ', ' + tEnd.toFixed(2) + '], using latest');
+        const latest = frames.slice(-Math.min(nFrames, frames.length));
+        return latest;
+    }
+    
+    // If we have fewer frames than requested, return all
+    if (inRange.length <= nFrames) {
+        return inRange;
+    }
+    
+    // Select evenly spaced frames
+    const result = [];
+    const duration = tEnd - tStart;
+    for (let i = 0; i < nFrames; i++) {
+        const targetTime = tStart + (i * duration / (nFrames - 1));
+        // Find closest frame to target time
+        let closest = inRange[0];
+        let minDiff = Math.abs(inRange[0].timestamp - targetTime);
+        for (const f of inRange) {
+            const diff = Math.abs(f.timestamp - targetTime);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = f;
+            }
+        }
+        // Avoid duplicates
+        if (result.length === 0 || result[result.length - 1] !== closest) {
+            result.push(closest);
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * Send frames to server in response to vlm_get_frames request.
+ */
+function vlmSendFrames(tStart, tEnd, nFrames) {
+    const selectedFrames = vlmGetFrames(tStart, tEnd, nFrames);
+    
+    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+        const payload = {
+            type: 'vlm_frames',
+            frames: selectedFrames.map(f => ({
+                data: f.data,
+                timestamp: f.timestamp,
+                width: f.width,
+                height: f.height
+            })),
+            t_start: tStart,
+            t_end: tEnd,
+            n_requested: nFrames
+        };
+        state.voiceWs.send(JSON.stringify(payload));
+        console.log('[VLM] Sent ' + selectedFrames.length + ' frames (requested ' + nFrames + ') for t=[' + tStart.toFixed(2) + ', ' + tEnd.toFixed(2) + ']');
+    }
+}
+
+/**
+ * Legacy: Single frame capture for backwards compatibility.
+ */
+function captureAndSendVideoFrame() {
+    // Use ring buffer if available, otherwise capture fresh
+    if (vlmRingBuffer.frames.length > 0) {
+        const latest = vlmRingBuffer.frames[vlmRingBuffer.frames.length - 1];
+        if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            state.voiceWs.send(JSON.stringify({
+                type: 'vlm_frames',
+                frames: [latest],
+                t_start: latest.timestamp,
+                t_end: latest.timestamp,
+                n_requested: 1
+            }));
+        }
+        return;
+    }
+    
+    // Fallback: capture fresh frame
+    const videoFeed = document.getElementById('video-feed');
+    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
+        if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            state.voiceWs.send(JSON.stringify({
+                type: 'vlm_frames',
+                frames: [],
+                t_start: 0,
+                t_end: 0,
+                n_requested: 1
+            }));
+        }
+        return;
+    }
+    
+    try {
+        const canvas = document.createElement('canvas');
+        const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
+        canvas.width = Math.min(videoFeed.videoWidth, 640);
+        canvas.height = Math.round(canvas.width / aspectRatio);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
+        
+        if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            state.voiceWs.send(JSON.stringify({
+                type: 'vlm_frames',
+                frames: [{data: dataUrl, timestamp: sessionTime, width: canvas.width, height: canvas.height}],
+                t_start: sessionTime,
+                t_end: sessionTime,
+                n_requested: 1
+            }));
+        }
+    } catch (e) {
+        console.error('[VLM] Frame capture error:', e);
     }
 }
 
@@ -4414,6 +4691,7 @@ function handleVoiceWsClose(ev) {
     console.log('[Voice] WebSocket closed: code=' + (ev && ev.code) + ' reason=' + (ev && ev.reason) + ' clean=' + (ev && ev.wasClean));
     state.voiceWs = null;
     stopVoiceMicStream();
+    vlmStopCapture();  // Stop VLM frame capture
     if (state.sessionState === 'live') {
         stopLiveSystemStatsPoll();
         if (state.liveTimelineRafId != null) {
