@@ -1161,11 +1161,17 @@ async def _run_voice_pipeline(
                 
                 full_response = ""
                 llm_first_token_sent = False
+                
+                # Use vision_system_prompt when vision is enabled and we have frames
+                effective_system_prompt = llm_config.system_prompt
+                if vision_enabled and image_data_urls:
+                    effective_system_prompt = getattr(llm_config, "vision_system_prompt", llm_config.system_prompt)
+                
                 try:
                     async for token in llm.generate_stream(
                         prompt=text,
                         history=conversation_history,
-                        system_prompt=llm_config.system_prompt,
+                        system_prompt=effective_system_prompt,
                         image_data_urls=image_data_urls if image_data_urls else None,
                     ):
                         if stopped.is_set():
