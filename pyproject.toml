@@ -47,6 +47,14 @@ dev = [
 audio = [
     "pyaudio>=0.2.13",  # For local USB device access (headless mode)
 ]
+camera = [
+    "opencv-python-headless>=4.5.0",  # For /api/camera/stream (Jetson USB webcam preview)
+]
+webrtc-camera = [
+    "aiortc>=1.6.0",
+    "av>=10.0.0",
+    "opencv-python-headless>=4.5.0",
+]
 
 [project.scripts]
 multi-modal-ai-studio = "multi_modal_ai_studio.cli.main:main"

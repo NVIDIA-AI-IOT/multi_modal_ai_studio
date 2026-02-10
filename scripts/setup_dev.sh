@@ -34,29 +34,20 @@ pip install --upgrade pip setuptools wheel
 
 echo
 
-# Check for system dependencies (pyaudio needs portaudio)
-echo "→ Checking system dependencies..."
-if ! pkg-config --exists portaudio-2.0; then
-    echo "⚠  portaudio-dev not found"
-    echo "   Installing system dependencies (requires sudo)..."
-    echo
-    sudo apt-get update
-    sudo apt-get install -y portaudio19-dev python3-pyaudio
-    echo "✓ System dependencies installed"
-else
-    echo "✓ System dependencies OK"
-fi
-
-echo
-
-# Install package in development mode
+# Install package in development mode first (no portaudio required for ALSA-only use)
 echo "→ Installing multi-modal-ai-studio in development mode..."
 pip install -e .
 
-# Optionally install audio support (for USB devices / headless mode)
+# Optionally install audio support (PyAudio for pyaudio:N devices; ALSA devices like EMEET use arecord and don't need this)
 echo
-read -p "Install USB audio support (pyaudio)? Needed for headless mode [y/N]: " install_audio
+read -p "Install USB audio support (pyaudio)? Only needed for pyaudio:N devices; ALSA mics (e.g. EMEET) work without it [y/N]: " install_audio
 if [[ "$install_audio" =~ ^[Yy]$ ]]; then
+    # PyAudio build requires portaudio dev headers
+    if ! pkg-config --exists portaudio-2.0; then
+        echo "→ Installing portaudio (required for pyaudio build)..."
+        sudo apt-get update
+        sudo apt-get install -y portaudio19-dev
+    fi
     echo "→ Installing audio dependencies..."
     pip install -e ".[audio]"
     echo "✓ Audio support installed"

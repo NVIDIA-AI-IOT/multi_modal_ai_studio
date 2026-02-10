@@ -71,13 +71,13 @@
                     <div class="session-meta-container" id="session-meta">
                         <div class="session-meta-icon" aria-hidden="true"><i data-lucide="message-square" class="lucide-inline"></i></div>
                         <div class="session-meta-content">
-                            <h2 class="session-title" id="session-title">Session</h2>
+                            <h2 class="session-title" id="session-title">New Session</h2>
                             <div class="session-meta-line2" id="session-meta-line2"><!-- Date & time, turns --></div>
                             <div class="session-meta-line3 session-stats" id="session-stats"><!-- Avg TTL, TTFA, etc. --></div>
                             <div class="session-meta-line4 session-filename" id="session-filename"><!-- Session filename (recorded only) --></div>
                         </div>
                         <div class="device-tags" id="device-tags" style="display: none;">
-                            <span class="device-tag"><i data-lucide="video" class="lucide-inline"></i> <span id="device-indicator-camera">—</span></span>
+                            <span class="device-tag device-tag-camera" id="device-tag-camera"><i data-lucide="video" class="lucide-inline"></i> <span id="device-indicator-camera">—</span></span>
                             <span class="device-tag"><i data-lucide="mic" class="lucide-inline"></i> <span id="device-indicator-mic">—</span></span>
                             <span class="device-tag"><i data-lucide="volume-2" class="lucide-inline"></i> <span id="device-indicator-speaker">—</span></span>
                         </div>
@@ -106,14 +106,15 @@
                                 START Session
                             </button>
                         </div>
-                        <!-- Live: Video feed -->
+                        <!-- Live: Video feed (browser = video element; server MJPEG = img, since video does not support multipart/x-mixed-replace) -->
                         <video id="video-feed" class="session-video-feed" autoplay muted playsinline style="display: none;"></video>
+                        <img id="video-feed-mjpeg" class="session-video-feed" alt="Camera stream" style="display: none;">
                         <!-- Mic amplitude: last 200ms dotted waveform at bottom of preview -->
                         <div class="mic-waveform-overlay" id="mic-waveform-overlay" style="display: none;" aria-hidden="true">
                             <canvas id="mic-waveform-canvas"></canvas>
                         </div>
                     </div>
-                    
+
                     <!-- STOP button when recording (no Setup Mode / PREVIEW) -->
                     <div class="device-controls-container" id="device-controls-container" style="display: none;">
                         <div class="session-control">
@@ -123,7 +124,7 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <!-- Live ASR label (updated on every partial; like Live RIVA WebUI) -->
                     <div class="live-asr-label-wrap" id="live-asr-label-wrap" style="display: none;">
                         <span class="live-asr-prefix">Listening: </span><span id="live-asr-text"></span>
@@ -143,7 +144,7 @@
                         </div>
                         <pre class="voice-debug-log" id="voice-debug-log"></pre>
                     </div>
-                    
+
                     <!-- Text input at bottom when Mic = None (Text Only), ChatGPT-style -->
                     <div class="chat-input-container" id="chat-input-container" style="display: none;">
                         <textarea id="chat-input" class="chat-input" rows="1" placeholder="Type a message..."></textarea>
@@ -264,6 +265,16 @@
                                         <div class="settings-desc">When enabled, ASR and TTS events are shown in a single Speech lane (ASR top, TTS bottom)</div>
                                     </span>
                                 </label>
+                            </div>
+                            <div class="settings-item">
+                                <div class="settings-title" style="margin-bottom: 8px;">Mic preview (waveform) gain</div>
+                                <div class="settings-desc" style="margin-bottom: 8px;">Amplify the green mic bar in setup and during the session (×1–×4). Use ×2 or ×3 for quiet mics like EMEET.</div>
+                                <select id="ui-mic-preview-gain" class="settings-select" title="Mic preview visualization gain">
+                                    <option value="1">×1</option>
+                                    <option value="2">×2</option>
+                                    <option value="3">×3</option>
+                                    <option value="4">×4</option>
+                                </select>
                             </div>
                             <div class="settings-item">
                                 <div class="settings-title" style="margin-bottom: 8px;">Default timeline view height</div>

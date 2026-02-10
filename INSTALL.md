@@ -25,7 +25,7 @@ This script will:
 
 ## Run the app
 
-**Device support:** Voice and video use **browser devices (WebRTC)**—microphone, speaker, and camera are accessed through the browser. Local USB microphone, USB speaker, or USB webcam on the server machine are **not supported yet**.
+**Device support:** Voice and video use **browser devices (WebRTC)** by default. A **server USB microphone** (ALSA, e.g. EMEET) is supported—select it in the Devices tab; no PyAudio install needed on Linux. USB speaker and USB webcam on the server are not supported yet.
 
 **View sessions only** (no Riva or LLM needed):
 
@@ -51,12 +51,16 @@ multi-modal-ai-studio --port 8092 \
 
 If you prefer manual setup:
 
-### 1. System Dependencies
+### 1. System Dependencies (optional, for PyAudio only)
+
+**Server USB microphone (ALSA, e.g. EMEET):** On Linux, the app uses `arecord` for ALSA devices. No extra install needed—just select the device in the UI.
+
+**PyAudio (for `pyaudio:N` device list / headless):** If you install the `[audio]` extra, install PortAudio first:
 
 ```bash
-# Install portaudio (required for pyaudio)
 sudo apt-get update
-sudo apt-get install -y portaudio19-dev python3-pyaudio
+sudo apt-get install -y portaudio19-dev
+# then: pip install -e ".[audio]"
 ```
 
 ### 2. Virtual Environment
@@ -395,11 +399,14 @@ sudo apt-get install -y \
 
 **Error**: `portaudio.h: No such file or directory`
 
-**Fix**:
+PyAudio needs the PortAudio development headers. Install them before `pip install -e ".[audio]"`:
+
 ```bash
 sudo apt-get install -y portaudio19-dev
-pip install --upgrade --force-reinstall pyaudio
+pip install -e ".[audio]"
 ```
+
+**Note:** If you only use a Server USB mic that appears as ALSA (e.g. EMEET OfficeCore M0 Plus), you don't need PyAudio—the app uses `arecord` on Linux. Skip the `.[audio]` extra.
 
 ### Import Errors
 

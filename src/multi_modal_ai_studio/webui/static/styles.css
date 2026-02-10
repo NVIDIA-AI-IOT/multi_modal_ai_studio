@@ -625,10 +625,14 @@ code, pre {
     opacity: 1;
 }
 .config-tab .config-tab-icon {
-    width: 14px;
-    height: 14px;
+    width: 17px;
+    height: 17px;
     flex-shrink: 0;
 }
+/* Pipeline tab icons use timeline colors (icon only) */
+.config-tab[data-tab="asr"] .config-tab-icon { color: var(--timeline-asr); }
+.config-tab[data-tab="llm"] .config-tab-icon { color: var(--timeline-llm); }
+.config-tab[data-tab="tts"] .config-tab-icon { color: var(--timeline-tts); }
 
 .config-tab.active {
     font-weight: 600;
@@ -832,6 +836,16 @@ code, pre {
     font-size: 11px;
 }
 
+.config-value--device {
+    display: block;
+    padding: 6px 10px;
+    margin-top: 4px;
+    background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
 /* VAD Tuning (sliders + presets) */
 .vad-tuning-container {
     display: flex;
@@ -1032,6 +1046,19 @@ code, pre {
     opacity: 0.6;
 }
 
+/* NVIDIA RIVA tab: bird icon (green), vertically centered with label */
+.speech-api-tab .riva-tab-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.speech-api-tab .riva-tab-icon {
+    color: var(--nvidia-green);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
 .backend-content {
     animation: fadeIn 0.2s ease;
 }
@@ -1119,7 +1146,6 @@ code, pre {
     margin-top: var(--space-xs);
     font-size: 0.75rem;
     color: var(--text-tertiary);
-    font-style: italic;
 }
 
 .checkbox-label {
@@ -1135,6 +1161,154 @@ code, pre {
     height: 18px;
     cursor: pointer;
     accent-color: var(--nvidia-green);
+}
+
+.checkbox-label--with-icon {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-sm);
+}
+.app-config-barge-in-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+/* Toggle switch (slide style, like Live RIVA WebUI) */
+.form-group-row--toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+.form-group-row--toggle .toggle-switch {
+    flex-shrink: 0;
+}
+.toggle-switch {
+    position: relative;
+    width: 48px;
+    height: 26px;
+    flex-shrink: 0;
+}
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    transition: 0.3s ease;
+    border-radius: 26px;
+}
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--text-secondary);
+    transition: 0.3s ease;
+    border-radius: 50%;
+}
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--accent-primary, var(--nvidia-green));
+    border-color: var(--accent-primary, var(--nvidia-green));
+}
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(22px);
+    background-color: white;
+}
+.toggle-switch input:disabled + .toggle-slider {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+.form-group-row--toggle .label-text {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.form-group-row--toggle .label-text .lucide-inline {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+.app-config-subheading {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+}
+.app-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+.radio-label {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 400;
+}
+.radio-label input[type="radio"] {
+    margin-top: 3px;
+    accent-color: var(--nvidia-green);
+    cursor: pointer;
+}
+.app-number-stepper {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    width: fit-content;
+}
+.btn-stepper {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    line-height: 1;
+    background: var(--bg-tertiary);
+    border: none;
+    border-right: 1px solid var(--border-color);
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 0;
+    transition: background var(--transition-base);
+}
+.app-number-stepper .btn-stepper:last-of-type {
+    border-right: none;
+    border-left: 1px solid var(--border-color);
+}
+.btn-stepper:hover:not(:disabled) {
+    background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+}
+.app-number-stepper-value {
+    min-width: 2.5rem;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
 .config-item:last-child {
@@ -1202,6 +1376,9 @@ code, pre {
     align-items: center;
     overflow: visible;
 }
+.pipeline-grid--no-camera {
+    grid-template-columns: 1fr 1fr;
+}
 .pipeline-device-slot {
     display: inline-flex;
     align-items: center;
@@ -1238,9 +1415,16 @@ code, pre {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.pipeline-device-slot--placeholder {
+    visibility: hidden;
+    min-width: 0;
+}
+.pipeline-device-slot--placeholder .pipeline-device-slot-icon {
+    min-width: 12px;
+}
 .pipeline-device-type-icon.lucide-inline {
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
     flex-shrink: 0;
     opacity: 0.7;
 }
@@ -1476,6 +1660,10 @@ code, pre {
     height: 12px;
     opacity: 0.9;
 }
+.device-tag--blank .device-tag-placeholder {
+    display: inline-block;
+    min-width: 20px;
+}
 
 .session-stat-item {
     display: flex;
@@ -1562,22 +1750,25 @@ code, pre {
     color: var(--text-tertiary);
 }
 
+.image-placeholder.placeholder--sound-only .placeholder-text {
+    color: #ef4444;
+}
+
 /* Hide placeholder when content is loaded */
 .session-preview-image[src]:not([src=""]) + .image-placeholder,
 .session-video-feed.active + .video-placeholder {
     display: none;
 }
 
-/* Mic amplitude waveform: bottom of camera preview, raised 20px; timeline-style (user green, dark rounded back) */
+/* Mic amplitude waveform: bottom of camera preview, raised 20px; inset 60px L/R; timeline-style drawn in canvas */
 .mic-waveform-overlay {
     position: absolute;
-    left: 0;
-    right: 0;
+    left: 60px;
+    right: 60px;
     bottom: 20px;
     height: 28px;
     z-index: 3;
     pointer-events: none;
-    background: transparent;
 }
 .mic-waveform-overlay canvas {
     display: block;
@@ -2566,6 +2757,13 @@ code, pre {
 }
 
 /* ===== Responsive Design ===== */
+/* Wide screens: larger session-list sidebar */
+@media (min-width: 1600px) {
+    .container {
+        grid-template-columns: 360px 1fr;
+    }
+}
+
 @media (max-width: 1200px) {
     .container {
         grid-template-columns: 240px 1fr;
