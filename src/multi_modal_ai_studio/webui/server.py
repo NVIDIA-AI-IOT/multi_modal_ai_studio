@@ -16,16 +16,51 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from aiohttp import web
+from aiohttp.abc import AbstractAccessLogger
 
 from multi_modal_ai_studio.config.schema import LLMConfig
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.riva import list_riva_tts_voices_sync
-from multi_modal_ai_studio.webui.voice_pipeline import handle_voice_ws
+from multi_modal_ai_studio.devices.local import (
+    list_local_cameras,
+    list_local_audio_inputs,
+    list_local_audio_outputs,
+)
+from multi_modal_ai_studio.webui.voice_pipeline import handle_voice_ws, handle_mic_preview_ws
+from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# High-frequency endpoints to omit from access log (reduces noise during live session)
+_ACCESS_LOG_SKIP_PATHS = frozenset({"/api/system/stats"})
+
+
+class _QuietAccessLogger(AbstractAccessLogger):
+    """Access logger that skips high-frequency polling endpoints (e.g. /api/system/stats)."""
+
+    def log(self, request: web.BaseRequest, response: web.StreamResponse, time: float) -> None:
+        if request.path in _ACCESS_LOG_SKIP_PATHS:
+            return
+        try:
+            size = getattr(response, "body_length", None) or getattr(response, "_body_length", None)
+            if size is None:
+                size = "-"
+            from datetime import datetime
+            req_time = datetime.utcnow().strftime("%d/%b/%Y:%H:%M:%S +0000")
+            self.logger.info(
+                '%s [%s] "%s %s HTTP/1.1" %s %s',
+                request.remote,
+                req_time,
+                request.method,
+                request.path,
+                response.status,
+                size,
+            )
+        except Exception:
+            pass
 
 try:
     import psutil
@@ -64,43 +99,6 @@ def _gather_system_stats() -> Dict[str, Any]:
     except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
         pass
     return {"cpu_percent": cpu_percent, "gpu_percent": gpu_percent}
-
-
-def _list_jetson_cameras() -> List[Dict[str, str]]:
-    """List video devices attached to the Jetson (server). Returns list of { id, label }."""
-    cameras = []
-    if sys.platform != "linux":
-        return cameras
-    try:
-        # List /dev/video* (video0, video1, ...); skip metadata nodes like video0 sometimes has video0_metadata
-        dev = Path("/dev")
-        for p in sorted(dev.glob("video*")):
-            if p.name.startswith("video") and p.name[-1].isdigit() and not "_" in p.name:
-                device_id = str(p)
-                # Optional: get label via v4l2-ctl (e.g. "UVC Camera (046d:0825)")
-                label = device_id
-                try:
-                    out = subprocess.run(
-                        ["v4l2-ctl", "--device=" + device_id, "--info"],
-                        capture_output=True,
-                        text=True,
-                        timeout=1,
-                    )
-                    if out.returncode == 0 and out.stdout:
-                        for line in out.stdout.splitlines():
-                            if "Card type" in line:
-                                parts = line.split(":", 1)
-                                if len(parts) == 2 and parts[1].strip():
-                                    label = parts[1].strip() + " (Jetson)"
-                                    break
-                except (FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
-                if label == device_id:
-                    label = device_id + " (Jetson)"
-                cameras.append({"id": device_id, "label": label})
-    except Exception as e:
-        logger.debug("List Jetson cameras: %s", e)
-    return cameras
 
 
 def get_app_config_dir() -> Path:
@@ -211,13 +209,18 @@ class WebUIServer:
         self.app.router.add_get('/api/health/riva', self.handle_health_riva)
         self.app.router.add_get('/api/system/stats', self.handle_system_stats)
         self.app.router.add_get('/api/devices/cameras', self.handle_list_cameras)
+        self.app.router.add_get('/api/devices/audio-inputs', self.handle_list_audio_inputs)
+        self.app.router.add_get('/api/devices/audio-outputs', self.handle_list_audio_outputs)
         self.app.router.add_get('/api/camera/stream', self.handle_camera_stream)
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
         self.app.router.add_get('/ws/voice', handle_voice_ws)
+        self.app.router.add_get('/ws/mic-preview', handle_mic_preview_ws)
+        self.app.router.add_get('/ws/camera-webrtc', handle_camera_webrtc_ws)
         # Serve static files
         static_dir = Path(__file__).parent / 'static'
         self.app.router.add_get('/', self.handle_index)
+        self.app.router.add_get('/favicon.ico', self.handle_favicon)
         self.app.router.add_static('/static', static_dir, name='static')
         self.app.router.add_get('/{filename}', self.handle_static_file)
 
@@ -232,6 +235,10 @@ class WebUIServer:
         response = web.FileResponse(index_path)
         response.headers['Cache-Control'] = 'no-cache'
         return response
+
+    async def handle_favicon(self, request):
+        """Respond to /favicon.ico so the browser does not 404 (no icon file)."""
+        return web.Response(status=204)
 
     async def handle_static_file(self, request):
         """Serve static files (CSS, JS)."""
@@ -477,21 +484,45 @@ class WebUIServer:
             return web.json_response({"cpu_percent": None, "gpu_percent": None})
 
     async def handle_list_cameras(self, request: web.Request) -> web.Response:
-        """List video cameras attached to the Jetson (server). Used for Camera devices (Jetson) dropdown."""
+        """List local USB video cameras (server). Used for Camera devices (Server USB) dropdown."""
         try:
             loop = asyncio.get_running_loop()
-            cameras = await loop.run_in_executor(None, _list_jetson_cameras)
+            cameras = await loop.run_in_executor(None, list_local_cameras)
             return web.json_response({"cameras": cameras})
         except Exception as e:
             logger.debug("List cameras error: %s", e)
             return web.json_response({"cameras": []})
 
+    async def handle_list_audio_inputs(self, request: web.Request) -> web.Response:
+        """List local audio input devices (microphones). Used for Microphone (Server USB) dropdown."""
+        try:
+            loop = asyncio.get_running_loop()
+            devices = await loop.run_in_executor(None, list_local_audio_inputs)
+            return web.json_response({"devices": devices})
+        except Exception as e:
+            logger.debug("List audio inputs error: %s", e)
+            return web.json_response({"devices": []})
+
+    async def handle_list_audio_outputs(self, request: web.Request) -> web.Response:
+        """List local audio output devices (speakers). Used for Speaker (Server USB) dropdown."""
+        try:
+            loop = asyncio.get_running_loop()
+            devices = await loop.run_in_executor(None, list_local_audio_outputs)
+            return web.json_response({"devices": devices})
+        except Exception as e:
+            logger.debug("List audio outputs error: %s", e)
+            return web.json_response({"devices": []})
+
     async def handle_camera_stream(self, request: web.Request) -> web.Response:
-        """MJPEG stream from a Jetson camera. device= query: /dev/video0 or empty for first camera.
-        Requires opencv-python-headless and a camera attached to the Jetson. When unavailable, returns 503."""
+        """MJPEG stream from a server USB camera. device= query: /dev/video0 or empty for first camera.
+        Requires opencv-python-headless and a camera attached to the server. When unavailable, returns 503."""
         try:
             import cv2
         except ImportError:
+            logger.warning(
+                "Camera stream unavailable: opencv-python-headless not installed. "
+                "Install with: pip install opencv-python-headless (or pip install -e \".[camera]\")"
+            )
             return web.Response(
                 text="Camera stream requires opencv-python-headless. pip install opencv-python-headless",
                 status=503,
@@ -499,18 +530,21 @@ class WebUIServer:
             )
         device = (request.query.get("device") or "").strip()
         if not device:
-            cameras = _list_jetson_cameras()
+            cameras = list_local_cameras()
             if not cameras:
+                logger.warning("Camera stream: no local cameras listed.")
                 return web.Response(
-                    text="No camera attached to Jetson. Attach a USB camera and list devices in Configuration > Devices.",
+                    text="No camera attached to server. Attach a USB camera and list devices in Configuration > Devices.",
                     status=503,
                     content_type="text/plain",
                 )
             device = cameras[0]["id"]
+        logger.info("[Camera MJPEG] Stream starting for device=%s", device)
         cap = cv2.VideoCapture(device)
         if not cap.isOpened():
+            logger.warning("Camera stream: could not open device %s (in use or no permission?).", device)
             return web.Response(
-                text="Could not open camera %s on Jetson." % device,
+                text="Could not open camera %s on server (is it in use or no permission?)." % device,
                 status=503,
                 content_type="text/plain",
             )
@@ -539,6 +573,7 @@ class WebUIServer:
         except (ConnectionResetError, asyncio.CancelledError):
             pass
         finally:
+            logger.info("[Camera MJPEG] Stream ended for device=%s", device)
             await asyncio.get_running_loop().run_in_executor(None, cap.release)
         return response
 
@@ -571,7 +606,12 @@ class WebUIServer:
 
     async def start(self):
         """Start the web server."""
-        runner = web.AppRunner(self.app)
+        # Custom access log: skip high-frequency /api/system/stats; same format for others
+        runner = web.AppRunner(
+            self.app,
+            access_log_class=_QuietAccessLogger,
+            access_log_format='%a %t "%r" %s %b',
+        )
         await runner.setup()
         site = web.TCPSite(runner, self.host, self.port, ssl_context=self.ssl_context)
         await site.start()

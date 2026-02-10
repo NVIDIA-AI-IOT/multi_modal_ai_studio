@@ -1,5 +1,7 @@
 // Multi-modal AI Studio - WebUI App
 // Handles session loading, display, and timeline visualization
+// Mic waveform debug: in console set localStorage.setItem('micWaveformDebug','1') and reload to see [MicWaveform] logs
+if (typeof localStorage !== 'undefined' && localStorage.getItem('micWaveformDebug')) window._micWaveformDebug = true;
 
 // ===== State Management =====
 const state = {
@@ -18,9 +20,18 @@ const state = {
     micWaveformAnimId: null,
     micAudioContext: null,
     micAnalyser: null,
+    /** When true, preview waveform is fed by server user_amplitude (no AnalyserNode) */
+    micWaveformFromServer: false,
+    /** WebSocket for mic level preview only (setup, before START); closed when starting session or stopping preview */
+    micPreviewWs: null,
 
     /** Voice pipeline WebSocket (live session) */
     voiceWs: null,
+    /** WebRTC peer connection and signaling WS for server camera (preview) */
+    cameraWebrtcPc: null,
+    cameraWebrtcWs: null,
+    /** Server camera device currently in use for preview (e.g. '/dev/video0'); used to avoid reconnecting when only mic/speaker changes */
+    previewServerCameraDevice: null,
     /** Live session: timeline events streamed from backend */
     liveTimelineEvents: [],
     /** Live session: chat turns [{ user, assistant }] for display */
@@ -100,6 +111,8 @@ const uiSettings = {
     timelineHeightAuto: true,
     /** Default timeline view height in px when timelineHeightAuto is false (200–600) */
     timelineHeightPx: 400,
+    /** UI-only gain for mic preview bar (setup + live); 1–4, default 2 for quiet mics (e.g. EMEET) */
+    micPreviewGain: 2,
     /** UI-only gain for user (mic) waveform on timeline: 1, 2, or 4 */
     userAudioGain: 2,
     /** UI-only gain for AI (TTS) waveform on timeline: 1, 2, or 4 */
@@ -132,31 +145,43 @@ function saveUISettings() {
 async function loadSessions() {
     console.log('loadSessions() called');
     try {
-        // Apply saved session directory override so server uses the right dir (e.g. mock_sessions)
+        // Apply saved session directory override so server uses the right dir (e.g. mock_sessions).
+        // If PATCH is not supported (e.g. old server), continue and load sessions anyway.
         const override = (typeof uiSettings.sessionDirOverride === 'string' && uiSettings.sessionDirOverride) ? uiSettings.sessionDirOverride : '';
         const payload = override ? { session_dir: override } : { session_dir: null };
-        await fetch('/api/app/session-dir', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        try {
+            const dirRes = await fetch(getApiBase() + '/api/app/session-dir', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!dirRes.ok) { /* ignore; e.g. 404 on older server */ }
+        } catch (_) { /* ignore */ }
 
         console.log('Fetching from /api/sessions...');
-        const response = await fetch('/api/sessions');
+        const response = await fetch(getApiBase() + '/api/sessions');
         console.log('Response received:', response.status);
+        if (!response.ok) {
+            throw new Error('Server returned ' + response.status + (response.statusText ? ' ' + response.statusText : ''));
+        }
         const sessions = await response.json();
         console.log('Sessions loaded:', sessions.length);
-        state.sessions = sessions;
+        state.sessions = Array.isArray(sessions) ? sessions : [];
         renderSessionList();
     } catch (error) {
         console.error('Failed to load sessions:', error);
-        // For now, show error in UI
-        document.getElementById('session-items').innerHTML = `
-            <div style="padding: 1rem; color: var(--text-secondary); text-align: center;">
-                <p>Failed to load sessions</p>
-                <p style="font-size: 0.85rem; margin-top: 0.5rem;">${error.message}</p>
-            </div>
-        `;
+        state.sessions = [];
+        var countEl = document.querySelector('.session-count');
+        if (countEl) countEl.textContent = 'Error';
+        var container = document.getElementById('session-items');
+        if (container) {
+            container.innerHTML = `
+                <div style="padding: 1rem; color: var(--text-secondary); text-align: center;">
+                    <p>Failed to load sessions</p>
+                    <p style="font-size: 0.85rem; margin-top: 0.5rem;">${(error && error.message) ? String(error.message) : 'Unknown error'}</p>
+                </div>
+            `;
+        }
     }
 }
 
@@ -358,7 +383,8 @@ function renderConfig() {
     const config = session.config || {};
     let tabConfig = { ...defaultConfig[configKey], ...(config[configKey] || {}) };
 
-    contentEl.innerHTML = renderEditableConfigForm(tab, tabConfig, true);
+    contentEl.innerHTML = renderEditableConfigForm(tab, tabConfig, true, config);
+    if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
 
@@ -481,7 +507,8 @@ function renderConfigSection(title, data) {
 }
 
 // New: Render configuration forms (editable or read-only)
-function renderEditableConfigForm(tab, config, readonly = false) {
+// sessionConfig: when readonly, full session.config (used for device_labels on Devices tab)
+function renderEditableConfigForm(tab, config, readonly = false, sessionConfig = null) {
     switch (tab) {
         case 'asr':
             return renderASRConfig(config, readonly);
@@ -490,7 +517,7 @@ function renderEditableConfigForm(tab, config, readonly = false) {
         case 'tts':
             return renderTTSConfig(config, readonly);
         case 'device':
-            return renderDeviceConfig(config, readonly);
+            return renderDeviceConfig(config, readonly, readonly && sessionConfig ? sessionConfig.device_labels : null);
         case 'app':
             return renderAppConfig(config, readonly);
         default:
@@ -975,14 +1002,41 @@ function renderTTSConfig(config, readonly = false) {
     `;
 }
 
+/** Suffix for devices enumerated by the browser (this PC, including USB attached to it). */
 function deviceLabelSuffix(label) {
-    if (!label) return '(Browser)';
-    var l = label.toLowerCase();
-    if (l.indexOf('usb') !== -1 || l.indexOf('jabra') !== -1 || l.indexOf('webcam') !== -1) return '(USB)';
     return '(Browser)';
 }
 
-function renderDeviceConfig(config, readonly = false) {
+/** Base label for deduplication: strip (Browser), (Server USB), (USB) suffix so we can match same device across lists. */
+function deviceLabelBase(label) {
+    return (label || '').replace(/\s*\((?:Server USB|Browser|USB)\)\s*$/i, '').trim();
+}
+
+function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
+    // When viewing a recorded session with saved device names, show plain read-only fields (no dropdowns)
+    if (readonly && deviceLabels && (deviceLabels.camera != null || deviceLabels.mic != null || deviceLabels.speaker != null)) {
+        const camName = (deviceLabels.camera != null && deviceLabels.camera !== '') ? escapeHtml(String(deviceLabels.camera)) : '—';
+        const micName = (deviceLabels.mic != null && deviceLabels.mic !== '') ? escapeHtml(String(deviceLabels.mic)) : '—';
+        const spkName = (deviceLabels.speaker != null && deviceLabels.speaker !== '') ? escapeHtml(String(deviceLabels.speaker)) : '—';
+        return `
+        <div class="config-form readonly">
+            <p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded devices for this session (read-only)</p>
+            <div class="form-group">
+                <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
+                <div class="config-value config-value--device" aria-readonly="true">${camName}</div>
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
+                <div class="config-value config-value--device" aria-readonly="true">${micName}</div>
+            </div>
+            <div class="form-group">
+                <label><i data-lucide="volume-2" class="lucide-inline"></i> Speaker device</label>
+                <div class="config-value config-value--device" aria-readonly="true">${spkName}</div>
+            </div>
+        </div>
+    `;
+    }
+
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
     const micValue = config.microphone === 'none' ? 'none' : (state.selectedBrowserMicId || '');
@@ -992,29 +1046,31 @@ function renderDeviceConfig(config, readonly = false) {
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            <p class="input-hint" style="margin-bottom: 1rem;">Select the device for your chat session. Select &#128683;None if you don&apos;t plan to use the device or go text based. <strong>Microphone:</strong> (Browser) = mic on this PC; Server USB = mic attached to the server (e.g. EMEET). <strong>Speaker:</strong> Server USB not yet wired; use (Browser) for playback.</p>
             <div class="form-group">
-                <label>Camera devices</label>
+                <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
-                    <option value="none" ${camValue === 'none' ? 'selected' : ''}>None</option>
-                    <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (browser)</option>
+                    <option value="none" ${camValue === 'none' ? 'selected' : ''}>&#128683;None (No vision-modality)</option>
+                    <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
                 </select>
-                <div class="input-hint input-hint-camera">Lists cameras on this device (browser) and USB cameras attached to the Jetson (server). Default uses the browser’s default camera (e.g. Dell Integrated webcam).</div>
+                <div class="input-hint input-hint-camera">Lists cameras on this PC (Browser) and USB cameras attached to the server (Server USB). Default uses the browser’s default camera.</div>
             </div>
             <div class="form-group">
-                <label>Microphone devices</label>
+                <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
                 <select id="device-microphone-list" ${disabled} data-device-type="microphone" onchange="onDeviceListChange('microphone', this.value)">
-                    <option value="none" ${micValue === 'none' ? 'selected' : ''}>None (Text Only)</option>
-                    <option value="" ${micValue === '' ? 'selected' : ''}>Default (browser choice)</option>
+                    <option value="none" ${micValue === 'none' ? 'selected' : ''}>&#128683;None (Text Only)</option>
+                    <option value="" ${micValue === '' ? 'selected' : ''}>Default (Browser)</option>
                 </select>
+                <div class="input-hint">Preview uses browser mic. Live session: select a (Browser) device to send mic from this PC, or a Server USB device to use the mic attached to the server (e.g. EMEET).</div>
             </div>
             <div class="form-group">
-                <label>Speaker devices</label>
+                <label><i data-lucide="volume-2" class="lucide-inline"></i> Speaker device</label>
                 <select id="device-speaker-list" ${disabled} data-device-type="speaker" onchange="onDeviceListChange('speaker', this.value)">
-                    <option value="none" ${spkValue === 'none' ? 'selected' : ''}>None (Text Only)</option>
-                    <option value="" ${spkValue === '' ? 'selected' : ''}>Default (browser choice)</option>
+                    <option value="none" ${spkValue === 'none' ? 'selected' : ''}>&#128683;None (Text Only)</option>
+                    <option value="" ${spkValue === '' ? 'selected' : ''}>Default (Browser)</option>
                 </select>
             </div>
-            ${!readonly ? '<div class="form-group"><button type="button" class="btn-secondary" onclick="requestDevicesAndPopulateAll()">Allow & list devices</button><div class="input-hint">Lists <strong>microphone, speaker, and cameras</strong> on this device (browser). Also loads USB cameras attached to the Jetson (server).</div></div>' : ''}
+            ${!readonly ? '<div class="form-group"><button type="button" class="btn-secondary" onclick="requestDevicesAndPopulateAll()">Allow & list devices</button><div class="input-hint">Lists <strong>microphone, speaker, and cameras</strong> on this PC (Browser) and USB devices attached to the server (Server USB).</div></div>' : ''}
         </div>
     `;
 }
@@ -1035,16 +1091,42 @@ function onDeviceListChange(type, value) {
             state.selectedBrowserCameraId = value;
         }
     } else if (type === 'microphone') {
-        currentConfig.devices.microphone = value === 'none' ? 'none' : 'browser';
-        state.selectedBrowserMicId = value === 'none' || value === '' ? null : value;
+        if (value === 'none') {
+            currentConfig.devices.microphone = 'none';
+            state.selectedBrowserMicId = null;
+        } else if (value === '') {
+            currentConfig.devices.microphone = 'browser';
+            state.selectedBrowserMicId = null;
+        } else if (value.startsWith('pyaudio:') || value.startsWith('alsa:')) {
+            currentConfig.devices.microphone = value;
+            state.selectedBrowserMicId = null;
+        } else {
+            currentConfig.devices.microphone = 'browser';
+            state.selectedBrowserMicId = value;
+        }
     } else if (type === 'speaker') {
-        currentConfig.devices.speaker = value === 'none' ? 'none' : 'browser';
-        state.selectedBrowserSpeakerId = value === 'none' || value === '' ? null : value;
+        if (value === 'none') {
+            currentConfig.devices.speaker = 'none';
+            state.selectedBrowserSpeakerId = null;
+        } else if (value === '') {
+            currentConfig.devices.speaker = 'browser';
+            state.selectedBrowserSpeakerId = null;
+        } else if (value.startsWith('pyaudio:') || value.startsWith('alsa:')) {
+            currentConfig.devices.speaker = value;
+            state.selectedBrowserSpeakerId = null;
+        } else {
+            currentConfig.devices.speaker = 'browser';
+            state.selectedBrowserSpeakerId = value;
+        }
     }
     updateDeviceIndicators();
     updateChatInputVisibility();
     refreshPipelineDisplay();
-    if (state.isLiveSession && state.sessionState === 'setup') startPreviewStream();
+    if (state.isLiveSession && state.sessionState === 'setup') {
+        // When only mic/speaker changes, keep server camera WebRTC open to avoid release/reopen race
+        var keepServerCamera = (type === 'microphone' || type === 'speaker');
+        startPreviewStream(keepServerCamera ? { keepServerCamera: true } : undefined);
+    }
 }
 
 function renderAppConfig(config, readonly = false) {
@@ -1160,41 +1242,52 @@ function requestDevicesAndPopulateAll() {
         });
 }
 
+var _populateDeviceDropdownsTimer = null;
+var POPULATE_DEVICE_DROPDOWNS_DEBOUNCE_MS = 180;
+
 function populateAllDeviceDropdowns() {
-    populateCameraDeviceDropdown();
-    populateMicrophoneDeviceDropdown();
-    populateSpeakerDeviceDropdown();
+    if (_populateDeviceDropdownsTimer != null) clearTimeout(_populateDeviceDropdownsTimer);
+    _populateDeviceDropdownsTimer = setTimeout(function () {
+        _populateDeviceDropdownsTimer = null;
+        populateCameraDeviceDropdown();
+        populateMicrophoneDeviceDropdown();
+        populateSpeakerDeviceDropdown();
+    }, POPULATE_DEVICE_DROPDOWNS_DEBOUNCE_MS);
 }
 
-/** Populate camera dropdown: browser cameras (this device) + Jetson USB cameras (server). Default (browser) uses browser default, e.g. Dell Integrated webcam. */
+/** Populate camera dropdown: browser cameras (Browser) + server USB cameras (Server USB). Default (Browser) uses browser default. Uses allSettled so one failure doesn't block the other list. */
 function populateCameraDeviceDropdown() {
     var select = document.getElementById('device-camera-list');
     if (!select) return;
     var havePermission = navigator.mediaDevices && navigator.mediaDevices.enumerateDevices;
     var browserPromise = havePermission
         ? navigator.mediaDevices.enumerateDevices().then(function (devices) {
-            return (devices.filter(function (d) { return d.kind === 'videoinput'; }) || []);
-        })
+            return Array.isArray(devices) ? devices.filter(function (d) { return d.kind === 'videoinput'; }) : [];
+        }).catch(function (err) { console.warn('[Devices] enumerateDevices (camera) failed:', err); return []; })
         : Promise.resolve([]);
     var jetsonPromise = fetch(getApiBase() + '/api/devices/cameras')
         .then(function (r) { return r.json(); })
-        .then(function (data) { return data.cameras || []; })
-        .catch(function (err) { console.warn('[Devices] Fetch Jetson cameras failed:', err); return []; });
+        .then(function (data) { return Array.isArray(data.cameras) ? data.cameras : []; })
+        .catch(function (err) { console.warn('[Devices] Fetch server cameras failed:', err); return []; });
 
-    Promise.all([browserPromise, jetsonPromise]).then(function (results) {
-        var browserCams = results[0];
-        var jetsonCams = results[1];
+    Promise.allSettled([browserPromise, jetsonPromise]).then(function (outcomes) {
+        var browserCams = (outcomes[0].status === 'fulfilled' && Array.isArray(outcomes[0].value)) ? outcomes[0].value : [];
+        var jetsonCams = (outcomes[1].status === 'fulfilled' && Array.isArray(outcomes[1].value)) ? outcomes[1].value : [];
+        if (!select.parentNode) return;
         select.innerHTML = '';
-        select.appendChild(newOption('none', 'None'));
-        select.appendChild(newOption('', 'Default (browser)'));
+        select.appendChild(newOption('none', '\uD83D\uDEABNone (No vision-modality)'));
+        select.appendChild(newOption('', 'Default (Browser)'));
         browserCams.forEach(function (d) {
-            var label = (d.label || 'Camera ' + (select.options.length)) + ' (browser)';
-            select.appendChild(newOption(d.deviceId, label));
+            var label = (d.label || 'Camera ' + (select.options.length)) + ' (Browser)';
+            select.appendChild(newOption(d.deviceId || '', label));
         });
+        var browserCamBases = browserCams.map(function (d) { return deviceLabelBase(d.label || d.deviceId || ''); });
         jetsonCams.forEach(function (c) {
-            var label = (c.label || c.id);
-            if (label.indexOf('(USB)') === -1 && label.indexOf('(Jetson)') === -1) label = label + ' (USB)';
-            select.appendChild(newOption(c.id, label));
+            var base = deviceLabelBase(c.label || c.id || '');
+            if (browserCamBases.indexOf(base) !== -1) return;
+            var label = (c.label || c.id || '');
+            if (label.indexOf('(Server USB)') === -1) label = label + ' (Server USB)';
+            select.appendChild(newOption(c.id || '', label));
         });
         var cam = currentConfig.devices.camera;
         var val = (cam === 'none' || cam === null || cam === undefined) ? 'none' : (cam === 'browser' || cam === '' ? '' : cam);
@@ -1212,44 +1305,90 @@ function newOption(value, text) {
 
 /**
  * Enumerate audio input devices and fill the combined "Microphone devices" dropdown.
+ * Includes browser devices (Browser) and server USB devices from /api/devices/audio-inputs.
+ * Uses allSettled so one failure (e.g. browser permission or server fetch) doesn't block the other list.
  */
 function populateMicrophoneDeviceDropdown() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
     var select = document.getElementById('device-microphone-list');
     if (!select) return;
-    navigator.mediaDevices.enumerateDevices()
-        .then(function (devices) {
-            var audioInputs = devices.filter(function (d) { return d.kind === 'audioinput'; });
-            select.innerHTML = '';
-            select.appendChild(newOption('none', 'None (Text Only)'));
-            select.appendChild(newOption('', 'Default (browser choice)'));
-            audioInputs.forEach(function (d) {
-                var label = (d.label || 'Microphone ' + (select.options.length)) + ' ' + deviceLabelSuffix(d.label);
-                select.appendChild(newOption(d.deviceId, label));
-            });
-            select.value = currentConfig.devices.microphone === 'none' ? 'none' : (state.selectedBrowserMicId || '');
-        })
-        .catch(function (err) { console.warn('[Devices] enumerateDevices failed:', err); });
+    var browserPromise = (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)
+        ? navigator.mediaDevices.enumerateDevices().then(function (devices) {
+            return Array.isArray(devices) ? devices.filter(function (d) { return d.kind === 'audioinput'; }) : [];
+        }).catch(function (err) { console.warn('[Devices] enumerateDevices (mic) failed:', err); return []; })
+        : Promise.resolve([]);
+    var jetsonPromise = fetch(getApiBase() + '/api/devices/audio-inputs')
+        .then(function (r) { return r.json(); })
+        .then(function (data) { return Array.isArray(data.devices) ? data.devices : []; })
+        .catch(function (err) { console.warn('[Devices] Fetch server audio inputs failed:', err); return []; });
+
+    Promise.allSettled([browserPromise, jetsonPromise]).then(function (outcomes) {
+        var browserInputs = (outcomes[0].status === 'fulfilled' && Array.isArray(outcomes[0].value)) ? outcomes[0].value : [];
+        var jetsonInputs = (outcomes[1].status === 'fulfilled' && Array.isArray(outcomes[1].value)) ? outcomes[1].value : [];
+        if (!select.parentNode) return; // select was removed by a re-render
+        select.innerHTML = '';
+        select.appendChild(newOption('none', '\uD83D\uDEABNone (Text Only)'));
+        select.appendChild(newOption('', 'Default (Browser)'));
+        browserInputs.forEach(function (d) {
+            var label = (d.label || 'Microphone ' + (select.options.length)) + ' (Browser)';
+            select.appendChild(newOption(d.deviceId || '', label));
+        });
+        var browserBases = browserInputs.map(function (d) { return deviceLabelBase(d.label || d.deviceId || ''); });
+        jetsonInputs.forEach(function (d) {
+            var base = deviceLabelBase(d.label || d.id || '');
+            if (browserBases.indexOf(base) !== -1) return; // same device already shown as (Browser), skip server duplicate
+            var label = (d.label || d.id || '');
+            if (label.indexOf('(Server USB)') === -1) label = label + ' (Server USB)';
+            select.appendChild(newOption(d.id || '', label));
+        });
+        var mic = currentConfig.devices.microphone;
+        var val = (mic === 'none' || mic === null || mic === undefined) ? 'none' : (mic === 'browser' ? (state.selectedBrowserMicId || '') : mic);
+        try { select.value = val; } catch (e) { select.value = ''; }
+        updateDeviceIndicators();
+    });
 }
 
+/**
+ * Enumerate audio output devices and fill the "Speaker devices" dropdown.
+ * Includes browser devices (Browser) and server USB devices from /api/devices/audio-outputs.
+ * Uses allSettled so one failure doesn't block the other list.
+ */
 function populateSpeakerDeviceDropdown() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
     var select = document.getElementById('device-speaker-list');
     if (!select) return;
-    navigator.mediaDevices.enumerateDevices()
-        .then(function (devices) {
-            var outputs = devices.filter(function (d) { return d.kind === 'audiooutput'; });
-            select.innerHTML = '';
-            select.appendChild(newOption('none', 'None (Text Only)'));
-            select.appendChild(newOption('', 'Default (browser choice)'));
-            outputs.forEach(function (d) {
-                var label = (d.label || 'Speaker ' + (select.options.length)) + ' ' + deviceLabelSuffix(d.label);
-                select.appendChild(newOption(d.deviceId, label));
-            });
-            select.value = currentConfig.devices.speaker === 'none' ? 'none' : (state.selectedBrowserSpeakerId || '');
-            updateDeviceIndicators();
-        })
-        .catch(function (err) { console.warn('[Devices] enumerateDevices failed:', err); });
+    var browserPromise = (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)
+        ? navigator.mediaDevices.enumerateDevices().then(function (devices) {
+            return Array.isArray(devices) ? devices.filter(function (d) { return d.kind === 'audiooutput'; }) : [];
+        }).catch(function (err) { console.warn('[Devices] enumerateDevices (speaker) failed:', err); return []; })
+        : Promise.resolve([]);
+    var jetsonPromise = fetch(getApiBase() + '/api/devices/audio-outputs')
+        .then(function (r) { return r.json(); })
+        .then(function (data) { return Array.isArray(data.devices) ? data.devices : []; })
+        .catch(function (err) { console.warn('[Devices] Fetch server audio outputs failed:', err); return []; });
+
+    Promise.allSettled([browserPromise, jetsonPromise]).then(function (outcomes) {
+        var browserOutputs = (outcomes[0].status === 'fulfilled' && Array.isArray(outcomes[0].value)) ? outcomes[0].value : [];
+        var jetsonOutputs = (outcomes[1].status === 'fulfilled' && Array.isArray(outcomes[1].value)) ? outcomes[1].value : [];
+        if (!select.parentNode) return;
+        select.innerHTML = '';
+        select.appendChild(newOption('none', '\uD83D\uDEABNone (Text Only)'));
+        select.appendChild(newOption('', 'Default (Browser)'));
+        browserOutputs.forEach(function (d) {
+            var label = (d.label || 'Speaker ' + (select.options.length)) + ' (Browser)';
+            select.appendChild(newOption(d.deviceId || '', label));
+        });
+        var browserBases = browserOutputs.map(function (d) { return deviceLabelBase(d.label || d.deviceId || ''); });
+        jetsonOutputs.forEach(function (d) {
+            var base = deviceLabelBase(d.label || d.id || '');
+            if (browserBases.indexOf(base) !== -1) return;
+            var label = (d.label || d.id || '');
+            if (label.indexOf('(Server USB)') === -1) label = label + ' (Server USB)';
+            select.appendChild(newOption(d.id || '', label));
+        });
+        var spk = currentConfig.devices.speaker;
+        var val = (spk === 'none' || spk === null || spk === undefined) ? 'none' : (spk === 'browser' ? (state.selectedBrowserSpeakerId || '') : spk);
+        try { select.value = val; } catch (e) { select.value = ''; }
+        updateDeviceIndicators();
+    });
 }
 
 // Update configuration value
@@ -3056,25 +3195,27 @@ function updateTimelineScrollbar(maxTime, visibleTimeWindow) {
 // ===== Live Session Management =====
 function deviceValueToLabel(value, type) {
     if (value === 'browser') return 'Browser WebRTC';
-    if (value === 'none') return type === 'camera' ? 'None' : 'None (text only)';
+    if (value === 'none') return type === 'camera' ? '\uD83D\uDEABNone (No vision-modality)' : '\uD83D\uDEABNone (Text Only)';
     return value || '—';
 }
 
-/** Prefer actual device name from stream or selected device dropdown when config is browser. */
+/** Prefer actual device name: from saved device_labels, stream/dropdown when config is browser, or dropdown option text for server devices (e.g. EMEET OfficeCore M0 Plus (Server USB)). */
 function getDeviceDisplayLabel(kind) {
     var d = currentConfig.devices || {};
+    var labels = currentConfig.device_labels || {};
     if (kind === 'camera') {
         if ((d.camera === 'browser' || d.camera === '') && state.previewStream) {
             var videoTracks = state.previewStream.getVideoTracks();
             if (videoTracks.length > 0 && videoTracks[0].label) return videoTracks[0].label;
         }
-        if (d.camera === 'browser' || d.camera === '') return 'Default (browser)';
-        if (d.camera && d.camera.indexOf('/dev/') === 0) return d.camera; // Jetson path; could resolve label from API if needed
+        if (d.camera === 'browser' || d.camera === '') return 'Default (Browser)';
+        if (labels.camera) return labels.camera;
         var camSel = document.getElementById('device-camera-list');
         if (camSel && d.camera && camSel.value === d.camera) {
             var opt = camSel.options[camSel.selectedIndex];
             if (opt && opt.textContent) return opt.textContent;
         }
+        if (d.camera && d.camera.indexOf('/dev/') === 0) return d.camera;
         return deviceValueToLabel(d.camera, 'camera');
     }
     if (kind === 'mic') {
@@ -3094,6 +3235,12 @@ function getDeviceDisplayLabel(kind) {
             }
             return 'Browser WebRTC';
         }
+        if (d.microphone !== 'none' && labels.mic) return labels.mic;
+        var micSel = document.getElementById('device-microphone-list');
+        if (micSel && d.microphone && micSel.value === d.microphone) {
+            var micOpt = micSel.options[micSel.selectedIndex];
+            if (micOpt && micOpt.textContent) return micOpt.textContent;
+        }
         return deviceValueToLabel(d.microphone, 'mic');
     }
     if (kind === 'speaker') {
@@ -3104,6 +3251,12 @@ function getDeviceDisplayLabel(kind) {
                 if (opt && opt.textContent) return opt.textContent;
             }
             return 'Browser WebRTC';
+        }
+        if (d.speaker !== 'none' && labels.speaker) return labels.speaker;
+        var spkSel = document.getElementById('device-speaker-list');
+        if (spkSel && d.speaker && spkSel.value === d.speaker) {
+            var spkOpt = spkSel.options[spkSel.selectedIndex];
+            if (spkOpt && spkOpt.textContent) return spkOpt.textContent;
         }
         return deviceValueToLabel(d.speaker, 'speaker');
     }
@@ -3142,6 +3295,14 @@ function updateChatInputVisibility() {
 
 /** Stop mic waveform overlay and release AudioContext. */
 function stopMicWaveform() {
+    if (state.micPreviewWs) {
+        try { state.micPreviewWs.close(); } catch (e) {}
+        state.micPreviewWs = null;
+    }
+    if (state.voiceWs && state.sessionState === 'setup') {
+        try { state.voiceWs.close(); } catch (e) {}
+        state.voiceWs = null;
+    }
     if (state.micWaveformAnimId != null) {
         cancelAnimationFrame(state.micWaveformAnimId);
         state.micWaveformAnimId = null;
@@ -3151,7 +3312,11 @@ function stopMicWaveform() {
         state.micAudioContext = null;
     }
     state.micAnalyser = null;
+    state.micWaveformFromServer = false;
     state.micAmplitudeBuffer = [];
+    state._micWaveformDrawLogged = false;
+    state._micWaveformSizeLogged = false;
+    state._micWaveformFirstDrawLogged = false;
     var overlay = document.getElementById('mic-waveform-overlay');
     if (overlay) overlay.style.display = 'none';
 }
@@ -3160,34 +3325,56 @@ function stopMicWaveform() {
 function drawMicWaveform() {
     var overlay = document.getElementById('mic-waveform-overlay');
     var canvas = document.getElementById('mic-waveform-canvas');
-    if (!overlay || !canvas || !state.micAnalyser || !state.previewStream) return;
-
-    var buf = new Uint8Array(state.micAnalyser.fftSize);
-    state.micAnalyser.getByteTimeDomainData(buf);
-    var max = 0;
-    for (var i = 0; i < buf.length; i++) {
-        var v = Math.abs(buf[i] - 128);
-        if (v > max) max = v;
+    if (!overlay || !canvas) return;
+    var fromServer = state.micWaveformFromServer;
+    if (!state.micAnalyser && !fromServer) return;
+    if (window._micWaveformDebug && fromServer && !state._micWaveformDrawLogged) {
+        state._micWaveformDrawLogged = true;
+        var rect = overlay.getBoundingClientRect();
+        console.log('[MicWaveform] drawMicWaveform (server): overlay display=' + overlay.style.display + ' rect=' + rect.width + 'x' + rect.height + ' parentDisplay=' + (overlay.parentElement ? getComputedStyle(overlay.parentElement).display : 'n/a'));
     }
+    if (state.micAnalyser && !fromServer && !state.previewStream) return;
 
     var ring = state.micAmplitudeBuffer;
-    var cap = 120; /* 2000ms at ~60fps */
-    if (ring.length >= cap) ring.shift();
-    ring.push(max);
+    if (!Array.isArray(ring)) ring = state.micAmplitudeBuffer = [];
+    if (state.micAnalyser && !fromServer) {
+        var buf = new Uint8Array(state.micAnalyser.fftSize);
+        state.micAnalyser.getByteTimeDomainData(buf);
+        var max = 0;
+        for (var i = 0; i < buf.length; i++) {
+            var v = Math.abs(buf[i] - 128);
+            if (v > max) max = v;
+        }
+        var cap = 120; /* 2000ms at ~60fps */
+        if (ring.length >= cap) ring.shift();
+        ring.push(Math.min(128, max * getMicPreviewGain()));
+    }
 
     var w = canvas.width = canvas.offsetWidth;
     var h = canvas.height = canvas.offsetHeight;
-    if (w <= 0 || h <= 0) { state.micWaveformAnimId = requestAnimationFrame(drawMicWaveform); return; }
+    if (w <= 0 || h <= 0) {
+        if (fromServer && !state._micWaveformSizeLogged) {
+            state._micWaveformSizeLogged = true;
+            console.warn('[MicWaveform] Canvas size 0x0 – overlay may be hidden or not laid out yet');
+        }
+        state.micWaveformAnimId = requestAnimationFrame(drawMicWaveform);
+        return;
+    }
+    if (fromServer && !state._micWaveformSizeLogged) {
+        state._micWaveformSizeLogged = true;
+        console.log('[MicWaveform] Canvas size ' + w + 'x' + h);
+    }
     var ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, w, h);
-    if (ring.length < 2) { state.micWaveformAnimId = requestAnimationFrame(drawMicWaveform); return; }
 
     var margin = 30;
+    var innerPadding = 20;
     var drawW = Math.max(0, w - margin * 2);
     var centerY = h / 2;
     var scale = (h / 2) * 0.8 / 128;
     var radius = 6;
 
+    /* Same rounded rect background for both browser-mic and server-mic (empty or with data). */
     ctx.save();
     var bgX = margin;
     var bgY = 0;
@@ -3208,13 +3395,21 @@ function drawMicWaveform() {
     ctx.fill();
     ctx.restore();
 
+    if (ring.length < 2) { state.micWaveformAnimId = requestAnimationFrame(drawMicWaveform); return; }
+
+    if (fromServer && !state._micWaveformFirstDrawLogged) {
+        state._micWaveformFirstDrawLogged = true;
+        console.log('[MicWaveform] Drawing server waveform (buffer len=' + ring.length + '); if you see this but no green bars, check canvas/overlay.');
+    }
     var green = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
     ctx.strokeStyle = green;
     ctx.lineWidth = 1.5;
     ctx.setLineDash([2, 3]);
-    var step = ring.length > 1 ? drawW / (ring.length - 1) : 0;
+    var waveformLeft = margin + innerPadding;
+    var waveformWidth = Math.max(0, drawW - innerPadding * 2);
+    var step = ring.length > 1 ? waveformWidth / (ring.length - 1) : 0;
     for (var j = 0; j < ring.length; j++) {
-        var x = margin + j * step;
+        var x = waveformLeft + j * step;
         var yTop = centerY - ring[j] * scale;
         var yBottom = centerY + ring[j] * scale;
         ctx.beginPath();
@@ -3249,7 +3444,69 @@ function startMicWaveform(stream) {
     }
 }
 
-/** Stop camera/mic preview stream and clear video element. Call on STOP or when leaving live session. */
+/** Start preview waveform for Server USB mic: open /ws/voice and use user_amplitude for the green bar (same connection used for live). */
+function startMicWaveformFromServer() {
+    if (state.voiceWs && (state.voiceWs.readyState === WebSocket.OPEN || state.voiceWs.readyState === WebSocket.CONNECTING)) {
+        var overlay = document.getElementById('mic-waveform-overlay');
+        if (overlay) overlay.style.display = 'block';
+        state.micWaveformFromServer = true;
+        state.micAmplitudeBuffer = state.micAmplitudeBuffer || [];
+        drawMicWaveform();
+        return;
+    }
+    stopMicWaveform();
+    var overlay = document.getElementById('mic-waveform-overlay');
+    var canvas = document.getElementById('mic-waveform-canvas');
+    if (!overlay || !canvas) {
+        console.warn('[MicWaveform] startMicWaveformFromServer: overlay=' + !!overlay + ' canvas=' + !!canvas + ' (elements missing?)');
+        return;
+    }
+    state.micWaveformFromServer = true;
+    state.micAmplitudeBuffer = [];
+    overlay.style.display = 'block';
+    drawMicWaveform();
+
+    // Single connection: use /ws/voice for preview (same 50 Hz user_amplitude). On START we send start_session on this WS instead of reopening.
+    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var wsUrl = protocol + '//' + window.location.host + '/ws/voice';
+    if (window._micWaveformDebug) console.log('[MicWaveform] Opening voice WebSocket for Server USB preview:', wsUrl);
+    var ws = new WebSocket(wsUrl);
+    state.voiceWs = ws;
+    ws.onopen = function () {
+        var config = {
+            asr: { ...currentConfig.asr },
+            llm: { ...currentConfig.llm },
+            tts: { ...currentConfig.tts },
+            devices: currentConfig.devices ? { ...currentConfig.devices } : {},
+            app: currentConfig.app ? { ...currentConfig.app } : {},
+            device_labels: { mic: getDeviceDisplayLabel('mic'), camera: getDeviceDisplayLabel('camera'), speaker: getDeviceDisplayLabel('speaker') },
+            device_types: { mic: getDeviceDisplayType('mic'), camera: getDeviceDisplayType('camera'), speaker: getDeviceDisplayType('speaker') },
+            asr_model_name: (currentConfig.asr && currentConfig.asr.model) ? String(currentConfig.asr.model).replace(/\(.*\)/, '').trim() : null,
+            llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
+            tts_model_name: (currentConfig.tts && (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model)) ? (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model) : null
+        };
+        if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
+        if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
+        var ttsModelSelect = document.getElementById('tts-model-select');
+        var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
+        var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
+        if (sentRivaModelName) {
+            config.tts.riva_model_name = sentRivaModelName;
+            config.tts_model_name = sentRivaModelName;
+        }
+        if (config.llm.ollama_url === undefined && config.llm.api_base) config.llm.ollama_url = (config.llm.api_base || '').replace(/\/v1\/?$/, '');
+        ws.send(JSON.stringify({ type: 'config', config: config }));
+        if (window._micWaveformDebug) console.log('[MicWaveform] Voice config sent (preview); server will stream user_amplitude at 50 Hz');
+    };
+    ws.onmessage = handleVoiceWsMessage;
+    ws.onclose = handleVoiceWsClose;
+    ws.onerror = function () {
+        console.error('[Voice] WebSocket error');
+        if (state.voiceWs === ws) state.voiceWs = null;
+    };
+}
+
+/** Stop camera/mic preview stream and clear video/img elements. Call on STOP or when leaving live session. */
 function stopPreviewStream() {
     stopMicWaveform();
     if (state.previewStream) {
@@ -3257,55 +3514,171 @@ function stopPreviewStream() {
         state.previewStream = null;
     }
     const videoFeed = document.getElementById('video-feed');
+    const mjpegFeed = document.getElementById('video-feed-mjpeg');
     if (videoFeed) {
         videoFeed.srcObject = null;
         videoFeed.src = '';
     }
+    if (mjpegFeed) {
+        mjpegFeed.src = '';
+    }
+    if (state.cameraWebrtcWs) {
+        try { state.cameraWebrtcWs.close(); } catch (e) {}
+        state.cameraWebrtcWs = null;
+    }
+    if (state.cameraWebrtcPc) {
+        try { state.cameraWebrtcPc.close(); } catch (e) {}
+        state.cameraWebrtcPc = null;
+    }
+    state.previewServerCameraDevice = null;
+}
+
+function isServerMicSelected() {
+    var mic = (currentConfig.devices || {}).microphone;
+    return mic && (String(mic).startsWith('alsa:') || String(mic).startsWith('pyaudio:'));
+}
+
+/** UI-only gain for mic preview waveform (1–4). Used for both browser and server USB mic bar. */
+function getMicPreviewGain() {
+    var g = (typeof uiSettings.micPreviewGain === 'number' && !isNaN(uiSettings.micPreviewGain)) ? uiSettings.micPreviewGain : 2;
+    return Math.max(1, Math.min(4, g));
 }
 
 /**
- * Start preview: browser camera (getUserMedia) and/or Jetson camera (server MJPEG stream), plus browser mic.
+ * Start preview: browser camera (getUserMedia) and/or server camera (Server USB MJPEG stream), plus mic.
+ * Mic preview has two paths: (1) Browser device (e.g. AirPods) uses getUserMedia + AnalyserNode, no WebSocket.
+ * (2) Server USB mic uses /ws/mic-preview to route amplitude from server capture to this client for the same waveform UI.
+ * options.keepServerCamera: if true, do not tear down server camera WebRTC when it is already open for the same device (avoids release/reopen race when only mic/speaker changes).
  */
-function startPreviewStream() {
-    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+function startPreviewStream(options) {
+    if (!state.isLiveSession || state.sessionState !== 'setup') {
+        if (window._micWaveformDebug) console.log('[MicWaveform] startPreviewStream skipped: isLiveSession=' + state.isLiveSession + ' sessionState=' + state.sessionState);
+        return;
+    }
     const d = currentConfig.devices || {};
     const isJetsonCamera = (d.camera && typeof d.camera === 'string' && d.camera.indexOf('/dev/') === 0);
     const wantJetsonVideo = (d.camera !== 'none' && d.camera != null && d.camera !== undefined && isJetsonCamera);
     const wantBrowserVideo = (d.camera !== 'none' && d.camera != null && d.camera !== undefined && !isJetsonCamera);
     const wantAudio = d.microphone !== 'none' && d.microphone != null;
+    const wantAudioForPreview = wantAudio && !isServerMicSelected();
+    const serverCamDevice = (wantJetsonVideo && d.camera) ? d.camera : null;
+    const keepServerCamera = options && options.keepServerCamera && wantJetsonVideo && state.cameraWebrtcPc && state.previewServerCameraDevice === serverCamDevice;
     if (!wantJetsonVideo && !wantBrowserVideo && !wantAudio) {
         stopPreviewStream();
         const videoFeed = document.getElementById('video-feed');
+        const mjpegFeed = document.getElementById('video-feed-mjpeg');
         const imagePlaceholder = document.getElementById('image-placeholder');
         if (videoFeed) {
             videoFeed.src = '';
             videoFeed.srcObject = null;
             videoFeed.style.display = 'none';
         }
+        if (mjpegFeed) {
+            mjpegFeed.src = '';
+            mjpegFeed.style.display = 'none';
+        }
         if (imagePlaceholder) imagePlaceholder.style.display = 'flex';
         return;
     }
 
-    stopPreviewStream();
+    if (!keepServerCamera) stopPreviewStream();
+    if (wantAudio && isServerMicSelected()) {
+        if (window._micWaveformDebug) console.log('[MicWaveform] startPreviewStream: calling startMicWaveformFromServer (wantAudio, Server USB selected)');
+        startMicWaveformFromServer();
+    }
     const videoFeed = document.getElementById('video-feed');
+    const mjpegFeed = document.getElementById('video-feed-mjpeg');
     const imagePlaceholder = document.getElementById('image-placeholder');
 
-    if (wantJetsonVideo && videoFeed) {
+    if (wantJetsonVideo && !keepServerCamera) {
         var deviceParam = (d.camera && d.camera !== '') ? encodeURIComponent(d.camera) : '';
-        videoFeed.src = getApiBase() + '/api/camera/stream?device=' + deviceParam;
-        videoFeed.style.display = 'block';
+        var streamUrl = getApiBase() + '/api/camera/stream?device=' + deviceParam;
+        var wsUrl = (getApiBase().replace(/^https/, 'wss').replace(/^http/, 'ws') || ('wss://' + window.location.host)) + '/ws/camera-webrtc?device=' + deviceParam;
+        function fallbackToMjpeg() {
+            if (mjpegFeed) {
+                mjpegFeed.src = streamUrl;
+                mjpegFeed.style.display = 'block';
+            }
+            if (videoFeed) {
+                videoFeed.src = '';
+                videoFeed.srcObject = null;
+                videoFeed.style.display = 'none';
+            }
+            if (imagePlaceholder) imagePlaceholder.style.display = 'none';
+        }
+        var pc = new RTCPeerConnection();
+        state.cameraWebrtcPc = pc;
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.ontrack = function (e) {
+            if (!state.isLiveSession || state.sessionState !== 'setup') return;
+            if (e.streams && e.streams[0] && videoFeed) {
+                videoFeed.srcObject = e.streams[0];
+                videoFeed.style.display = 'block';
+                if (mjpegFeed) { mjpegFeed.src = ''; mjpegFeed.style.display = 'none'; }
+                if (imagePlaceholder) imagePlaceholder.style.display = 'none';
+            }
+        };
+        state.previewServerCameraDevice = serverCamDevice;
+        pc.createOffer().then(function (offer) {
+            return pc.setLocalDescription(offer);
+        }).then(function () {
+            var ws = new WebSocket(wsUrl);
+            state.cameraWebrtcWs = ws;
+            ws.onopen = function () {
+                ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }));
+            };
+            ws.onmessage = function (ev) {
+                try {
+                    var msg = JSON.parse(ev.data);
+                    if (msg.type === 'answer' && msg.sdp) {
+                        pc.setRemoteDescription({ type: msg.answerType || msg.type || 'answer', sdp: msg.sdp }).catch(function (err) {
+                            console.warn('[Camera WebRTC] setRemoteDescription failed:', err);
+                            fallbackToMjpeg();
+                        });
+                    } else if (msg.type === 'ice' && msg.candidate != null) {
+                        pc.addIceCandidate(new RTCIceCandidate({ candidate: msg.candidate, sdpMid: msg.sdpMid, sdpMLineIndex: msg.sdpMLineIndex })).catch(function () {});
+                    } else if (msg.type === 'ice' && msg.candidate === null) {
+                        pc.addIceCandidate(null).catch(function () {});
+                    } else if (msg.type === 'error') {
+                        console.warn('[Camera WebRTC] server error:', msg.error);
+                        fallbackToMjpeg();
+                    }
+                } catch (e) {
+                    console.warn('[Camera WebRTC] message parse error:', e);
+                }
+            };
+            ws.onerror = ws.onclose = function () {
+                if (videoFeed && !videoFeed.srcObject) fallbackToMjpeg();
+            };
+            pc.onicecandidate = function (e) {
+                if (ws.readyState === WebSocket.OPEN && e.candidate) {
+                    ws.send(JSON.stringify({ type: 'ice', candidate: e.candidate.candidate, sdpMid: e.candidate.sdpMid, sdpMLineIndex: e.candidate.sdpMLineIndex }));
+                } else if (ws.readyState === WebSocket.OPEN && e.candidate === null) {
+                    ws.send(JSON.stringify({ type: 'ice', candidate: null }));
+                }
+            };
+        }).catch(function (err) {
+            console.warn('[Camera WebRTC] offer failed:', err);
+            fallbackToMjpeg();
+        });
         if (imagePlaceholder) imagePlaceholder.style.display = 'none';
-    } else if (!wantBrowserVideo && videoFeed) {
-        videoFeed.src = '';
-        videoFeed.srcObject = null;
-        videoFeed.style.display = 'none';
+    } else if (!wantBrowserVideo && !keepServerCamera) {
+        if (videoFeed) {
+            videoFeed.src = '';
+            videoFeed.srcObject = null;
+            videoFeed.style.display = 'none';
+        }
+        if (mjpegFeed) {
+            mjpegFeed.src = '';
+            mjpegFeed.style.display = 'none';
+        }
         if (imagePlaceholder) imagePlaceholder.style.display = 'flex';
     }
 
-    var needGetUserMedia = wantBrowserVideo || wantAudio;
+    var needGetUserMedia = wantBrowserVideo || wantAudioForPreview;
     if (!needGetUserMedia) {
         updateDeviceIndicators();
-        if (wantAudio) {
+        if (wantAudioForPreview) {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 updateDeviceIndicators();
                 return;
@@ -3314,15 +3687,21 @@ function startPreviewStream() {
             navigator.mediaDevices.getUserMedia({ video: false, audio: audioOnlyConstraint })
                 .then(function (stream) {
                     if (!state.isLiveSession || state.sessionState !== 'setup') { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+                    if (state.previewStream) state.previewStream.getTracks().forEach(function (t) { t.stop(); });
                     state.previewStream = stream;
                     updateDeviceIndicators();
-                    if (stream.getAudioTracks().length > 0) startMicWaveform(stream);
+                    if (stream.getAudioTracks().length > 0) {
+                        if (isServerMicSelected()) startMicWaveformFromServer();
+                        else startMicWaveform(stream);
+                    }
                 })
                 .catch(function (err) {
                     console.error('getUserMedia (mic) failed:', err);
                     if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') showMicrophonePermissionDeniedHint();
                     updateDeviceIndicators();
                 });
+        } else if (wantAudio && isServerMicSelected()) {
+            startMicWaveformFromServer();
         }
         return;
     }
@@ -3334,22 +3713,30 @@ function startPreviewStream() {
     }
 
     var videoConstraint = wantBrowserVideo ? (state.selectedBrowserCameraId ? { deviceId: { exact: state.selectedBrowserCameraId } } : true) : false;
-    var audioConstraint = wantAudio ? (state.selectedBrowserMicId ? { deviceId: { exact: state.selectedBrowserMicId } } : true) : false;
+    var audioConstraint = wantAudioForPreview ? (state.selectedBrowserMicId ? { deviceId: { exact: state.selectedBrowserMicId } } : true) : false;
     navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: audioConstraint })
         .then(function (stream) {
             if (!state.isLiveSession || state.sessionState !== 'setup') {
                 stream.getTracks().forEach(function (t) { t.stop(); });
                 return;
             }
+            if (state.previewStream) state.previewStream.getTracks().forEach(function (t) { t.stop(); });
             state.previewStream = stream;
             if (wantBrowserVideo && videoFeed && stream.getVideoTracks().length > 0) {
+                var mjpegEl = document.getElementById('video-feed-mjpeg');
+                if (mjpegEl) { mjpegEl.src = ''; mjpegEl.style.display = 'none'; }
                 videoFeed.src = '';
                 videoFeed.srcObject = stream;
                 videoFeed.style.display = 'block';
                 if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             }
             updateDeviceIndicators();
-            if (stream.getAudioTracks().length > 0) startMicWaveform(stream);
+            if (stream.getAudioTracks().length > 0) {
+                if (isServerMicSelected()) startMicWaveformFromServer();
+                else startMicWaveform(stream);
+            } else if (wantAudio && isServerMicSelected()) {
+                startMicWaveformFromServer();
+            }
         })
         .catch(function (err) {
             console.error('getUserMedia failed:', err);
@@ -3357,6 +3744,7 @@ function startPreviewStream() {
                 showMicrophonePermissionDeniedHint();
             }
             updateDeviceIndicators();
+            if (wantAudio && isServerMicSelected()) startMicWaveformFromServer();
         });
 }
 
@@ -3429,7 +3817,9 @@ function updateLiveSessionUI() {
             if (startOverlay) startOverlay.style.display = 'flex';
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
+            // Preview (camera + mic waveform slot) is shown in setup so user sees what they’ll get before clicking START
             startPreviewStream();
+            if (isServerMicSelected()) startMicWaveformFromServer();
             var cam = (currentConfig.devices || {}).camera;
             var hasVideo = (cam !== 'none' && cam != null && cam !== undefined);
             if (imagePlaceholder) imagePlaceholder.style.display = hasVideo ? 'none' : 'flex';
@@ -3558,7 +3948,7 @@ function updateHistoricalSessionPreview() {
 
         sessionMeta.style.display = 'flex';
     } else if (!state.selectedSession) {
-        sessionTitle.textContent = 'Session';
+        sessionTitle.textContent = 'New Session';
         if (sessionMetaLine2) sessionMetaLine2.textContent = '';
         sessionStats.innerHTML = '';
         if (sessionFilenameEl) { sessionFilenameEl.textContent = ''; sessionFilenameEl.style.display = 'none'; }
@@ -3671,34 +4061,207 @@ function getApiBase() {
     return window.location.origin;
 }
 
+/** Shared voice WebSocket message handler (preview and live). Used when Server USB opens /ws/voice for preview and when START opens it for browser mic. */
+function handleVoiceWsMessage(ev) {
+    if (typeof ev.data !== 'string') return;
+    try {
+        const msg = JSON.parse(ev.data);
+        if (uiSettings.showDebugInfo) {
+            const eventType = (msg.type === 'event' && msg.event && msg.event.event_type) ? msg.event.event_type : '';
+            console.log('[Voice] 📥', msg.type, eventType ? ' event_type=' + eventType : '', msg);
+        }
+        if (msg.type !== 'user_amplitude') {
+            const toLog = (msg.type === 'tts_audio' && msg.data)
+                ? { type: 'tts_audio', sample_rate: msg.sample_rate, data_length: msg.data.length }
+                : msg;
+            pushVoiceMessageLog(toLog);
+        }
+        if (msg.type === 'user_amplitude') {
+            var ts = typeof msg.timestamp === 'number' ? msg.timestamp : (state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0);
+            var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
+            if (state.liveSessionStartTime > 0 && Array.isArray(state.liveAudioAmplitudeHistory)) {
+                state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: amp });
+            }
+            if (state.micWaveformFromServer && Array.isArray(state.micAmplitudeBuffer)) {
+                var cap = 120;
+                if (state.micAmplitudeBuffer.length >= cap) state.micAmplitudeBuffer.shift();
+                state.micAmplitudeBuffer.push(Math.min(128, (amp / 100) * 128 * getMicPreviewGain()));
+                if (state.micAmplitudeBuffer.length === 1 && state.sessionState === 'live') {
+                    console.log('[MicWaveform] First user_amplitude received (live); green waveform will show as more samples arrive.');
+                }
+            }
+            renderTimeline();
+        } else if (msg.type === 'event' && msg.event) {
+            const evt = msg.event;
+            if (evt.event_type === 'session_start') {
+                if (state.liveSessionStartTime <= 0) {
+                    state.liveSessionStartTime = Date.now() / 1000;
+                    startLiveSystemStatsPoll();
+                }
+                state.liveAudioAmplitudeHistory = [];
+                if (state.micWaveformFromServer) state.micAmplitudeBuffer = [];
+            }
+            if (evt.lane === undefined || evt.lane === null) {
+                if (evt.event_type && evt.event_type.startsWith('asr_')) evt.lane = 'speech';
+                else if (evt.event_type && evt.event_type.startsWith('llm_')) evt.lane = 'llm';
+                else if (evt.event_type && evt.event_type.startsWith('tts_')) evt.lane = 'tts';
+                else if (evt.event_type === 'session_start') evt.lane = 'system';
+            } else if (typeof evt.lane === 'string') {
+                evt.lane = evt.lane.toLowerCase();
+            }
+            state.liveTimelineEvents.push(evt);
+            renderTimeline();
+            if (evt.event_type === 'asr_partial') {
+                state.voiceTurnActive = true;
+                var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
+                if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
+                state.liveAsrInterimText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
+                updateLiveAsrLabel();
+            } else if (evt.event_type === 'asr_final') {
+                if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+                    var ft = evt.timestamp != null ? Number(evt.timestamp) : null;
+                    if (typeof ft === 'number' && !isNaN(ft))
+                        state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
+                }
+                state.liveAsrInterimText = '';
+                updateLiveAsrLabel();
+                var userText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
+                if (userText) {
+                    var last = state.liveChatTurns[state.liveChatTurns.length - 1];
+                    var sameUtterance = last && last.assistant === '' && last.user &&
+                        (userText === last.user || userText.indexOf(last.user) === 0 || last.user.indexOf(userText) === 0);
+                    if (sameUtterance) {
+                        last.user = userText;
+                    } else {
+                        state.liveChatTurns.push({ user: userText, assistant: '' });
+                    }
+                    renderLiveChat();
+                    requestAnimationFrame(function () { updateLiveSessionUI(); });
+                }
+            } else if (evt.event_type === 'chat') {
+                var userText = evt.user != null ? String(evt.user) : (evt.data && evt.data.user != null ? String(evt.data.user) : null);
+                var assistantText = evt.assistant != null ? String(evt.assistant) : (evt.data && evt.data.assistant != null ? String(evt.data.assistant) : '');
+                if (userText != null) {
+                    var last = state.liveChatTurns[state.liveChatTurns.length - 1];
+                    if (last && last.assistant === '' && last.user === userText) {
+                        last.assistant = assistantText;
+                    } else {
+                        state.liveChatTurns.push({ user: userText, assistant: assistantText });
+                    }
+                    renderLiveChat();
+                    requestAnimationFrame(function () { updateLiveSessionUI(); });
+                }
+            }
+        } else if (msg.type === 'tts_start') {
+            state.firstTtsPlayTimeThisResponse = null;
+            state.earliestTtsPlayTimeAboveThreshold = null;
+            if (state.ttsAudioContext) {
+                if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
+            }
+        } else if (msg.type === 'tts_audio' && msg.data) {
+            playTtsChunk(msg.data, msg.sample_rate || 24000);
+        } else if (msg.type === 'session_saved' && msg.session_id) {
+            state.lastSavedSessionId = msg.session_id;
+            loadSessions();
+        } else if (msg.type === 'error') {
+            console.error('Voice pipeline error:', msg.error);
+            appendLiveChatError(msg.error);
+        }
+    } catch (e) {
+        console.error('Parse WS message error:', e);
+    }
+}
+
+function handleVoiceWsClose(ev) {
+    console.log('[Voice] WebSocket closed: code=' + (ev && ev.code) + ' reason=' + (ev && ev.reason) + ' clean=' + (ev && ev.wasClean));
+    state.voiceWs = null;
+    stopVoiceMicStream();
+    if (state.sessionState === 'live') {
+        stopLiveSystemStatsPoll();
+        if (state.liveTimelineRafId != null) {
+            cancelAnimationFrame(state.liveTimelineRafId);
+            state.liveTimelineRafId = null;
+        }
+        state.sessionState = 'stopped';
+        updateLiveSessionUI();
+    } else if (state.sessionState === 'setup') {
+        state.micWaveformFromServer = false;
+        state.micAmplitudeBuffer = [];
+    }
+}
+
 function startSessionRecording() {
     if (state.sessionState !== 'setup') return;
 
-    console.log('[Voice] Start session recording (WebSocket + mic)');
-    state.liveTimelineEvents = [];
-    state.voiceMessageLog = [];
-    state.liveChatTurns = [];
-    state.ttsNextStartTime = 0;
-    state.liveAudioAmplitudeHistory = [];
-    state.liveTtsAmplitudeHistory = [];
-    state.liveTtlBands = [];
-    state.liveTtlBandStartTime = null;
-    state.voiceTurnActive = false;
-    state.voiceSilenceCandidate = null;
-    state.lastAsrPartialTime = null;
-    state.firstTtsPlayTimeThisResponse = null;
-    state.earliestTtsPlayTimeAboveThreshold = null;
-    state.liveSystemStats = [];
-    state.liveTimelineInitialZoomSet = false;
-    state.sessionState = 'live';
-    scheduleLiveTimelineTick();
-    updateLiveSessionUI();
+    // Server USB: we may already have the voice WS open for preview (same connection, same 50 Hz stream). Just send start_session.
+    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN && isServerMicSelected()) {
+        console.log('[Voice] Already connected (Server USB preview); sending start_session');
+        state.liveTimelineEvents = [];
+        state.voiceMessageLog = [];
+        state.liveChatTurns = [];
+        state.ttsNextStartTime = 0;
+        state.liveAudioAmplitudeHistory = [];
+        state.liveTtsAmplitudeHistory = [];
+        state.liveTtlBands = [];
+        state.liveTtlBandStartTime = null;
+        state.voiceTurnActive = false;
+        state.voiceSilenceCandidate = null;
+        state.lastAsrPartialTime = null;
+        state.firstTtsPlayTimeThisResponse = null;
+        state.earliestTtsPlayTimeAboveThreshold = null;
+        state.liveSystemStats = [];
+        state.liveTimelineInitialZoomSet = false;
+        state.sessionState = 'live';
+        state.liveSessionStartTime = Date.now() / 1000;
+        startLiveSystemStatsPoll();
+        scheduleLiveTimelineTick();
+        updateLiveSessionUI();
+        state.voiceWs.send(JSON.stringify({ type: 'start_session' }));
+        updateVoiceDebugPanel();
+        document.getElementById('chat-history').innerHTML = `
+        <div class="empty-state">
+            <p><i data-lucide="circle" class="lucide-inline" style="fill: #ef4444;"></i> Session is LIVE - Start talking!</p>
+        </div>
+    `;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        return;
+    }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = protocol + '//' + window.location.host + '/ws/voice';
-    console.log('[Voice] Connecting to', wsUrl);
-    const ws = new WebSocket(wsUrl);
-    state.voiceWs = ws;
+    console.log('[Voice] Start session recording (WebSocket + mic)');
+    if (state.micPreviewWs) {
+        try { state.micPreviewWs.close(); } catch (e) {}
+        state.micPreviewWs = null;
+    }
+    var delayMs = 0;
+    function connectVoiceAndStart() {
+        state.liveTimelineEvents = [];
+        state.voiceMessageLog = [];
+        state.liveChatTurns = [];
+        state.ttsNextStartTime = 0;
+        state.liveAudioAmplitudeHistory = [];
+        state.liveTtsAmplitudeHistory = [];
+        state.liveTtlBands = [];
+        state.liveTtlBandStartTime = null;
+        state.voiceTurnActive = false;
+        state.voiceSilenceCandidate = null;
+        state.lastAsrPartialTime = null;
+        state.firstTtsPlayTimeThisResponse = null;
+        state.earliestTtsPlayTimeAboveThreshold = null;
+        state.liveSystemStats = [];
+        state.liveTimelineInitialZoomSet = false;
+        state.sessionState = 'live';
+        // Start session clock and CPU/GPU polling immediately so the first few seconds have system stats
+        state.liveSessionStartTime = Date.now() / 1000;
+        startLiveSystemStatsPoll();
+        scheduleLiveTimelineTick();
+        updateLiveSessionUI();
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = protocol + '//' + window.location.host + '/ws/voice';
+        if (delayMs) console.log('[Voice] Connecting to', wsUrl, '(after', delayMs, 'ms release delay for Server USB mic)');
+        else console.log('[Voice] Connecting to', wsUrl);
+        const ws = new WebSocket(wsUrl);
+        state.voiceWs = ws;
 
     ws.onopen = function () {
         console.log('[Voice] WebSocket connected, sending config');
@@ -3738,118 +4301,8 @@ function startSessionRecording() {
         startVoiceMicStream();
     };
 
-    ws.onmessage = function (ev) {
-        if (typeof ev.data === 'string') {
-            try {
-                const msg = JSON.parse(ev.data);
-                // Debug: log every message only when debug panel is on (avoid main-thread saturation during live)
-                if (uiSettings.showDebugInfo) {
-                    const eventType = (msg.type === 'event' && msg.event && msg.event.event_type) ? msg.event.event_type : '';
-                    console.log('[Voice] 📥', msg.type, eventType ? ' event_type=' + eventType : '', msg);
-                }
-                // For UI log, use summary for large payloads (tts_audio) so JSON stays readable
-                const toLog = (msg.type === 'tts_audio' && msg.data)
-                    ? { type: 'tts_audio', sample_rate: msg.sample_rate, data_length: msg.data.length }
-                    : msg;
-                pushVoiceMessageLog(toLog);
-
-                if (msg.type === 'event' && msg.event) {
-                    const ev = msg.event;
-                    if (ev.event_type === 'session_start') {
-                        state.liveSessionStartTime = Date.now() / 1000;
-                        startLiveSystemStatsPoll();
-                    }
-                    if (ev.lane === undefined || ev.lane === null) {
-                        if (ev.event_type && ev.event_type.startsWith('asr_')) ev.lane = 'speech';
-                        else if (ev.event_type && ev.event_type.startsWith('llm_')) ev.lane = 'llm';
-                        else if (ev.event_type && ev.event_type.startsWith('tts_')) ev.lane = 'tts';
-                        else if (ev.event_type === 'session_start') ev.lane = 'system';
-                    } else if (typeof ev.lane === 'string') {
-                        ev.lane = ev.lane.toLowerCase();
-                    }
-                    state.liveTimelineEvents.push(ev);
-                    renderTimeline();
-                    if (ev.event_type === 'asr_partial') {
-                        state.voiceTurnActive = true; // Gate for JS end-of-speech: only detect silence after we have speech
-                        var pt = ev.timestamp != null ? Number(ev.timestamp) : null;
-                        if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
-                        state.liveAsrInterimText = (ev.data && ev.data.text != null) ? String(ev.data.text).trim() : '';
-                        updateLiveAsrLabel();
-                    } else if (ev.event_type === 'asr_final') {
-                        // Fallback: if JS never detected silence this turn, set TTL band start between first partial and final (before LLM)
-                        if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
-                            var ft = ev.timestamp != null ? Number(ev.timestamp) : null;
-                            if (typeof ft === 'number' && !isNaN(ft))
-                                state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
-                        }
-                        state.liveAsrInterimText = '';
-                        updateLiveAsrLabel();
-                        var userText = (ev.data && ev.data.text != null) ? String(ev.data.text).trim() : '';
-                        if (userText) {
-                            var last = state.liveChatTurns[state.liveChatTurns.length - 1];
-                            // If last turn has no assistant yet and this final looks like the same utterance (finalization), update it
-                            var sameUtterance = last && last.assistant === '' && last.user &&
-                                (userText === last.user || userText.indexOf(last.user) === 0 || last.user.indexOf(userText) === 0);
-                            if (sameUtterance) {
-                                last.user = userText;
-                            } else {
-                                state.liveChatTurns.push({ user: userText, assistant: '' });
-                            }
-                            renderLiveChat();
-                            requestAnimationFrame(function () { updateLiveSessionUI(); });
-                        }
-                    } else if (ev.event_type === 'chat') {
-                        var userText = ev.user != null ? String(ev.user) : (ev.data && ev.data.user != null ? String(ev.data.user) : null);
-                        var assistantText = ev.assistant != null ? String(ev.assistant) : (ev.data && ev.data.assistant != null ? String(ev.data.assistant) : '');
-                        if (userText != null) {
-                            var last = state.liveChatTurns[state.liveChatTurns.length - 1];
-                            if (last && last.assistant === '' && last.user === userText) {
-                                last.assistant = assistantText;
-                            } else {
-                                state.liveChatTurns.push({ user: userText, assistant: assistantText });
-                            }
-                            renderLiveChat();
-                            requestAnimationFrame(function () { updateLiveSessionUI(); });
-                        }
-                    }
-                } else if (msg.type === 'tts_start') {
-                    state.firstTtsPlayTimeThisResponse = null;
-                    state.earliestTtsPlayTimeAboveThreshold = null;
-                    if (state.ttsAudioContext) {
-                        if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
-                    }
-                    // Do not reset ttsNextStartTime here: schedule new TTS after previous playback ends to avoid overlap
-                } else if (msg.type === 'tts_audio' && msg.data) {
-                    playTtsChunk(msg.data, msg.sample_rate || 24000);
-                } else if (msg.type === 'session_saved' && msg.session_id) {
-                    state.lastSavedSessionId = msg.session_id;
-                    loadSessions();
-                } else if (msg.type === 'error') {
-                    console.error('Voice pipeline error:', msg.error);
-                    appendLiveChatError(msg.error);
-                }
-            } catch (e) {
-                console.error('Parse WS message error:', e);
-            }
-        }
-    };
-
-    ws.onclose = function (ev) {
-        console.log('[Voice] WebSocket closed: code=' + (ev && ev.code) + ' reason=' + (ev && ev.reason) + ' clean=' + (ev && ev.wasClean));
-        state.voiceWs = null;
-        stopVoiceMicStream();
-        if (state.sessionState === 'live') {
-            stopLiveSystemStatsPoll();
-            if (state.liveTimelineRafId != null) {
-                cancelAnimationFrame(state.liveTimelineRafId);
-                state.liveTimelineRafId = null;
-            }
-            state.sessionState = 'stopped';
-            // Keep isLiveSession true so timeline keeps showing waveforms/ASR until user selects another session
-            updateLiveSessionUI();
-        }
-    };
-
+    ws.onmessage = handleVoiceWsMessage;
+    ws.onclose = handleVoiceWsClose;
     ws.onerror = function () {
         console.error('[Voice] WebSocket error');
     };
@@ -3861,6 +4314,8 @@ function startSessionRecording() {
         </div>
     `;
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    };
+    if (delayMs) setTimeout(connectVoiceAndStart, delayMs); else connectVoiceAndStart();
 }
 
 function appendLiveChatError(text) {
@@ -3900,6 +4355,15 @@ function renderLiveChat() {
 const TARGET_SAMPLE_RATE = 16000;
 
 function startVoiceMicStream() {
+    // When user selected a Server USB microphone, the server captures from it; do not send browser PCM.
+    var mic = (currentConfig.devices || {}).microphone;
+    if (mic && (String(mic).startsWith('alsa:') || String(mic).startsWith('pyaudio:'))) {
+        stopVoiceMicStream();
+        console.log('[Voice] Using Server USB microphone; no browser mic stream (server captures from device).');
+        updateDeviceIndicators();
+        startMicWaveformFromServer();
+        return;
+    }
     // Request a fresh microphone stream. Use selected device from device list if set, else browser default.
     stopVoiceMicStream();
     var audioConstraint = state.selectedBrowserMicId
@@ -3971,20 +4435,19 @@ function connectPcmToWs(stream) {
             const v = Math.max(-1, Math.min(1, input[i]));
             pcmData[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
         }
-        // Debug: log client-side mic RMS ~every 1s (INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md)
+        // Debug-only: client mic RMS (enable with localStorage micWaveformDebug=1)
         var nowSec = Date.now() / 1000;
         var sumSq = 0;
         for (var i = 0; i < input.length; i++) sumSq += input[i] * input[i];
         var clientRms = input.length ? Math.sqrt(sumSq / input.length) : 0;
         var clientAmpScaled = Math.min(100, clientRms * 400);
-        if (state.liveSessionStartTime > 0 && nowSec - lastClientAmpLogTime >= 1.0) {
-            console.warn('[user_amplitude] client: buffer_len=' + input.length + ' float_rms=' + clientRms.toFixed(4) + ' amp_0_100=' + clientAmpScaled.toFixed(2));
+        if (window._micWaveformDebug && state.liveSessionStartTime > 0 && nowSec - lastClientAmpLogTime >= 1.0) {
+            console.log('[user_amplitude] client: buffer_len=' + input.length + ' float_rms=' + clientRms.toFixed(4) + ' amp_0_100=' + clientAmpScaled.toFixed(2));
             lastClientAmpLogTime = nowSec;
         }
-        // Log every high amplitude on client so we can compare with server (false green on replay = high values in saved timeline)
-        if (state.liveSessionStartTime > 0 && clientAmpScaled >= 20) {
+        if (window._micWaveformDebug && state.liveSessionStartTime > 0 && clientAmpScaled >= 20) {
             var sessionT = nowSec - state.liveSessionStartTime;
-            console.warn('[user_amplitude_high] client: session_t=' + sessionT.toFixed(2) + 's amp_0_100=' + clientAmpScaled.toFixed(2) + ' (same buffer we send to server)');
+            console.log('[user_amplitude_high] client: session_t=' + sessionT.toFixed(2) + 's amp_0_100=' + clientAmpScaled.toFixed(2));
         }
         ws.send(pcmData.buffer);
         pcmChunkCount++;
@@ -4586,7 +5049,7 @@ function truncateWithTitle(text, maxLen) {
 /**
  * Build pipeline config HTML: grid with device slots (icon + name) + connected pipeline bar ( > ASR > LLM > TTS > ).
  * @param {Object} config - Session config: { devices, asr, llm, tts }
- * @param {{ condensed?: boolean, deviceLabels?: { mic?: string, camera?: string, speaker?: string }, deviceTypes?: { mic?: 'browser'|'usb'|null, camera?: 'browser'|'usb'|null, speaker?: 'browser'|'usb'|null } }} options - deviceLabels: when provided use for slot text; deviceTypes: when provided show small icon at end of name (globe=browser, usb=local)
+ * @param {{ condensed?: boolean, deviceLabels?: { mic?: string, camera?: string, speaker?: string }, deviceTypes?: { mic?: 'browser'|'usb'|null, camera?: 'browser'|'usb'|null, speaker?: 'browser'|'usb'|null } }} options - deviceLabels: when provided use for slot text; deviceTypes: when provided show small icon at end of name (chromium=browser, usb=local)
  */
 function getPipelineTableHtml(config, options) {
     if (!config) return '';
@@ -4632,7 +5095,7 @@ function getPipelineTableHtml(config, options) {
     function slot(icon, shortLabel, fullTitle, typeIcon) {
         var titleAttr = fullTitle ? ' title="' + escapeHtml(fullTitle) + '"' : '';
         var dataFull = ' data-full-label="' + escapeHtml(fullLabel(shortLabel, fullTitle)) + '"';
-        var typeIconHtml = typeIcon === 'browser' ? '<i data-lucide="globe" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : (typeIcon === 'usb' ? '<i data-lucide="usb" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : '');
+        var typeIconHtml = typeIcon === 'browser' ? '<i data-lucide="chromium" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : (typeIcon === 'usb' ? '<i data-lucide="usb" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : '');
         return '<span class="pipeline-device-slot"' + titleAttr + dataFull + '><span class="pipeline-device-slot-icon"><i data-lucide="' + icon + '" class="lucide-inline"></i></span><span class="pipeline-device-slot-label"><span class="pipeline-device-slot-name">' + escapeHtml(shortLabel) + '</span>' + typeIconHtml + '</span></span>';
     }
     var micType = deviceTypesOpt && deviceTypesOpt.mic != null ? deviceTypesOpt.mic : null;
@@ -5026,6 +5489,13 @@ function openSettingsModal() {
     }
     if (timelinePxValue) timelinePxValue.textContent = String(uiSettings.timelineHeightPx);
 
+    const micPreviewGainEl = document.getElementById('ui-mic-preview-gain');
+    if (micPreviewGainEl) {
+        var g = (typeof uiSettings.micPreviewGain === 'number' && !isNaN(uiSettings.micPreviewGain)) ? uiSettings.micPreviewGain : 2;
+        g = Math.max(1, Math.min(4, Math.round(g)));
+        micPreviewGainEl.value = String(g);
+    }
+
     modal.classList.add('show');
 }
 
@@ -5072,6 +5542,12 @@ function saveSettingsFromModal() {
     uiSettings.timelineHeightAuto = timelineAuto ? timelineAuto.checked : true;
     uiSettings.timelineHeightPx = timelinePx ? Math.max(200, Math.min(600, parseInt(timelinePx.value, 10) || 400)) : 400;
 
+    const micPreviewGainEl = document.getElementById('ui-mic-preview-gain');
+    if (micPreviewGainEl) {
+        var g = parseInt(micPreviewGainEl.value, 10);
+        uiSettings.micPreviewGain = (!isNaN(g) && g >= 1 && g <= 4) ? g : 2;
+    }
+
     saveUISettings();
     applyUISettingsToLayout();
 
@@ -5096,6 +5572,7 @@ function resetUISettings() {
         uiSettings.recordPreviewInSessionHistory = true;
         uiSettings.timelineHeightAuto = true;
         uiSettings.timelineHeightPx = 400;
+        uiSettings.micPreviewGain = 2;
         uiSettings.userAudioGain = 2;
         uiSettings.aiAudioGain = 2;
         uiSettings.userVoiceThreshold = 5;
@@ -5119,6 +5596,8 @@ function resetUISettings() {
             timelinePx.disabled = !!uiSettings.timelineHeightAuto;
         }
         if (timelinePxValue) timelinePxValue.textContent = String(uiSettings.timelineHeightPx);
+        var micPreviewGainEl = document.getElementById('ui-mic-preview-gain');
+        if (micPreviewGainEl) micPreviewGainEl.value = String(uiSettings.micPreviewGain);
         const ug = document.getElementById('timeline-user-audio-gain');
         const ag = document.getElementById('timeline-ai-audio-gain');
         if (ug) ug.value = String(uiSettings.userAudioGain);

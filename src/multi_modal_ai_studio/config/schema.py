@@ -357,11 +357,32 @@ class SessionConfig:
         tts_data = {k: v for k, v in tts_data.items() if k in TTSConfig.__dataclass_fields__}
         devices_data = dict(data.get('devices', {}))
         if 'camera' in devices_data and 'video_source' not in devices_data:
-            devices_data['video_source'] = devices_data.pop('camera', 'browser')
+            cam = devices_data.pop('camera', 'browser')
+            if cam and cam.startswith('/dev/'):
+                devices_data['video_source'] = 'usb'
+                devices_data['video_device'] = cam
+            else:
+                devices_data['video_source'] = cam if cam in ('browser', 'none') else 'browser'
         if 'microphone' in devices_data and 'audio_input_source' not in devices_data:
-            devices_data['audio_input_source'] = devices_data.pop('microphone', 'browser')
+            mic = devices_data.pop('microphone', 'browser')
+            if mic and mic.startswith('alsa:'):
+                devices_data['audio_input_source'] = 'alsa'
+                devices_data['audio_input_device'] = mic[5:] or 'default'
+            elif mic and mic.startswith('pyaudio:'):
+                devices_data['audio_input_source'] = 'usb'
+                devices_data['audio_input_device'] = mic[8:]
+            else:
+                devices_data['audio_input_source'] = mic if mic in ('browser', 'none') else 'browser'
         if 'speaker' in devices_data and 'audio_output_source' not in devices_data:
-            devices_data['audio_output_source'] = devices_data.pop('speaker', 'browser')
+            spk = devices_data.pop('speaker', 'browser')
+            if spk and spk.startswith('alsa:'):
+                devices_data['audio_output_source'] = 'alsa'
+                devices_data['audio_output_device'] = spk[5:] or 'default'
+            elif spk and spk.startswith('pyaudio:'):
+                devices_data['audio_output_source'] = 'usb'
+                devices_data['audio_output_device'] = spk[8:]
+            else:
+                devices_data['audio_output_source'] = spk if spk in ('browser', 'none') else 'browser'
         devices_data = {k: v for k, v in devices_data.items() if k in DeviceConfig.__dataclass_fields__}
         app_data = {k: v for k, v in (data.get('app') or {}).items() if k in AppConfig.__dataclass_fields__}
         return cls(
