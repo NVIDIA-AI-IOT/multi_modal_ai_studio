@@ -21,6 +21,10 @@ from typing import Any, Dict, Optional
 from aiohttp import web
 
 from multi_modal_ai_studio.devices.capture import start_server_mic_capture
+from multi_modal_ai_studio.devices.playback import (
+    start_server_speaker_playback,
+    stop_server_speaker_playback,
+)
 
 from multi_modal_ai_studio.config.schema import (
     SessionConfig,
@@ -101,6 +105,14 @@ async def _run_voice_pipeline(
     use_server_mic = config.devices.audio_input_source in ("alsa", "usb") and bool(
         config.devices.audio_input_device
     )
+    use_server_speaker = config.devices.audio_output_source in ("alsa", "usb") and bool(
+        config.devices.audio_output_device
+    )
+    if use_server_speaker:
+        logger.info(
+            "Server speaker enabled: device=%s (TTS will play to ALSA)",
+            config.devices.audio_output_device,
+        )
     if not use_server_mic:
         session.start()
 
@@ -157,8 +169,8 @@ async def _run_voice_pipeline(
         if not capture_thread:
             logger.warning(
                 "Server mic capture could not start (source=%s device=%s); no voice input from server device",
-                config.devices.audio_input_source,
-                config.devices.audio_input_device,
+                _mic_source,
+                _mic_device,
             )
             use_server_mic = False
         else:
@@ -182,6 +194,27 @@ async def _run_voice_pipeline(
                     try:
                         obj = json.loads(msg.data)
                         if obj.get("type") == "start_session":
+                            # Optional: client sends current config so saved session has correct devices (e.g. speaker changed after preview)
+                            if "config" in obj:
+                                try:
+                                    payload = _normalize_frontend_config(obj["config"])
+                                    existing = session.config.to_dict()
+                                    if "devices" in payload:
+                                        existing["devices"] = {**existing.get("devices", {}), **payload["devices"]}
+                                    if "device_labels" in payload:
+                                        existing["device_labels"] = {**(existing.get("device_labels") or {}), **payload["device_labels"]}
+                                    if "device_types" in payload:
+                                        existing["device_types"] = {**(existing.get("device_types") or {}), **payload["device_types"]}
+                                    session.config = SessionConfig.from_dict(existing)
+                                    # Log if speaker was updated to Server USB/ALSA so TTS will play there
+                                    dc = session.config.devices
+                                    if dc.audio_output_source in ("alsa", "usb") and dc.audio_output_device:
+                                        logger.info(
+                                            "Server speaker from start_session config: device=%s (TTS will play to ALSA)",
+                                            dc.audio_output_device,
+                                        )
+                                except Exception as e:
+                                    logger.warning("Could not merge start_session config: %s", e)
                             # Server USB: transition from preview to full pipeline (same capture, now feed ASR + timeline)
                             if use_server_mic and not pipeline_live.is_set():
                                 session.start()
@@ -465,6 +498,7 @@ async def _run_voice_pipeline(
                 tts_first_sent = False
                 last_tts_amplitude_time = 0.0
                 tts_amplitude_interval = 0.05
+                server_speaker_proc = None
                 try:
                     async for chunk in tts.synthesize_stream(full_response):
                         if stopped.is_set():
@@ -480,6 +514,29 @@ async def _run_voice_pipeline(
                                 "timestamp": ts_tts_first,
                             })
                             tts_first_sent = True
+                        # Use session.config so speaker selection sent in start_session is applied (initial config may have browser)
+                        _use_speaker = session.config.devices.audio_output_source in ("alsa", "usb") and bool(
+                            session.config.devices.audio_output_device
+                        )
+                        _out_device = session.config.devices.audio_output_device
+                        if _use_speaker and chunk.audio:
+                            if server_speaker_proc is None:
+                                server_speaker_proc = start_server_speaker_playback(
+                                    _out_device,
+                                    chunk.sample_rate,
+                                )
+                                if server_speaker_proc is None:
+                                    logger.warning(
+                                        "Server speaker playback could not start for %s; check aplay and device (e.g. same device as mic may be busy)",
+                                        _out_device,
+                                    )
+                            if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
+                                try:
+                                    server_speaker_proc.stdin.write(chunk.audio)
+                                    server_speaker_proc.stdin.flush()
+                                except (BrokenPipeError, OSError) as e:
+                                    logger.debug("Server speaker write failed (aplay may have exited): %s", e)
+                                    server_speaker_proc = None
                         if session.timeline.start_time is not None and chunk.audio:
                             now = time.time() - session.timeline.start_time
                             if now - last_tts_amplitude_time >= tts_amplitude_interval:
@@ -504,6 +561,9 @@ async def _run_voice_pipeline(
                     })
                 except Exception as e:
                     logger.exception("TTS error: %s", e)
+                finally:
+                    if server_speaker_proc is not None:
+                        stop_server_speaker_playback(server_speaker_proc)
 
                 session.end_turn()
         except asyncio.CancelledError:
@@ -545,6 +605,9 @@ async def _run_voice_pipeline(
                 await asr.send_audio(chunk)
                 if session.timeline.start_time is not None:
                     now = time.time() - session.timeline.start_time
+                    # Reset throttle when switching from preview to live (last_amplitude_time was in preview seconds, now is session-relative)
+                    if last_amplitude_time > 1.0:
+                        last_amplitude_time = 0.0
                     if now - last_amplitude_time >= amplitude_interval:
                         amp = _pcm_rms_to_amplitude(chunk)
                         session.timeline.add_audio_amplitude(amplitude=amp, source="user")
