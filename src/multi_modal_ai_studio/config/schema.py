@@ -102,6 +102,12 @@ class LLMConfig:
         top_p: Nucleus sampling parameter
         frequency_penalty: Frequency penalty (-2.0 to 2.0)
         presence_penalty: Presence penalty (-2.0 to 2.0)
+        enable_vision: If True, capture and send camera frames to VLM with each prompt
+        vision_detail: Image detail level for VLM ("low", "high", "auto") - affects token usage
+        vision_frames: Number of frames to capture per turn (1=single frame, 2-10=multi-frame during speech)
+        vision_quality: JPEG quality for captured frames (0.3-1.0)
+        vision_max_width: Maximum frame width in pixels (smaller = faster, larger = more detail)
+        vision_buffer_fps: Frame capture rate for ring buffer (frames per second)
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
     api_base: str = "http://localhost:11434/v1"
@@ -115,6 +121,13 @@ class LLMConfig:
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
+    # Vision (VLM) settings - send camera frames with prompts
+    enable_vision: bool = False
+    vision_detail: Literal["low", "high", "auto"] = "auto"
+    vision_frames: int = 4  # Number of frames per turn (1-10)
+    vision_quality: float = 0.7  # JPEG quality (0.3-1.0)
+    vision_max_width: int = 640  # Max frame width in pixels
+    vision_buffer_fps: float = 3.0  # Ring buffer capture rate
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
