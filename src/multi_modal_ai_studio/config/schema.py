@@ -196,18 +196,24 @@ class DeviceConfig:
 
     Attributes:
         video_source: Video input source
-        video_device: Device path for USB video (e.g., /dev/video0)
+        video_device: Device path/id for USB video (e.g., /dev/video0)
+        video_device_name: Human-readable name (e.g. "UVC Camera"); stable across reboots
         audio_input_source: Audio input source
-        audio_input_device: Device path for USB/ALSA audio
+        audio_input_device: Device path/id for USB/ALSA audio (e.g., hw:2,0)
+        audio_input_device_name: Human-readable name (e.g. "EMEET OfficeCore M0 Plus")
         audio_output_source: Audio output source
-        audio_output_device: Device path for USB/ALSA audio
+        audio_output_device: Device path/id for USB/ALSA audio
+        audio_output_device_name: Human-readable name for speaker
     """
     video_source: Literal["browser", "usb", "none"] = "browser"
     video_device: Optional[str] = None
+    video_device_name: Optional[str] = None
     audio_input_source: Literal["browser", "usb", "alsa", "none"] = "browser"
     audio_input_device: Optional[str] = None
+    audio_input_device_name: Optional[str] = None
     audio_output_source: Literal["browser", "usb", "alsa", "none"] = "browser"
     audio_output_device: Optional[str] = None
+    audio_output_device_name: Optional[str] = None
 
     @property
     def interaction_mode(self) -> str:
@@ -324,8 +330,37 @@ class SessionConfig:
     tts_model_name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return asdict(self)
+        """Convert to dictionary. Include speaker, camera, microphone and device names for round-trip."""
+        data = asdict(self)
+        if "devices" in data and isinstance(data["devices"], dict):
+            d = data["devices"]
+            # Speaker
+            src = d.get("audio_output_source", "browser")
+            dev = d.get("audio_output_device")
+            if src in ("alsa", "usb") and dev:
+                d["speaker"] = f"{src}:{dev}" if src == "alsa" else f"pyaudio:{dev}"
+            elif src in ("browser", "none"):
+                d["speaker"] = src
+            # Camera (for round-trip)
+            if d.get("video_source") == "usb" and d.get("video_device"):
+                d["camera"] = d["video_device"]
+            elif d.get("video_source") in ("browser", "none"):
+                d["camera"] = d.get("video_source", "browser")
+            # Microphone (for round-trip)
+            mi = d.get("audio_input_source", "browser")
+            mid = d.get("audio_input_device")
+            if mi in ("alsa", "usb") and mid:
+                d["microphone"] = f"alsa:{mid}" if mi == "alsa" else f"pyaudio:{mid}"
+            elif mi in ("browser", "none"):
+                d["microphone"] = mi
+            # Device names (stable across reboots; client can resolve id by name)
+            if d.get("video_device_name"):
+                d["camera_name"] = d["video_device_name"]
+            if d.get("audio_input_device_name"):
+                d["microphone_name"] = d["audio_input_device_name"]
+            if d.get("audio_output_device_name"):
+                d["speaker_name"] = d["audio_output_device_name"]
+        return data
 
     def to_yaml(self, path: Path) -> None:
         """Export to YAML file."""
@@ -363,6 +398,7 @@ class SessionConfig:
                 devices_data['video_device'] = cam
             else:
                 devices_data['video_source'] = cam if cam in ('browser', 'none') else 'browser'
+            devices_data.setdefault('video_device_name', devices_data.pop('camera_name', None))
         if 'microphone' in devices_data and 'audio_input_source' not in devices_data:
             mic = devices_data.pop('microphone', 'browser')
             if mic and mic.startswith('alsa:'):
@@ -373,7 +409,9 @@ class SessionConfig:
                 devices_data['audio_input_device'] = mic[8:]
             else:
                 devices_data['audio_input_source'] = mic if mic in ('browser', 'none') else 'browser'
-        if 'speaker' in devices_data and 'audio_output_source' not in devices_data:
+            devices_data.setdefault('audio_input_device_name', devices_data.pop('microphone_name', None))
+        # Prefer speaker over audio_output_* when speaker is set (so alsa:hw:2,0 wins over stale browser)
+        if 'speaker' in devices_data:
             spk = devices_data.pop('speaker', 'browser')
             if spk and spk.startswith('alsa:'):
                 devices_data['audio_output_source'] = 'alsa'
@@ -381,8 +419,15 @@ class SessionConfig:
             elif spk and spk.startswith('pyaudio:'):
                 devices_data['audio_output_source'] = 'usb'
                 devices_data['audio_output_device'] = spk[8:]
+            elif spk in ('browser', 'none'):
+                devices_data['audio_output_source'] = spk
+                devices_data['audio_output_device'] = None
             else:
-                devices_data['audio_output_source'] = spk if spk in ('browser', 'none') else 'browser'
+                # speaker was something else (e.g. browser device id); only set if not already set
+                if 'audio_output_source' not in devices_data:
+                    devices_data['audio_output_source'] = 'browser'
+                    devices_data['audio_output_device'] = None
+            devices_data.setdefault('audio_output_device_name', devices_data.pop('speaker_name', None))
         devices_data = {k: v for k, v in devices_data.items() if k in DeviceConfig.__dataclass_fields__}
         app_data = {k: v for k, v in (data.get('app') or {}).items() if k in AppConfig.__dataclass_fields__}
         return cls(

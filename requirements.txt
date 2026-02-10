@@ -10,6 +10,9 @@ pyaudio>=0.2.13
 numpy>=1.21.0
 websockets>=11.0
 
+# Optional: Jetson USB camera preview (pip install -e ".[camera]" or uncomment below)
+# opencv-python-headless>=4.5.0
+
 # Development dependencies (optional)
 # Uncomment for development:
 # pytest>=7.0.0

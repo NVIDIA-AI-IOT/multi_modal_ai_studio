@@ -1,5 +1,7 @@
 # Multi-modal AI Studio
 
+![](./docs/images/screenshot_example_2.png)
+
 **Voice, Text, and Video AI Interface with Advanced Performance Analysis**
 
 Multi-modal AI Studio is a next-generation conversational AI interface designed for analyzing and optimizing voice AI systems. Built on NVIDIA Riva, OpenAI APIs, and other backends, it features sophisticated session management, real-time timeline visualization, and comprehensive latency metrics.
@@ -92,7 +94,7 @@ multi-modal-ai-studio --preset low-latency
 
 Open **http://localhost:8092** in your browser.
 
-**Sessions and sample data**  
+**Sessions and sample data**
 By default the app loads and saves sessions in `sessions/`. To view or use the sample/mock session JSONs (e.g. in `mock_sessions/`), run with `--session-dir mock_sessions`. Open the app, then click a session in the sidebar to view its config and timeline.
 
 ### Run Headless

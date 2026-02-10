@@ -60,6 +60,8 @@ const state = {
     liveTimelineRafId: null,
     /** Live session: (timestamp_sec, amplitude 0–100) for AUDIO lane waveform; max ~15 sec at ~20 Hz */
     liveAudioAmplitudeHistory: [],
+    /** Server USB: amplitude samples received before session_start; flushed into liveAudioAmplitudeHistory when session starts */
+    pendingServerMicAmplitude: [],
     /** Live session: TTS (AI) segments for purple waveform on AUDIO lane: { startTime, endTime, amplitude } */
     liveTtsAmplitudeHistory: [],
     /** Live session: TTL bands from JS end-of-speech to first sound out: [{ start, end, ttlMs }] (times in session sec) */
@@ -76,6 +78,8 @@ const state = {
     earliestTtsPlayTimeAboveThreshold: null,
     /** Session time (sec) when amplitude first went below threshold; used to confirm 150ms silence */
     voiceSilenceCandidate: null,
+    /** Consecutive user_amplitude samples below threshold (Server USB 20 Hz path only); used to confirm silence without wall-clock. */
+    voiceSilenceConsecutiveCount: 0,
     /** Live session: CPU/GPU samples for bottom timeline lane: { t, cpu, gpu } (t = session-relative sec) */
     liveSystemStats: [],
     /** Live session: interval id for system stats polling; cleared on disconnect */
@@ -433,7 +437,10 @@ const defaultConfig = {
         auto_start_recording: false,
         show_interim_asr: true,
         enable_timeline: true,
+        llm_warmup_while_preview: true,
         barge_in_enabled: false,
+        barge_in_trigger: 'final',
+        barge_in_partial_count: 3,
         log_level: 'info'
     }
 };
@@ -473,6 +480,24 @@ function saveDefaultConfig() {
         }
     } catch (e) {
         console.error('Failed to save default config:', e);
+    }
+}
+
+/** Pin an LLM field (e.g. system_prompt, extra_request_body) to the saved default so it is used in other sessions. */
+function pinLlmFieldToDefault(fieldName) {
+    try {
+        const saved = localStorage.getItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+        const base = saved ? JSON.parse(saved) : {};
+        const merged = {
+            ...base,
+            llm: {
+                ...(base.llm || defaultConfig.llm || {}),
+                [fieldName]: currentConfig.llm[fieldName]
+            }
+        };
+        localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(merged));
+    } catch (e) {
+        console.warn('Failed to pin LLM field to default:', e);
     }
 }
 
@@ -537,7 +562,7 @@ function renderASRConfig(config, readonly = false) {
             <div class="backend-tabs speech-api-tabs ${readonly ? 'disabled' : ''}">
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'riva' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('asr', 'backend', 'riva')">NVIDIA<br>RIVA</button>
+                        onclick="updateConfig('asr', 'backend', 'riva')"><span class="riva-tab-inner"><i data-lucide="bird" class="lucide-inline riva-tab-icon"></i><span class="riva-tab-text">NVIDIA<br>RIVA</span></span></button>
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai' ? 'active' : ''}"
                         ${disabled}
                         onclick="updateConfig('asr', 'backend', 'openai')">OpenAI<br>REST API</button>
@@ -813,7 +838,7 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">System Prompt</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) updateConfig(\'llm\', \'system_prompt\', el.value)" title="Save"><i data-lucide="save" class="lucide-inline"></i></button>' : ''}
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
                 </div>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
                           onchange="updateConfig('llm', 'system_prompt', this.value)">${config.system_prompt}</textarea>
@@ -822,7 +847,7 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">Extra request body (JSON)</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-extra-request-body\'); if(el) updateConfig(\'llm\', \'extra_request_body\', el.value)" title="Save"><i data-lucide="save" class="lucide-inline"></i></button>' : ''}
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-extra-request-body\'); if(el) { updateConfig(\'llm\', \'extra_request_body\', el.value); pinLlmFieldToDefault(\'extra_request_body\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
                 </div>
                 <textarea id="llm-extra-request-body" ${disabled} rows="4" placeholder='{"chat_template_kwargs": {"enable_thinking": false}}'
                           onchange="updateConfig('llm', 'extra_request_body', this.value)">${escapeHtml(config.extra_request_body || '')}</textarea>
@@ -862,7 +887,7 @@ function renderTTSConfig(config, readonly = false) {
             <div class="backend-tabs speech-api-tabs ${readonly ? 'disabled' : ''}">
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'riva' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('tts', 'backend', 'riva')">NVIDIA<br>RIVA</button>
+                        onclick="updateConfig('tts', 'backend', 'riva')"><span class="riva-tab-inner"><i data-lucide="bird" class="lucide-inline riva-tab-icon"></i><span class="riva-tab-text">NVIDIA<br>RIVA</span></span></button>
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai' ? 'active' : ''}"
                         ${disabled}
                         onclick="updateConfig('tts', 'backend', 'openai')">OpenAI<br>REST API</button>
@@ -1123,6 +1148,10 @@ function onDeviceListChange(type, value) {
     updateChatInputVisibility();
     refreshPipelineDisplay();
     if (state.isLiveSession && state.sessionState === 'setup') {
+        // When microphone changes to (possibly different) Server USB device, close voice WS so server gets new device; otherwise we'd keep capturing from the first USB mic.
+        if (type === 'microphone' && (value.startsWith('alsa:') || value.startsWith('pyaudio:'))) {
+            stopMicWaveform();
+        }
         // When only mic/speaker changes, keep server camera WebRTC open to avoid release/reopen race
         var keepServerCamera = (type === 'microphone' || type === 'speaker');
         startPreviewStream(keepServerCamera ? { keepServerCamera: true } : undefined);
@@ -1133,10 +1162,57 @@ function renderAppConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
     const overrideVal = (typeof uiSettings.sessionDirOverride === 'string' && uiSettings.sessionDirOverride) ? uiSettings.sessionDirOverride : '';
+    const bargeInEnabled = !!config.barge_in_enabled;
+    const bargeInTrigger = config.barge_in_trigger === 'partial' ? 'partial' : 'final';
+    const partialCount = Math.max(1, Math.min(20, parseInt(config.barge_in_partial_count, 10) || 3));
 
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+
+            <div class="form-group form-group--barge-in">
+                <div class="form-group-row form-group-row--toggle">
+                    <label class="label-text" for="app-enable-barge-in">
+                        <i data-lucide="ship" class="lucide-inline" aria-hidden="true"></i>
+                        <span>Barge-in</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${disabled} id="app-enable-barge-in" ${bargeInEnabled ? 'checked' : ''}
+                               onchange="updateConfig('app', 'barge_in_enabled', this.checked); appConfigRefresh();">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="input-hint">Interrupt AI speech by speaking. When on, TTS stops when your speech is detected.</div>
+            </div>
+
+            ${bargeInEnabled ? `
+            <div class="form-group app-barge-in-options" id="app-barge-in-options">
+                <div class="app-config-subheading">Stop frontend TTS on</div>
+                <div class="app-radio-group">
+                    <label class="radio-label">
+                        <input type="radio" ${disabled} name="app-barge-in-trigger" value="final" ${bargeInTrigger === 'final' ? 'checked' : ''}
+                               onchange="updateConfig('app', 'barge_in_trigger', 'final'); appConfigRefresh();">
+                        <span><strong>Final transcript</strong> (stable, ~0.5–1s delay)</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" ${disabled} name="app-barge-in-trigger" value="partial" ${bargeInTrigger === 'partial' ? 'checked' : ''}
+                               onchange="updateConfig('app', 'barge_in_trigger', 'partial'); appConfigRefresh();">
+                        <span><strong>Partial transcript</strong> (fast, may have false positive)</span>
+                    </label>
+                </div>
+            </div>
+            ${bargeInTrigger === 'partial' ? `
+            <div class="form-group" id="app-barge-in-partial-count-row">
+                <label class="app-config-subheading">Number of partial</label>
+                <div class="app-number-stepper">
+                    <button type="button" class="btn-stepper" ${disabled} aria-label="Decrease" onclick="var n=Math.max(1,(currentConfig.app.barge_in_partial_count||3)-1); updateConfig('app','barge_in_partial_count',n); var el=document.getElementById('app-barge-in-partial-value'); if(el){el.value=n;el.textContent=n;}">−</button>
+                    <span class="app-number-stepper-value" id="app-barge-in-partial-value">${partialCount}</span>
+                    <button type="button" class="btn-stepper" ${disabled} aria-label="Increase" onclick="var n=Math.min(20,(currentConfig.app.barge_in_partial_count||3)+1); updateConfig('app','barge_in_partial_count',n); var el=document.getElementById('app-barge-in-partial-value'); if(el){el.value=n;el.textContent=n;}">+</button>
+                </div>
+                <div class="input-hint">Stop TTS after this many partial transcripts (1–20).</div>
+            </div>
+            ` : ''}
+            ` : ''}
 
             ${!readonly ? `
             <div class="form-group">
@@ -1150,19 +1226,26 @@ function renderAppConfig(config, readonly = false) {
             ` : ''}
 
             <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} id="app-enable-timeline" ${config.enable_timeline ? 'checked' : ''}
-                           onchange="updateConfig('app', 'enable_timeline', this.checked)">
-                    Show Timeline Visualization
-                </label>
+                <div class="form-group-row form-group-row--toggle">
+                    <label class="label-text" for="app-enable-timeline"><i data-lucide="chart-gantt" class="lucide-inline" aria-hidden="true"></i><span>Show Timeline Visualization</span></label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${disabled} id="app-enable-timeline" ${config.enable_timeline ? 'checked' : ''}
+                               onchange="updateConfig('app', 'enable_timeline', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </div>
 
             <div class="form-group">
-                <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} id="app-enable-barge-in" ${config.barge_in_enabled ? 'checked' : ''}
-                           onchange="updateConfig('app', 'barge_in_enabled', this.checked)">
-                    Enable barge-in
-                </label>
+                <div class="form-group-row form-group-row--toggle">
+                    <label class="label-text" for="app-llm-warmup-while-preview"><i data-lucide="heater" class="lucide-inline" aria-hidden="true"></i><span>Enable LLM warmup while preview</span></label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${disabled} id="app-llm-warmup-while-preview" ${config.llm_warmup_while_preview ? 'checked' : ''}
+                               onchange="updateConfig('app', 'llm_warmup_while_preview', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="input-hint">Send dummy request to pre-load model and reduce first-turn latency.</div>
             </div>
 
             <div class="form-group">
@@ -1177,6 +1260,10 @@ function renderAppConfig(config, readonly = false) {
             </div>
         </div>
     `;
+}
+
+function appConfigRefresh() {
+    if (state.activeConfigTab === 'app') renderConfig();
 }
 
 async function applySessionDirOverride(value) {
@@ -1289,8 +1376,10 @@ function populateCameraDeviceDropdown() {
             if (label.indexOf('(Server USB)') === -1) label = label + ' (Server USB)';
             select.appendChild(newOption(c.id || '', label));
         });
-        var cam = currentConfig.devices.camera;
-        var val = (cam === 'none' || cam === null || cam === undefined) ? 'none' : (cam === 'browser' || cam === '' ? '' : cam);
+        var cam = (state.selectedSession && !state.isLiveSession && state.selectedSession.config && state.selectedSession.config.devices)
+            ? (state.selectedSession.config.devices.camera != null ? state.selectedSession.config.devices.camera : state.selectedSession.config.devices.video_device)
+            : currentConfig.devices.camera;
+        var val = (cam === 'none' || cam === null || cam === undefined) ? 'none' : (cam === 'browser' || cam === '') ? '' : cam;
         try { select.value = val; } catch (e) { select.value = ''; }
         updateDeviceIndicators();
     });
@@ -1340,8 +1429,10 @@ function populateMicrophoneDeviceDropdown() {
             if (label.indexOf('(Server USB)') === -1) label = label + ' (Server USB)';
             select.appendChild(newOption(d.id || '', label));
         });
-        var mic = currentConfig.devices.microphone;
-        var val = (mic === 'none' || mic === null || mic === undefined) ? 'none' : (mic === 'browser' ? (state.selectedBrowserMicId || '') : mic);
+        var mic = (state.selectedSession && !state.isLiveSession && state.selectedSession.config && state.selectedSession.config.devices)
+            ? (state.selectedSession.config.devices.microphone != null ? state.selectedSession.config.devices.microphone : state.selectedSession.config.devices.audio_input_device)
+            : currentConfig.devices.microphone;
+        var val = (mic === 'none' || mic === null || mic === undefined) ? 'none' : (mic === 'browser' || mic === '') ? (state.selectedBrowserMicId || '') : mic;
         try { select.value = val; } catch (e) { select.value = ''; }
         updateDeviceIndicators();
     });
@@ -1384,8 +1475,10 @@ function populateSpeakerDeviceDropdown() {
             if (label.indexOf('(Server USB)') === -1) label = label + ' (Server USB)';
             select.appendChild(newOption(d.id || '', label));
         });
-        var spk = currentConfig.devices.speaker;
-        var val = (spk === 'none' || spk === null || spk === undefined) ? 'none' : (spk === 'browser' ? (state.selectedBrowserSpeakerId || '') : spk);
+        var spk = (state.selectedSession && !state.isLiveSession && state.selectedSession.config && state.selectedSession.config.devices)
+            ? (state.selectedSession.config.devices.speaker != null ? state.selectedSession.config.devices.speaker : state.selectedSession.config.devices.audio_output_device)
+            : currentConfig.devices.speaker;
+        var val = (spk === 'none' || spk === null || spk === undefined) ? 'none' : (spk === 'browser' || spk === '') ? (state.selectedBrowserSpeakerId || '') : spk;
         try { select.value = val; } catch (e) { select.value = ''; }
         updateDeviceIndicators();
     });
@@ -1395,6 +1488,15 @@ function populateSpeakerDeviceDropdown() {
 function updateConfig(section, key, value) {
     console.log(`Config updated: ${section}.${key} = ${value}`);
     currentConfig[section][key] = value;
+
+    // Persist LLM system prompt and extra request body so they survive reload without "Save as default"
+    if (section === 'llm' && (key === 'system_prompt' || key === 'extra_request_body') && state.isLiveSession) {
+        try {
+            localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(JSON.parse(JSON.stringify(currentConfig))));
+        } catch (e) {
+            console.warn('Failed to persist config to localStorage:', e);
+        }
+    }
 
     // Re-render the config panel to show/hide conditional fields
     const contentEl = document.getElementById('config-tab-content');
@@ -3277,12 +3379,41 @@ function getDeviceDisplayType(kind) {
 }
 
 function updateDeviceIndicators() {
-    var cam = document.getElementById('device-indicator-camera');
+    var camTag = document.getElementById('device-tag-camera');
     var mic = document.getElementById('device-indicator-mic');
     var spk = document.getElementById('device-indicator-speaker');
-    if (cam) cam.textContent = getDeviceDisplayLabel('camera');
+    var camConfig = (currentConfig.devices || {}).camera;
+    var hasCamera = camConfig !== 'none' && camConfig != null && camConfig !== undefined;
+    if (camTag) {
+        if (hasCamera) {
+            camTag.classList.remove('device-tag--blank');
+            camTag.innerHTML = '<i data-lucide="video" class="lucide-inline"></i> <span id="device-indicator-camera">' + escapeHtml(getDeviceDisplayLabel('camera')) + '</span>';
+            if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(camTag);
+        } else {
+            camTag.classList.add('device-tag--blank');
+            camTag.innerHTML = '<span class="device-tag-placeholder" aria-hidden="true"></span>';
+        }
+    }
     if (mic) mic.textContent = getDeviceDisplayLabel('mic');
     if (spk) spk.textContent = getDeviceDisplayLabel('speaker');
+}
+
+/** Update image-placeholder content: when camera is None show "SOUND ONLY" (red) + video-off icon; otherwise Multi-modal Session + Vision + Voice. */
+function updateImagePlaceholderContent(config) {
+    var placeholder = document.getElementById('image-placeholder');
+    if (!placeholder) return;
+    var c = config || (state.isLiveSession ? currentConfig : (state.selectedSession && state.selectedSession.config ? state.selectedSession.config : currentConfig));
+    var d = c.devices || {};
+    var cam = d.camera ?? d.video_source;
+    var noCamera = cam === 'none' || cam == null || cam === undefined;
+    if (noCamera) {
+        placeholder.className = 'image-placeholder placeholder--sound-only';
+        placeholder.innerHTML = '<span class="placeholder-icon"><i data-lucide="video-off" class="lucide-inline" aria-hidden="true"></i></span><p class="placeholder-text">SOUND ONLY</p>';
+    } else {
+        placeholder.className = 'image-placeholder';
+        placeholder.innerHTML = '<span class="placeholder-icon"><i data-lucide="video" class="lucide-inline" aria-hidden="true"></i></span><p class="placeholder-text">Multi-modal Session</p><p class="placeholder-subtext">Vision + Voice Analysis</p>';
+    }
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(placeholder);
 }
 
 function updateChatInputVisibility() {
@@ -3444,6 +3575,53 @@ function startMicWaveform(stream) {
     }
 }
 
+/** Build the voice config object sent to the server (WS config message or start_session). Uses currentConfig and sets audio_output_* from devices.speaker so saved sessions have correct speaker. */
+function buildVoiceConfig() {
+    var config = {
+        asr: { ...currentConfig.asr },
+        llm: { ...currentConfig.llm },
+        tts: { ...currentConfig.tts },
+        devices: currentConfig.devices ? { ...currentConfig.devices } : {},
+        app: currentConfig.app ? { ...currentConfig.app } : {},
+        device_labels: { mic: getDeviceDisplayLabel('mic'), camera: getDeviceDisplayLabel('camera'), speaker: getDeviceDisplayLabel('speaker') },
+        device_types: { mic: getDeviceDisplayType('mic'), camera: getDeviceDisplayType('camera'), speaker: getDeviceDisplayType('speaker') },
+        asr_model_name: (currentConfig.asr && currentConfig.asr.model) ? String(currentConfig.asr.model).replace(/\(.*\)/, '').trim() : null,
+        llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
+        tts_model_name: (currentConfig.tts && (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model)) ? (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model) : null
+    };
+    if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
+    if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
+    var spk = (config.devices && config.devices.speaker) ? String(config.devices.speaker) : '';
+    if (spk.startsWith('alsa:')) {
+        config.devices.audio_output_source = 'alsa';
+        config.devices.audio_output_device = spk.slice(5) || 'default';
+    } else if (spk.startsWith('pyaudio:')) {
+        config.devices.audio_output_source = 'usb';
+        config.devices.audio_output_device = spk.slice(8) || '';
+    }
+    // Device names (stable across reboots; session can resolve id by name when hw:N,M changes)
+    var cam = (config.devices.camera || config.devices.video_device) ? String(config.devices.camera || config.devices.video_device) : '';
+    if (cam && (cam.indexOf('/dev/') === 0 || config.devices.video_source === 'usb')) {
+        config.devices.video_device_name = getDeviceDisplayLabel('camera') || undefined;
+    }
+    var mic = (config.devices.microphone) ? String(config.devices.microphone) : '';
+    if (mic && (mic.indexOf('alsa:') === 0 || mic.indexOf('pyaudio:') === 0)) {
+        config.devices.audio_input_device_name = getDeviceDisplayLabel('mic') || undefined;
+    }
+    if (spk && (spk.indexOf('alsa:') === 0 || spk.indexOf('pyaudio:') === 0)) {
+        config.devices.audio_output_device_name = getDeviceDisplayLabel('speaker') || undefined;
+    }
+    var ttsModelSelect = document.getElementById('tts-model-select');
+    var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
+    var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
+    if (sentRivaModelName) {
+        config.tts.riva_model_name = sentRivaModelName;
+        config.tts_model_name = sentRivaModelName;
+    }
+    if (config.llm.ollama_url === undefined && config.llm.api_base) config.llm.ollama_url = (config.llm.api_base || '').replace(/\/v1\/?$/, '');
+    return config;
+}
+
 /** Start preview waveform for Server USB mic: open /ws/voice and use user_amplitude for the green bar (same connection used for live). */
 function startMicWaveformFromServer() {
     if (state.voiceWs && (state.voiceWs.readyState === WebSocket.OPEN || state.voiceWs.readyState === WebSocket.CONNECTING)) {
@@ -3473,28 +3651,7 @@ function startMicWaveformFromServer() {
     var ws = new WebSocket(wsUrl);
     state.voiceWs = ws;
     ws.onopen = function () {
-        var config = {
-            asr: { ...currentConfig.asr },
-            llm: { ...currentConfig.llm },
-            tts: { ...currentConfig.tts },
-            devices: currentConfig.devices ? { ...currentConfig.devices } : {},
-            app: currentConfig.app ? { ...currentConfig.app } : {},
-            device_labels: { mic: getDeviceDisplayLabel('mic'), camera: getDeviceDisplayLabel('camera'), speaker: getDeviceDisplayLabel('speaker') },
-            device_types: { mic: getDeviceDisplayType('mic'), camera: getDeviceDisplayType('camera'), speaker: getDeviceDisplayType('speaker') },
-            asr_model_name: (currentConfig.asr && currentConfig.asr.model) ? String(currentConfig.asr.model).replace(/\(.*\)/, '').trim() : null,
-            llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
-            tts_model_name: (currentConfig.tts && (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model)) ? (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model) : null
-        };
-        if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
-        if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
-        var ttsModelSelect = document.getElementById('tts-model-select');
-        var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
-        var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
-        if (sentRivaModelName) {
-            config.tts.riva_model_name = sentRivaModelName;
-            config.tts_model_name = sentRivaModelName;
-        }
-        if (config.llm.ollama_url === undefined && config.llm.api_base) config.llm.ollama_url = (config.llm.api_base || '').replace(/\/v1\/?$/, '');
+        var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
         if (window._micWaveformDebug) console.log('[MicWaveform] Voice config sent (preview); server will stream user_amplitude at 50 Hz');
     };
@@ -3508,7 +3665,10 @@ function startMicWaveformFromServer() {
 
 /** Stop camera/mic preview stream and clear video/img elements. Call on STOP or when leaving live session. */
 function stopPreviewStream() {
-    stopMicWaveform();
+    // Keep Server USB voice WS open when we're in setup with Server USB selected, so a refresh (e.g. updateLiveSessionUI) doesn't close and immediately reopen it and hit "Device or resource busy".
+    if (!(state.sessionState === 'setup' && isServerMicSelected())) {
+        stopMicWaveform();
+    }
     if (state.previewStream) {
         state.previewStream.getTracks().forEach(function (t) { t.stop(); });
         state.previewStream = null;
@@ -3536,6 +3696,14 @@ function stopPreviewStream() {
 function isServerMicSelected() {
     var mic = (currentConfig.devices || {}).microphone;
     return mic && (String(mic).startsWith('alsa:') || String(mic).startsWith('pyaudio:'));
+}
+
+function isServerSpeakerSelected() {
+    var d = currentConfig.devices || {};
+    var spk = d.speaker;
+    if (spk && (String(spk).startsWith('alsa:') || String(spk).startsWith('pyaudio:'))) return true;
+    if (d.audio_output_source === 'alsa' || d.audio_output_source === 'usb') return !!d.audio_output_device;
+    return false;
 }
 
 /** UI-only gain for mic preview waveform (1–4). Used for both browser and server USB mic bar. */
@@ -3577,7 +3745,10 @@ function startPreviewStream(options) {
             mjpegFeed.src = '';
             mjpegFeed.style.display = 'none';
         }
-        if (imagePlaceholder) imagePlaceholder.style.display = 'flex';
+        if (imagePlaceholder) {
+            imagePlaceholder.style.display = 'flex';
+            updateImagePlaceholderContent();
+        }
         return;
     }
 
@@ -3774,6 +3945,7 @@ function updateLiveSessionUI() {
     const sessionTitle = document.getElementById('session-title');
     const sessionMetaLine2 = document.getElementById('session-meta-line2');
     const sessionStats = document.getElementById('session-stats');
+    const sessionFilenameEl = document.getElementById('session-filename');
     const pipelineConfigEl = document.getElementById('pipeline-config');
     const startBtn = document.getElementById('start-session-btn');
     const stopBtn = document.getElementById('stop-session-btn');
@@ -3814,6 +3986,7 @@ function updateLiveSessionUI() {
             document.getElementById('new-session-btn')?.classList.add('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.add('config-panel--start-ready');
             if (sessionStats) sessionStats.innerHTML = '';
+            if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
             if (startOverlay) startOverlay.style.display = 'flex';
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
@@ -3822,12 +3995,16 @@ function updateLiveSessionUI() {
             if (isServerMicSelected()) startMicWaveformFromServer();
             var cam = (currentConfig.devices || {}).camera;
             var hasVideo = (cam !== 'none' && cam != null && cam !== undefined);
-            if (imagePlaceholder) imagePlaceholder.style.display = hasVideo ? 'none' : 'flex';
+            if (imagePlaceholder) {
+                imagePlaceholder.style.display = hasVideo ? 'none' : 'flex';
+                if (!hasVideo) updateImagePlaceholderContent();
+            }
             if (videoFeed) videoFeed.style.display = hasVideo ? 'block' : 'none';
         } else if (state.sessionState === 'live') {
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
             if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: #ef4444;"><i data-lucide="circle" class="lucide-inline" style="fill: currentColor;"></i> RECORDING</span>';
+            if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             if (videoFeed) videoFeed.style.display = 'block';
             if (startOverlay) startOverlay.style.display = 'none';
@@ -3839,7 +4016,19 @@ function updateLiveSessionUI() {
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
             if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: var(--text-secondary);"><i data-lucide="check-circle" class="lucide-inline"></i> Session recorded</span>';
-            if (imagePlaceholder) imagePlaceholder.style.display = 'flex';
+            if (sessionFilenameEl && state.lastSavedSessionId) {
+                var sessionFileName = state.lastSavedSessionId + '.json';
+                sessionFilenameEl.innerHTML = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
+                sessionFilenameEl.style.display = '';
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(sessionFilenameEl);
+            } else if (sessionFilenameEl) {
+                sessionFilenameEl.innerHTML = '';
+                sessionFilenameEl.style.display = 'none';
+            }
+            if (imagePlaceholder) {
+                imagePlaceholder.style.display = 'flex';
+                updateImagePlaceholderContent();
+            }
             if (videoFeed) videoFeed.style.display = 'none';
             if (startOverlay) startOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
@@ -3978,12 +4167,9 @@ function startNewSession() {
     state.sessionState = 'setup';
     state.selectedSession = null;
 
-    if (uiSettings.showNewChatWithDefaultConfig) {
-        const saved = getDefaultConfig();
-        currentConfig = saved ? JSON.parse(JSON.stringify(saved)) : JSON.parse(JSON.stringify(defaultConfig));
-    } else {
-        currentConfig = JSON.parse(JSON.stringify(defaultConfig));
-    }
+    // Restore saved default config when present so system prompt and other edits persist across reloads
+    const saved = getDefaultConfig();
+    currentConfig = saved ? JSON.parse(JSON.stringify(saved)) : JSON.parse(JSON.stringify(defaultConfig));
 
     // Clear chat history
     document.getElementById('chat-history').innerHTML = `
@@ -4077,16 +4263,52 @@ function handleVoiceWsMessage(ev) {
             pushVoiceMessageLog(toLog);
         }
         if (msg.type === 'user_amplitude') {
-            var ts = typeof msg.timestamp === 'number' ? msg.timestamp : (state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0);
             var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
+            var serverTs = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
+            // Use client-side session time for AUDIO lane so waveform aligns with timeline (avoids server/client clock skew).
+            var ts = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : serverTs;
             if (state.liveSessionStartTime > 0 && Array.isArray(state.liveAudioAmplitudeHistory)) {
                 state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: amp });
+                // Server USB: end-of-speech from sparse user_amplitude (20 Hz). Use consecutive sample count, not wall-clock,
+                // so we don't need 0.15s of messages (asr_final would win). 3 consecutive below-threshold ≈ 100ms at 20 Hz.
+                var userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
+                var effectiveTh = state.micWaveformFromServer ? Math.min(userTh, 2) : userTh;
+                var SILENCE_CONSECUTIVE_SAMPLES = 3; // 20 Hz => ~100ms; enough to beat asr_final when possible
+                if (state.micWaveformFromServer && state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+                    if (amp < effectiveTh) {
+                        if (state.voiceSilenceCandidate == null) {
+                            state.voiceSilenceCandidate = ts;
+                            state.voiceSilenceConsecutiveCount = 1;
+                        } else {
+                            state.voiceSilenceConsecutiveCount = (state.voiceSilenceConsecutiveCount || 0) + 1;
+                        }
+                        if (state.voiceSilenceConsecutiveCount >= SILENCE_CONSECUTIVE_SAMPLES) {
+                            state.liveTtlBandStartTime = state.voiceSilenceCandidate;
+                            state.voiceSilenceCandidate = null;
+                            state.voiceSilenceConsecutiveCount = 0;
+                            if (window._micWaveformDebug || uiSettings.showDebugInfo) {
+                                console.log('[TTL] liveTtlBandStartTime set from amplitude (Server USB silence)', state.liveTtlBandStartTime);
+                            }
+                        }
+                    } else {
+                        state.voiceSilenceCandidate = null;
+                        state.voiceSilenceConsecutiveCount = 0;
+                    }
+                }
+            } else if (state.micWaveformFromServer && Array.isArray(state.pendingServerMicAmplitude)) {
+                // Buffer until session_start so we don't drop the first samples (message ordering).
+                if (state.pendingServerMicAmplitude.length < 300) state.pendingServerMicAmplitude.push({ timestamp: serverTs, amplitude: amp });
             }
             if (state.micWaveformFromServer && Array.isArray(state.micAmplitudeBuffer)) {
                 var cap = 120;
-                if (state.micAmplitudeBuffer.length >= cap) state.micAmplitudeBuffer.shift();
-                state.micAmplitudeBuffer.push(Math.min(128, (amp / 100) * 128 * getMicPreviewGain()));
-                if (state.micAmplitudeBuffer.length === 1 && state.sessionState === 'live') {
+                var val = Math.min(128, (amp / 100) * 128 * getMicPreviewGain());
+                // Server sends ~20 Hz (chunk-bound); browser mic gets ~60 fps. Push 3 samples per message so preview scrolls at similar visual rate.
+                var samplesPerMessage = 3;
+                for (var si = 0; si < samplesPerMessage; si++) {
+                    if (state.micAmplitudeBuffer.length >= cap) state.micAmplitudeBuffer.shift();
+                    state.micAmplitudeBuffer.push(val);
+                }
+                if (state.micAmplitudeBuffer.length <= samplesPerMessage && state.sessionState === 'live') {
                     console.log('[MicWaveform] First user_amplitude received (live); green waveform will show as more samples arrive.');
                 }
             }
@@ -4097,8 +4319,16 @@ function handleVoiceWsMessage(ev) {
                 if (state.liveSessionStartTime <= 0) {
                     state.liveSessionStartTime = Date.now() / 1000;
                     startLiveSystemStatsPoll();
+                    state.liveAudioAmplitudeHistory = [];
                 }
-                state.liveAudioAmplitudeHistory = [];
+                // Flush Server USB amplitude received before session_start so AUDIO lane has data from the first sample.
+                // When Server USB mic is used, client sets liveSessionStartTime before sending start_session so
+                // user_amplitude may already be pushing into liveAudioAmplitudeHistory; do not clear it.
+                if (state.pendingServerMicAmplitude && state.pendingServerMicAmplitude.length) {
+                    state.liveAudioAmplitudeHistory = state.liveAudioAmplitudeHistory || [];
+                    state.liveAudioAmplitudeHistory.push.apply(state.liveAudioAmplitudeHistory, state.pendingServerMicAmplitude);
+                    state.pendingServerMicAmplitude = [];
+                }
                 if (state.micWaveformFromServer) state.micAmplitudeBuffer = [];
             }
             if (evt.lane === undefined || evt.lane === null) {
@@ -4155,14 +4385,22 @@ function handleVoiceWsMessage(ev) {
         } else if (msg.type === 'tts_start') {
             state.firstTtsPlayTimeThisResponse = null;
             state.earliestTtsPlayTimeAboveThreshold = null;
+            if (isServerSpeakerSelected()) state.ttsNextStartTime = -1;
             if (state.ttsAudioContext) {
                 if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
             }
         } else if (msg.type === 'tts_audio' && msg.data) {
-            playTtsChunk(msg.data, msg.sample_rate || 24000);
+            // When Server USB speaker is selected, the server plays TTS to that device; do not play in browser.
+            // Still record TTS segments so the purple waveform and tts_playback_segments are saved.
+            if (isServerSpeakerSelected()) {
+                recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000);
+            } else {
+                playTtsChunk(msg.data, msg.sample_rate || 24000);
+            }
         } else if (msg.type === 'session_saved' && msg.session_id) {
             state.lastSavedSessionId = msg.session_id;
             loadSessions();
+            updateLiveSessionUI();
         } else if (msg.type === 'error') {
             console.error('Voice pipeline error:', msg.error);
             appendLiveChatError(msg.error);
@@ -4201,11 +4439,13 @@ function startSessionRecording() {
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
         state.liveAudioAmplitudeHistory = [];
+        state.pendingServerMicAmplitude = [];
         state.liveTtsAmplitudeHistory = [];
         state.liveTtlBands = [];
         state.liveTtlBandStartTime = null;
         state.voiceTurnActive = false;
         state.voiceSilenceCandidate = null;
+        state.voiceSilenceConsecutiveCount = 0;
         state.lastAsrPartialTime = null;
         state.firstTtsPlayTimeThisResponse = null;
         state.earliestTtsPlayTimeAboveThreshold = null;
@@ -4216,7 +4456,7 @@ function startSessionRecording() {
         startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
-        state.voiceWs.send(JSON.stringify({ type: 'start_session' }));
+        state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
         updateVoiceDebugPanel();
         document.getElementById('chat-history').innerHTML = `
         <div class="empty-state">
@@ -4239,11 +4479,13 @@ function startSessionRecording() {
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
         state.liveAudioAmplitudeHistory = [];
+        state.pendingServerMicAmplitude = [];
         state.liveTtsAmplitudeHistory = [];
         state.liveTtlBands = [];
         state.liveTtlBandStartTime = null;
         state.voiceTurnActive = false;
         state.voiceSilenceCandidate = null;
+        state.voiceSilenceConsecutiveCount = 0;
         state.lastAsrPartialTime = null;
         state.firstTtsPlayTimeThisResponse = null;
         state.earliestTtsPlayTimeAboveThreshold = null;
@@ -4265,37 +4507,7 @@ function startSessionRecording() {
 
     ws.onopen = function () {
         console.log('[Voice] WebSocket connected, sending config');
-        const config = {
-            asr: { ...currentConfig.asr },
-            llm: { ...currentConfig.llm },
-            tts: { ...currentConfig.tts },
-            devices: currentConfig.devices ? { ...currentConfig.devices } : {},
-            app: currentConfig.app ? { ...currentConfig.app } : {},
-            device_labels: {
-                mic: getDeviceDisplayLabel('mic'),
-                camera: getDeviceDisplayLabel('camera'),
-                speaker: getDeviceDisplayLabel('speaker')
-            },
-            device_types: {
-                mic: getDeviceDisplayType('mic'),
-                camera: getDeviceDisplayType('camera'),
-                speaker: getDeviceDisplayType('speaker')
-            },
-            asr_model_name: (currentConfig.asr && currentConfig.asr.model) ? String(currentConfig.asr.model).replace(/\(.*\)/, '').trim() : null,
-            llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
-            tts_model_name: (currentConfig.tts && (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model)) ? (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model) : null
-        };
-        if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
-        if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
-        // Use dropdown value at send time so we capture the selected TTS model even when it was never written to currentConfig (e.g. user left first option selected after load)
-        var ttsModelSelect = document.getElementById('tts-model-select');
-        var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
-        var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
-        if (sentRivaModelName) {
-            config.tts.riva_model_name = sentRivaModelName;
-            config.tts_model_name = sentRivaModelName;  // so backend normalizer can set tts.riva_model_name when missing
-        }
-        if (config.llm.ollama_url === undefined && config.llm.api_base) config.llm.ollama_url = (config.llm.api_base || '').replace(/\/v1\/?$/, '');
+        var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
         console.log('[Voice] Config sent, starting mic stream');
         startVoiceMicStream();
@@ -4496,6 +4708,45 @@ function stopVoiceMicStream() {
     }
 }
 
+/** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser. */
+function recordTtsSegmentOnly(base64Data, sampleRate) {
+    const binary = atob(base64Data);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    const samples = new Int16Array(bytes.buffer);
+    const numSamples = samples.length;
+    const duration = numSamples / sampleRate;
+    if (state.liveSessionStartTime <= 0 || !state.liveTtsAmplitudeHistory) return;
+    let startTime = state.ttsNextStartTime;
+    if (typeof startTime !== 'number' || startTime < 0) {
+        startTime = (Date.now() / 1000) - state.liveSessionStartTime;
+        state.ttsNextStartTime = startTime;
+    }
+    const endTime = startTime + duration;
+    state.ttsNextStartTime = endTime;
+    var sumSq = 0;
+    for (var i = 0; i < numSamples; i++) sumSq += (samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF)) * (samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF));
+    var rms = Math.min(100, Math.sqrt(sumSq / numSamples) * 400);
+    state.liveTtsAmplitudeHistory.push({ startTime: startTime, endTime: endTime, amplitude: rms });
+    if (state.firstTtsPlayTimeThisResponse == null || startTime < state.firstTtsPlayTimeThisResponse)
+        state.firstTtsPlayTimeThisResponse = startTime;
+    if (rms > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || startTime < state.earliestTtsPlayTimeAboveThreshold))
+        state.earliestTtsPlayTimeAboveThreshold = startTime;
+    if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+        var bandStart = state.liveTtlBandStartTime;
+        var firstChunk = state.firstTtsPlayTimeThisResponse;
+        var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+        var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+        state.liveTtlBandStartTime = null;
+        state.voiceTurnActive = false;
+        state.lastAsrPartialTime = null;
+        state.firstTtsPlayTimeThisResponse = null;
+        state.earliestTtsPlayTimeAboveThreshold = null;
+        state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+    }
+}
+
 function playTtsChunk(base64Data, sampleRate) {
     const binary = atob(base64Data);
     const len = binary.length;
@@ -4625,7 +4876,7 @@ function setupEventHandlers() {
             if (themeText) themeText.textContent = 'Auto';
         }
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
-        if (state.selectedSession) renderTimeline();
+        renderTimeline();
     }
 
     try {
@@ -5101,13 +5352,14 @@ function getPipelineTableHtml(config, options) {
     var micType = deviceTypesOpt && deviceTypesOpt.mic != null ? deviceTypesOpt.mic : null;
     var camType = deviceTypesOpt && deviceTypesOpt.camera != null ? deviceTypesOpt.camera : null;
     var spkType = deviceTypesOpt && deviceTypesOpt.speaker != null ? deviceTypesOpt.speaker : null;
-    const slots = slot('mic', micT.short, micT.title, micType) + slot('video', camT.short, camT.title, camType) + slot('volume-2', spkT.short, spkT.title, spkType);
+    var emptySlot = '<span class="pipeline-device-slot pipeline-device-slot--placeholder" aria-hidden="true"><span class="pipeline-device-slot-icon"></span><span class="pipeline-device-slot-label"><span class="pipeline-device-slot-name"></span></span></span>';
+    const slots = slot('mic', micT.short, micT.title, micType) + (hasCamera ? slot('video', camT.short, camT.title, camType) : emptySlot) + slot('volume-2', spkT.short, spkT.title, spkType);
     function seg(type, labelText, tooltip) {
         var titleAttr = tooltip ? ' title="' + escapeHtml(tooltip) + '"' : '';
         var dataFull = ' data-full-label="' + escapeHtml(labelText) + '"';
         return '<span class="pipeline-seg pipeline-seg-' + type + '"><svg class="pipeline-seg-shape" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true"><polygon class="pipeline-seg-poly" points="0,0 180,0 200,20 180,40 0,40 20,20"/></svg><span class="pipeline-seg-label"' + titleAttr + dataFull + '>' + escapeHtml(labelText) + '</span></span>';
     }
-    const arrowRow = '<div class="pipeline-arrow-row" aria-hidden="true"><i data-lucide="chevron-down" class="lucide-inline pipeline-arrow-down"></i></div>';
+    const arrowRow = hasCamera ? '<div class="pipeline-arrow-row" aria-hidden="true"><i data-lucide="chevron-down" class="lucide-inline pipeline-arrow-down"></i></div>' : '';
     const flowSegments = '<div class="pipeline-flow">' + seg('asr', asrLabel, asrTooltip) + seg('llm', midLabel, midTooltip) + seg('tts', ttsLabelVal, ttsTooltip) + '</div>';
     const flowRow = '<div class="pipeline-flow-row">' + flowSegments + '</div>';
     const cornerLeft = '<div class="pipeline-corner pipeline-corner-left" aria-hidden="true"><i data-lucide="corner-down-right" class="lucide-inline"></i></div>';
@@ -5138,10 +5390,11 @@ function getPipelineSummaryHtml(config) {
     return escapeHtml(asr + ' | ' + mid + ' | ' + tts);
 }
 
-/** Update pipeline segment SVG and --seg-slant so slants stay 45°/135° at any size (inset = height/2). */
+/** Update pipeline segment SVG and --seg-slant so slants stay 45°/135° at any size (inset = height/2). Polygon inset by 1 so 1px stroke is not clipped by viewBox. */
 function updatePipelineSegShapes(container) {
     if (!container) return;
     var segs = container.querySelectorAll('.pipeline-seg');
+    var inset = 1;
     segs.forEach(function (seg) {
         var w = seg.offsetWidth;
         var h = seg.offsetHeight;
@@ -5152,7 +5405,12 @@ function updatePipelineSegShapes(container) {
         var poly = seg.querySelector('.pipeline-seg-poly');
         if (svg && poly) {
             svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-            poly.setAttribute('points', '0,0 ' + (w - s) + ',0 ' + w + ',' + (h / 2) + ' ' + (w - s) + ',' + h + ' 0,' + h + ' ' + s + ',' + (h / 2));
+            var x0 = inset;
+            var y0 = inset;
+            var x1 = w - inset;
+            var y1 = h - inset;
+            var midY = h / 2;
+            poly.setAttribute('points', x0 + ',' + y0 + ' ' + (x1 - s) + ',' + y0 + ' ' + x1 + ',' + midY + ' ' + (x1 - s) + ',' + y1 + ' ' + x0 + ',' + y1 + ' ' + (x0 + s) + ',' + midY);
         }
     });
 }
@@ -5210,11 +5468,17 @@ function refreshPipelineDisplay() {
         el.innerHTML = getPipelineTableHtml(currentConfig, { condensed: false, deviceLabels: deviceLabels, deviceTypes: deviceTypes });
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         requestAnimationFrame(function () { updatePipelineSegShapes(el); updatePipelineLabelTrimming(el); });
+        updateImagePlaceholderContent();
     } else if (state.selectedSession && state.selectedSession.config) {
         var c = state.selectedSession.config;
         var opts = { condensed: false };
         if (c.device_labels && (c.device_labels.mic != null || c.device_labels.camera != null || c.device_labels.speaker != null)) opts.deviceLabels = c.device_labels;
-        if (c.device_types && (c.device_types.mic != null || c.device_types.camera != null || c.device_types.speaker != null)) opts.deviceTypes = c.device_types;
+        var types = c.device_types ? { ...c.device_types } : {};
+        var d = c.devices || {};
+        if ((d.speaker && (String(d.speaker).indexOf('alsa:') === 0 || String(d.speaker).indexOf('pyaudio:') === 0)) && types.speaker !== 'usb') types.speaker = 'usb';
+        if ((d.microphone && (String(d.microphone).indexOf('alsa:') === 0 || String(d.microphone).indexOf('pyaudio:') === 0)) && types.mic !== 'usb') types.mic = 'usb';
+        if (d.camera && String(d.camera).indexOf('/dev/') === 0 && types.camera !== 'usb') types.camera = 'usb';
+        opts.deviceTypes = types;
         el.innerHTML = getPipelineTableHtml(c, opts);
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         requestAnimationFrame(function () { updatePipelineSegShapes(el); updatePipelineLabelTrimming(el); });
