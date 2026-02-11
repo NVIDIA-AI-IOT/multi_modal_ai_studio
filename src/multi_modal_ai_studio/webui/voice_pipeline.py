@@ -21,10 +21,19 @@ from typing import Any, Dict, Optional
 from aiohttp import web
 
 from multi_modal_ai_studio.devices.capture import start_server_mic_capture
-from multi_modal_ai_studio.devices.playback import (
-    start_server_speaker_playback,
-    stop_server_speaker_playback,
-)
+
+try:
+    from multi_modal_ai_studio.devices.playback import (
+        start_server_speaker_playback,
+        stop_server_speaker_playback,
+    )
+except ImportError:
+    # playback.py may be missing on some checkouts; stub so app still starts.
+    def start_server_speaker_playback(device: str, sample_rate: int, proc_holder: Optional[list] = None):
+        return None
+
+    def stop_server_speaker_playback(proc) -> None:
+        pass
 
 from multi_modal_ai_studio.config.schema import (
     SessionConfig,
