@@ -426,7 +426,7 @@ class WebUIServer:
             # Send a minimal prompt to trigger model loading
             warmup_response = ""
             async for token in backend.generate_stream("Say OK", []):
-                warmup_response += token.text
+                warmup_response += token.token
                 break  # We only need the first token to confirm model is loaded
             
             elapsed = time.time() - start_time
