@@ -203,6 +203,7 @@ class WebUIServer:
         self.app.router.add_patch('/api/sessions/{session_id}', self.handle_patch_session)
         self.app.router.add_delete('/api/sessions/{session_id}', self.handle_delete_session)
         self.app.router.add_get('/api/llm/models', self.handle_llm_models)
+        self.app.router.add_post('/api/llm/warmup', self.handle_llm_warmup)
         self.app.router.add_get('/api/asr/models', self.handle_asr_models)
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
         self.app.router.add_get('/api/health/llm', self.handle_health_llm)
@@ -381,6 +382,67 @@ class WebUIServer:
                 {"error": str(e), "models": []},
                 status=500
             )
+
+    async def handle_llm_warmup(self, request: web.Request) -> web.Response:
+        """
+        Warm up an LLM/VLM model by sending a minimal prompt.
+        
+        This loads the model into GPU memory before the user starts a session,
+        reducing first-response latency. Works with any OpenAI-compatible backend
+        (Ollama, vLLM, OpenAI, etc.).
+        
+        POST body: {"api_base": "...", "api_key": "...", "model": "..."}
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+        
+        api_base = (body.get("api_base") or "").strip().rstrip("/")
+        api_key = body.get("api_key") or None
+        model = (body.get("model") or "").strip()
+        
+        if not api_base or not model:
+            return web.json_response(
+                {"error": "api_base and model are required"},
+                status=400
+            )
+        
+        logger.info("[LLM Warmup] Warming up model: %s @ %s", model, api_base)
+        
+        try:
+            import time
+            start_time = time.time()
+            
+            config = LLMConfig(
+                api_base=api_base,
+                api_key=api_key,
+                model=model,
+                max_tokens=1,  # Minimal tokens to reduce overhead
+                temperature=0.0,
+            )
+            backend = OpenAILLMBackend(config)
+            
+            # Send a minimal prompt to trigger model loading
+            warmup_response = ""
+            async for token in backend.generate_stream("Say OK", []):
+                warmup_response += token.text
+                break  # We only need the first token to confirm model is loaded
+            
+            elapsed = time.time() - start_time
+            logger.info("[LLM Warmup] Model %s warmed up in %.2fs", model, elapsed)
+            
+            return web.json_response({
+                "success": True,
+                "model": model,
+                "warmup_time_seconds": round(elapsed, 2),
+            })
+        except Exception as e:
+            logger.warning("[LLM Warmup] Failed to warm up %s: %s", model, e)
+            return web.json_response({
+                "success": False,
+                "error": str(e),
+            }, status=500)
 
     async def handle_asr_models(self, request: web.Request) -> web.Response:
         """List available Riva ASR models at the given server (query: server=host:port)."""

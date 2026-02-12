@@ -32,12 +32,14 @@ This guide explains how to set up and run Vision-Language Models (VLMs) with Mul
 
 ## Supported VLM Models
 
-| Model | Provider | Use Case |
-|-------|----------|----------|
-| **Cosmos-Reason2-8B** | NVIDIA | Physical world reasoning, spatial understanding |
-| **LLaVA** | Open Source | General vision-language tasks |
-| **Qwen-VL** | Alibaba | Multi-modal understanding |
-| **GPT-4V** | OpenAI | General vision (requires API key) |
+| Model | Provider | Backend | Use Case |
+|-------|----------|---------|----------|
+| **Cosmos-Reason2-8B** | NVIDIA | vLLM | Physical world reasoning, spatial understanding |
+| **llava-llama3** | Meta/LLaVA | Ollama | General vision, easiest setup |
+| **llava-phi3** | Microsoft/LLaVA | Ollama | Faster, smaller model |
+| **moondream** | Vikhyat | Ollama | Lightweight vision (~1.7GB) |
+| **LLaVA-v1.6** | Open Source | vLLM | General vision-language tasks |
+| **GPT-4V** | OpenAI | OpenAI API | Best quality (requires API key) |
 
 ## Prerequisites
 
@@ -364,7 +366,39 @@ This is because VLMs are trained on image-text pairs and will generate visual de
 
 ## Using Other VLM Models
 
-### LLaVA
+### Ollama (Easiest Setup)
+
+Ollama supports vision models with no Docker configuration needed:
+
+```bash
+# Install Ollama (if not already installed)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a vision model
+ollama pull llava-llama3    # ~5GB, good quality
+# or
+ollama pull llava-phi3      # ~3GB, faster
+# or
+ollama pull moondream       # ~1.7GB, smallest
+```
+
+Configure in UI:
+| Setting | Value |
+|---------|-------|
+| **API Base** | `http://localhost:11434/v1` |
+| **Model** | `llava-llama3` |
+| **Enable Vision** | ✅ Checked |
+
+Or in preset:
+```yaml
+llm:
+  scheme: openai
+  api_base: http://localhost:11434/v1
+  model: llava-llama3
+  enable_vision: true
+```
+
+### LLaVA via vLLM
 
 ```bash
 docker run -d --gpus all \
