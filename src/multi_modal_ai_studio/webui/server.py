@@ -554,6 +554,16 @@ class WebUIServer:
         )
         await response.prepare(request)
 
+        # Get FrameBroker for VLM access
+        frame_broker = None
+        try:
+            from multi_modal_ai_studio.backends.vision.frame_broker import get_frame_broker
+            frame_broker = get_frame_broker()
+            logger.info("[Camera MJPEG] FrameBroker connected for VLM frame storage")
+        except ImportError:
+            logger.debug("[Camera MJPEG] FrameBroker not available")
+        
+        frame_count = 0
         try:
             while True:
                 ret, frame = await asyncio.get_running_loop().run_in_executor(
@@ -561,6 +571,18 @@ class WebUIServer:
                 )
                 if not ret or frame is None:
                     break
+                
+                # Store frame in FrameBroker for VLM (every 3rd frame = ~10fps)
+                frame_count += 1
+                if frame_broker and frame_count % 3 == 0:
+                    try:
+                        frame_copy = frame.copy()
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, lambda f=frame_copy: frame_broker.store_frame(f, jpeg_quality=70)
+                        )
+                    except Exception as e:
+                        logger.debug("[Camera MJPEG] FrameBroker store failed: %s", e)
+                
                 _, jpeg = await asyncio.get_running_loop().run_in_executor(
                     None, lambda f=frame: cv2.imencode(".jpg", f)
                 )

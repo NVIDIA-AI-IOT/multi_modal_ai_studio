@@ -76,17 +76,26 @@ docker pull nvcr.io/nvidia/vllm:latest
 
 ## Step 2: Start vLLM with Cosmos-Reason2
 
+### Hugging Face Access (Required for Gated Models)
+
+Cosmos-Reason2 is a **gated model**. You must:
+1. Accept the license at [huggingface.co/nvidia/Cosmos-Reason2-8B](https://huggingface.co/nvidia/Cosmos-Reason2-8B)
+2. Get your token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+3. Pass the token as an environment variable (see below)
+
 ### For Jetson:
 
 ```bash
 docker run -d --gpus all \
   --name vllm-cosmos \
   -p 8003:8000 \
+  -e HUGGING_FACE_HUB_TOKEN=hf_your_token_here \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
   ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor \
   python3 -m vllm.entrypoints.openai.api_server \
     --model nvidia/Cosmos-Reason2-8B \
     --max-model-len 16384 \
+    --gpu-memory-utilization 0.8 \
     --port 8000
 ```
 
@@ -96,14 +105,18 @@ docker run -d --gpus all \
 docker run -d --gpus all \
   --name vllm-cosmos \
   -p 8003:8000 \
+  -e HUGGING_FACE_HUB_TOKEN=hf_your_token_here \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
   vllm/vllm-openai:latest \
   --model nvidia/Cosmos-Reason2-8B \
   --max-model-len 16384 \
+  --gpu-memory-utilization 0.8 \
   --port 8000
 ```
 
 > **Note**: First run downloads the model (~16GB). This may take several minutes.
+> 
+> **Memory Issues?** Lower `--gpu-memory-utilization` to 0.7 or reduce `--max-model-len` to 8192.
 
 ### Verify vLLM is Running:
 
@@ -305,6 +318,17 @@ Run with: `python -m multi_modal_ai_studio --preset presets/my-vlm.yaml`
 | Camera not detected | Use HTTPS or localhost (not HTTP + IP) |
 | Permission denied | Check browser camera permissions |
 | Black frames | Ensure camera isn't used by another app |
+| USB camera not listed | Only capture devices are shown (metadata devices like /dev/video1 are filtered) |
+
+#### Camera Source Options
+
+| Source | Setting | Use Case |
+|--------|---------|----------|
+| **Browser** | `video_source: browser` | Use client webcam via WebRTC |
+| **USB (Server)** | `video_source: usb` + device path | Use server-attached USB camera (e.g., `/dev/video0`) |
+| **None** | `video_source: none` | Disable camera for text-only mode |
+
+> **Note**: When using USB camera, frames are captured via OpenCV and streamed to both UI preview and VLM.
 
 ### ASR Issues
 
@@ -321,6 +345,20 @@ Run with: `python -m multi_modal_ai_studio --preset presets/my-vlm.yaml`
 | Slow responses | Reduce `vision_frames`, lower `max_tokens` |
 | Generic answers | Improve system prompt, increase frames |
 | "I can't see" errors | Check `enable_vision: true`, camera working |
+| VLM hallucinates scenes | See "VLM vs LLM Behavior" below |
+
+#### VLM vs LLM Behavior (Important!)
+
+**VLMs hallucinate when asked visual questions without images:**
+
+| Model Type | "Describe the scene" (no camera) |
+|------------|----------------------------------|
+| **VLM** (Cosmos-Reason, LLaVA) | Hallucinates: "A winter scene with snow..." |
+| **Regular LLM** (Llama, GPT-3.5) | "I can't see anything" |
+
+This is because VLMs are trained on image-text pairs and will generate visual descriptions even without input images.
+
+**When camera is set to "none"**, the system adds a prompt note to help prevent hallucination, but results depend on the model.
 
 ---
 

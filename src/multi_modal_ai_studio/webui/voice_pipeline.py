@@ -176,30 +176,61 @@ async def _run_voice_pipeline(
         else:
             logger.info("Server mic capture thread started; waiting for first PCM chunk and user_amplitude")
 
-    # VLM: Multi-frame browser capture for vision models
-    # Frames are captured continuously in browser ring buffer, then selected on ASR final
+    # VLM: Multi-frame capture for vision models
+    # Frames are captured continuously in browser ring buffer (browser camera)
+    # or in server-side FrameBroker (USB camera), then selected on ASR final
     vision_enabled = getattr(llm_config, "enable_vision", False)
+    
+    # Disable vision if camera is set to "none" (even if enable_vision=True in config)
+    if vision_enabled and config.devices.video_source == "none":
+        vision_enabled = False
+        logger.info("[VLM] Vision disabled: camera set to 'none'")
+    
     vision_frames_count = getattr(llm_config, "vision_frames", 4)
     vision_quality = getattr(llm_config, "vision_quality", 0.7)
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
     
-    # Multi-frame response handling
+    # Determine if using server-side camera (USB)
+    use_server_camera = (
+        config.devices.video_source == "usb" 
+        and bool(config.devices.video_device)
+    )
+    
+    # Multi-frame response handling (for browser camera)
     browser_frames_event = asyncio.Event()
     browser_frames_data: dict = {"frames": [], "t_start": 0.0, "t_end": 0.0}
     
     # Track speech timing for frame selection
     speech_start_time: Optional[float] = None  # Set on first asr_partial
     
+    # Frame broker for server camera
+    _frame_broker = None
+    if vision_enabled and use_server_camera:
+        try:
+            from multi_modal_ai_studio.backends.vision.frame_broker import get_frame_broker
+            _frame_broker = get_frame_broker()
+            logger.info("[VLM] Using FrameBroker for server camera frames")
+        except ImportError:
+            logger.warning("[VLM] FrameBroker not available, server camera VLM disabled")
+    
     if vision_enabled:
         logger.info(
-            "VLM vision enabled: n_frames=%d, quality=%.1f, max_width=%d, buffer_fps=%.1f",
-            vision_frames_count, vision_quality, vision_max_width, vision_buffer_fps
+            "VLM vision enabled: n_frames=%d, quality=%.1f, max_width=%d, buffer_fps=%.1f, server_camera=%s",
+            vision_frames_count, vision_quality, vision_max_width, vision_buffer_fps, use_server_camera
         )
     
     async def start_vlm_capture() -> None:
-        """Tell browser to start capturing frames into ring buffer."""
+        """Tell browser to start capturing frames into ring buffer.
+        
+        For server camera (USB), WebRTC already stores frames in FrameBroker,
+        so we only need to notify browser for browser camera.
+        """
         if not vision_enabled:
+            return
+        if use_server_camera:
+            # Server camera uses FrameBroker, no browser action needed
+            logger.debug("[VLM] Server camera uses FrameBroker, no browser capture needed")
             return
         try:
             await ws.send_str(json.dumps({
@@ -213,13 +244,32 @@ async def _run_voice_pipeline(
             logger.warning("[VLM] Failed to start capture: %s", e)
     
     async def request_vlm_frames(t_start: float, t_end: float, n_frames: int, timeout: float = 3.0) -> list:
-        """Request n_frames from browser's ring buffer, evenly spaced between t_start and t_end.
+        """Request n_frames evenly spaced between t_start and t_end.
+        
+        For browser camera: requests from browser's JavaScript ring buffer.
+        For server camera: reads from FrameBroker (populated by WebRTC track).
         
         Returns list of frame data URLs, or empty list if unavailable.
         """
         if not vision_enabled:
             return []
         
+        # Server camera: read from FrameBroker
+        if use_server_camera and _frame_broker is not None:
+            try:
+                loop = asyncio.get_event_loop()
+                frames = await loop.run_in_executor(
+                    None, 
+                    lambda: _frame_broker.get_frames(t_start, t_end, n_frames, vision_max_width)
+                )
+                logger.info("[VLM] Retrieved %d frames from FrameBroker (t=%.2f to %.2f)", 
+                           len(frames), t_start, t_end)
+                return frames
+            except Exception as e:
+                logger.warning("[VLM] FrameBroker get_frames failed: %s", e)
+                return []
+        
+        # Browser camera: request from browser's JavaScript ring buffer
         browser_frames_event.clear()
         browser_frames_data["frames"] = []
         
@@ -247,6 +297,10 @@ async def _run_voice_pipeline(
     async def stop_vlm_capture() -> None:
         """Tell browser to stop capturing frames."""
         if not vision_enabled:
+            return
+        if use_server_camera:
+            # Server camera uses FrameBroker, no browser action needed
+            logger.debug("[VLM] Server camera uses FrameBroker, no browser stop needed")
             return
         try:
             await ws.send_str(json.dumps({"type": "vlm_stop_capture"}))
@@ -548,8 +602,9 @@ async def _run_voice_pipeline(
                     t_start = speech_start_time if speech_start_time is not None else max(0, t_end - 3.0)
                     speech_duration = t_end - t_start
                     
-                    logger.info("[VLM] Requesting %d frames from browser (speech: %.2fs to %.2fs, duration=%.2fs)",
-                               vision_frames_count, t_start, t_end, speech_duration)
+                    source = "FrameBroker" if use_server_camera else "browser"
+                    logger.info("[VLM] Requesting %d frames from %s (speech: %.2fs to %.2fs, duration=%.2fs)",
+                               vision_frames_count, source, t_start, t_end, speech_duration)
                     
                     ts_frame_request = time.time()
                     image_data_urls = await request_vlm_frames(
@@ -580,9 +635,18 @@ async def _run_voice_pipeline(
                 llm_first_token_sent = False
                 
                 # Use vision_system_prompt when vision is enabled and we have frames
+                # When vision is disabled, append note to prevent hallucinations
                 effective_system_prompt = llm_config.system_prompt
                 if vision_enabled and image_data_urls:
                     effective_system_prompt = getattr(llm_config, "vision_system_prompt", llm_config.system_prompt)
+                elif not vision_enabled:
+                    # Vision disabled - brief but clear instruction
+                    effective_system_prompt = llm_config.system_prompt + " You have no camera access right now, so you cannot see anything. If asked to describe visuals, just say 'I can't see right now.' Answer other questions normally."
+                    logger.debug("[VLM] Vision disabled, added no-vision instruction to prompt")
+                elif vision_enabled and not image_data_urls:
+                    # Vision enabled but no frames captured
+                    effective_system_prompt = llm_config.system_prompt + "\n\nNote: No camera frames are available right now. If asked about visual content, explain the camera is not working."
+                    logger.warning("[VLM] Vision enabled but no frames available")
                 
                 try:
                     async for token in llm.generate_stream(

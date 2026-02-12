@@ -932,6 +932,7 @@ function toggleVlmSettings() {
     }
 }
 
+
 function renderTTSConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
@@ -3838,7 +3839,7 @@ function startPreviewStream(options) {
         state.cameraWebrtcPc = pc;
         pc.addTransceiver('video', { direction: 'recvonly' });
         pc.ontrack = function (e) {
-            if (!state.isLiveSession || state.sessionState !== 'setup') return;
+            // Always show video from server camera WebRTC - during setup AND live session
             if (e.streams && e.streams[0] && videoFeed) {
                 videoFeed.srcObject = e.streams[0];
                 videoFeed.style.display = 'block';
@@ -4056,14 +4057,45 @@ function updateLiveSessionUI() {
                 imagePlaceholder.style.display = hasVideo ? 'none' : 'flex';
                 if (!hasVideo) updateImagePlaceholderContent();
             }
-            if (videoFeed) videoFeed.style.display = hasVideo ? 'block' : 'none';
+            // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
+            // Only show one to avoid overlap
+            var mjpegFeedSetup = document.getElementById('video-feed-mjpeg');
+            var hasWebRTCSetup = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
+            var hasMjpegSetup = mjpegFeedSetup && mjpegFeedSetup.src && mjpegFeedSetup.src !== '';
+            if (hasVideo) {
+                if (hasWebRTCSetup) {
+                    videoFeed.style.display = 'block';
+                    if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+                } else if (hasMjpegSetup) {
+                    if (videoFeed) videoFeed.style.display = 'none';
+                    mjpegFeedSetup.style.display = 'block';
+                } else if (videoFeed) {
+                    videoFeed.style.display = 'block';
+                }
+            } else {
+                if (videoFeed) videoFeed.style.display = 'none';
+                if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+            }
         } else if (state.sessionState === 'live') {
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
             if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: #ef4444;"><i data-lucide="circle" class="lucide-inline" style="fill: currentColor;"></i> RECORDING</span>';
             if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
-            if (videoFeed) videoFeed.style.display = 'block';
+            // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
+            // Only show one to avoid overlap (empty video covering the MJPEG img)
+            var mjpegFeedLive = document.getElementById('video-feed-mjpeg');
+            var hasWebRTC = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
+            var hasMjpeg = mjpegFeedLive && mjpegFeedLive.src && mjpegFeedLive.src !== '';
+            if (hasWebRTC) {
+                videoFeed.style.display = 'block';
+                if (mjpegFeedLive) mjpegFeedLive.style.display = 'none';
+            } else if (hasMjpeg) {
+                if (videoFeed) videoFeed.style.display = 'none';
+                mjpegFeedLive.style.display = 'block';
+            } else if (videoFeed) {
+                videoFeed.style.display = 'block';
+            }
             if (startOverlay) startOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'flex';
