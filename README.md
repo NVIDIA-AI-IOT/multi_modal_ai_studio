@@ -53,8 +53,8 @@ Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommen
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/multi-modal-ai-studio.git
-cd multi-modal-ai-studio
+git clone https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio.git
+cd multi_modal_ai_studio
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -71,10 +71,10 @@ Full steps and troubleshooting: [INSTALL.md](INSTALL.md)
 
 ```bash
 # View sessions and timeline (no backend required)
-multi-modal-ai-studio --port 8092
+multi_modal_ai_studio --port 8092
 
 # With Riva ASR/TTS (use --asr-server and --tts-server)
-multi-modal-ai-studio \
+multi_modal_ai_studio \
   --port 8092 \
   --asr-server localhost:50051 \
   --tts-server localhost:50051 \
@@ -82,14 +82,14 @@ multi-modal-ai-studio \
   --llm-model llama3.2:3b
 
 # With OpenAI Realtime API
-multi-modal-ai-studio \
+multi_modal_ai_studio \
   --port 8092 \
   --asr-scheme openai-realtime \
   --tts-scheme openai-realtime \
   --llm-api-key sk-...
 
 # With preset
-multi-modal-ai-studio --preset low-latency
+multi_modal_ai_studio --preset low-latency
 ```
 
 Open **http://localhost:8092** in your browser.
@@ -101,10 +101,10 @@ By default the app loads and saves sessions in `sessions/`. To view or use the s
 
 ```bash
 # From config file
-multi-modal-ai-studio --mode headless --config my-config.yaml
+multi_modal_ai_studio --mode headless --config my-config.yaml
 
 # From CLI args
-multi-modal-ai-studio \
+multi_modal_ai_studio \
   --mode headless \
   --audio-input alsa:hw:0,0 \
   --audio-output alsa:hw:1,0 \
