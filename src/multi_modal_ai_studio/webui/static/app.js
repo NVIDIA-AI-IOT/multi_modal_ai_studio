@@ -957,7 +957,7 @@ function renderLLMConfig(config, readonly = false) {
                            onchange="updateConfig('llm', 'enable_vision', this.checked); toggleVlmSettings();">
                     Enable Vision (VLM)
                 </label>
-                ${!readonly ? '<span class="input-hint">Send camera frames to VLM during speech (e.g. Cosmos-Reason, GPT-4V)</span>' : ''}
+                ${!readonly ? '<span class="input-hint">Send camera frames to VLM during speech (requires camera)</span>' : ''}
             </div>
 
             <div id="vlm-settings" class="form-group" style="display: ${config.enable_vision ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid var(--border-color);">
@@ -1033,14 +1033,28 @@ function toggleVlmSettings() {
         vlmSettings.style.display = enableVision.checked ? 'block' : 'none';
     }
     
-    // Swap system prompt content based on vision state
+    // Swap system prompt content based on vision state and update config
     if (systemPrompt && currentConfig.llm) {
         if (enableVision.checked) {
-            // Switching to vision mode - show vision_system_prompt
-            systemPrompt.value = currentConfig.llm.vision_system_prompt || 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.';
+            // Switching to vision mode - use vision system prompt
+            const visionPrompt = currentConfig.llm.vision_system_prompt || 
+                'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.';
+            systemPrompt.value = visionPrompt;
+            currentConfig.llm.system_prompt = visionPrompt;
+            
+            // Vision ON → Camera cannot be "none", auto-switch to browser
+            if (currentConfig.devices.video_source === 'none' || currentConfig.devices.camera === 'none') {
+                currentConfig.devices.video_source = 'browser';
+                currentConfig.devices.camera = 'browser';
+                console.log('Vision enabled: auto-switching camera from "none" to "browser"');
+                // Update camera dropdown if visible
+                const cameraSelect = document.getElementById('device-camera-list');
+                if (cameraSelect) cameraSelect.value = '';
+            }
         } else {
-            // Switching to text mode - show system_prompt
-            systemPrompt.value = currentConfig.llm.system_prompt || 'You are a helpful voice assistant.';
+            // Switching to text mode - use generic system prompt
+            systemPrompt.value = 'You are a helpful AI assistant.';
+            currentConfig.llm.system_prompt = 'You are a helpful AI assistant.';
         }
     }
 }
@@ -1259,10 +1273,10 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             <div class="form-group">
                 <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
-                    <option value="none" ${camValue === 'none' ? 'selected' : ''}>&#128683;None (No vision-modality)</option>
+                    <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
                 </select>
-                <div class="input-hint input-hint-camera">Lists cameras on this PC (Browser) and USB cameras attached to the server (Server USB). Default uses the browser’s default camera.</div>
+                <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser) and USB cameras attached to the server (Server USB).</div>
             </div>
             <div class="form-group">
                 <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
@@ -1286,19 +1300,37 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
 
 function onDeviceListChange(type, value) {
     if (type === 'camera') {
+        // Prevent selecting "none" when VLM is enabled
+        if (value === 'none' && currentConfig.llm && currentConfig.llm.enable_vision) {
+            console.warn('Cannot set camera to "none" when VLM is enabled - camera is required');
+            // Reset dropdown to current valid value
+            const select = document.getElementById('device-camera-list');
+            if (select) {
+                select.value = currentConfig.devices.camera === 'browser' ? '' : currentConfig.devices.camera;
+            }
+            return;
+        }
+        
         if (value === 'none') {
             currentConfig.devices.camera = 'none';
+            currentConfig.devices.video_source = 'none';
             state.selectedBrowserCameraId = null;
         } else if (value === '') {
             currentConfig.devices.camera = 'browser';
+            currentConfig.devices.video_source = 'browser';
             state.selectedBrowserCameraId = null;
         } else if (value.indexOf('/dev/') === 0) {
             currentConfig.devices.camera = value;
+            currentConfig.devices.video_source = 'usb';
+            currentConfig.devices.video_device = value;
             state.selectedBrowserCameraId = null;
         } else {
             currentConfig.devices.camera = value;
+            currentConfig.devices.video_source = 'browser';
             state.selectedBrowserCameraId = value;
         }
+        // Update VLM warning if vision is enabled but camera is none
+        toggleVlmSettings();
     } else if (type === 'microphone') {
         if (value === 'none') {
             currentConfig.devices.microphone = 'none';

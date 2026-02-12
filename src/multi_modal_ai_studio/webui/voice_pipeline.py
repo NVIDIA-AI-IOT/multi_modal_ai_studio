@@ -714,9 +714,10 @@ async def _run_voice_pipeline(
     # VLM: Multi-frame capture for vision models
     # Frames are captured continuously in browser ring buffer (browser camera)
     # or in server-side FrameBroker (USB camera), then selected on ASR final
-    vision_enabled = getattr(llm_config, "enable_vision", False)
+    vision_configured = getattr(llm_config, "enable_vision", False)  # User checked "Enable Vision (VLM)"
+    vision_enabled = vision_configured
     
-    # Disable vision if camera is set to "none" (even if enable_vision=True in config)
+    # Disable vision if camera is set to "none"
     if vision_enabled and config.devices.video_source == "none":
         vision_enabled = False
         logger.info("[VLM] Vision disabled: camera set to 'none'")
@@ -1218,18 +1219,12 @@ async def _run_voice_pipeline(
                 llm_first_token_sent = False
                 
                 # Use vision_system_prompt when vision is enabled and we have frames
-                # When vision is disabled, append note to prevent hallucinations
                 effective_system_prompt = llm_config.system_prompt
                 if vision_enabled and image_data_urls:
+                    # VLM with frames - use vision-specific prompt
                     effective_system_prompt = getattr(llm_config, "vision_system_prompt", llm_config.system_prompt)
-                elif not vision_enabled:
-                    # Vision disabled - brief but clear instruction
-                    effective_system_prompt = llm_config.system_prompt + " You have no camera access right now, so you cannot see anything. If asked to describe visuals, just say 'I can't see right now.' Answer other questions normally."
-                    logger.debug("[VLM] Vision disabled, added no-vision instruction to prompt")
                 elif vision_enabled and not image_data_urls:
-                    # Vision enabled but no frames captured
-                    effective_system_prompt = llm_config.system_prompt + "\n\nNote: No camera frames are available right now. If asked about visual content, explain the camera is not working."
-                    logger.warning("[VLM] Vision enabled but no frames available")
+                    logger.warning("[VLM] Vision enabled but no frames captured")
                 
                 try:
                     async for token in llm.generate_stream(
