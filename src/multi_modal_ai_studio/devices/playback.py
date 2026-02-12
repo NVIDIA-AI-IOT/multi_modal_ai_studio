@@ -1,52 +1,70 @@
 """
-Server-side audio playback for voice pipeline.
+Server-side audio playback for TTS (voice pipeline).
 
-When the user selects a Server USB speaker (ALSA), the server plays TTS audio
-to that device instead of streaming to the browser.
+When the user selects a Server USB speaker (ALSA), the server plays TTS PCM
+to that device via aplay in addition to sending audio to the browser.
 """
 
 import logging
 import subprocess
+import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+CHANNELS = 1
+
 
 def start_server_speaker_playback(
     device: str,
-    sample_rate: int = 24000,
+    sample_rate: int,
+    proc_holder: Optional[list] = None,
 ) -> Optional[subprocess.Popen]:
-    """
-    Start an aplay subprocess for streaming TTS audio to an ALSA device.
+    """Start aplay for TTS playback to an ALSA device.
+
+    Caller must write 16-bit LE mono PCM to the returned process's stdin,
+    then close stdin when done so aplay exits. Use plughw when device is
+    hw:X,Y so ALSA can do sample-rate conversion if needed.
 
     Args:
-        device: ALSA device (e.g. "hw:3,0" or "plughw:3,0")
-        sample_rate: Audio sample rate (default 24000 for TTS)
+        device: ALSA device (e.g. hw:2,0).
+        sample_rate: PCM sample rate in Hz (e.g. 24000 from TTS).
+        proc_holder: If provided, the Popen is appended so caller can terminate
+            it to stop playback (e.g. on disconnect).
 
     Returns:
-        The subprocess.Popen object (with stdin pipe), or None if failed.
-        Write 16-bit signed PCM data to proc.stdin.
-        Call stop_server_speaker_playback when done.
+        Popen with stdin=PIPE, or None if aplay could not be started.
     """
     if not device:
         return None
-    
+
     dev = (device or "default").strip()
-    # Use plughw for rate conversion if needed
     if dev.startswith("hw:") and not dev.startswith("plughw:"):
         dev = "plug" + dev
-        logger.debug("ALSA using %s for rate conversion (sample_rate=%d)", dev, sample_rate)
-    
-    cmd = ["aplay", "-D", dev, "-f", "S16_LE", "-r", str(sample_rate), "-c", "1", "-t", "raw"]
-    logger.info("ALSA playback starting: %s (device=%s)", " ".join(cmd), device)
-    
+        logger.debug("ALSA playback using %s for rate conversion", dev)
+    cmd = [
+        "aplay",
+        "-D", dev,
+        "-f", "S16_LE",
+        "-r", str(sample_rate),
+        "-c", str(CHANNELS),
+        "-t", "raw",
+    ]
+    logger.info("ALSA playback starting: %s (device=%s, rate=%s)", " ".join(cmd), device, sample_rate)
     try:
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        # If same device is used for mic (arecord) and speaker, aplay may exit with "Device or resource busy"
+        time.sleep(0.15)
+        if proc.poll() is not None:
+            err = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "") or "(no stderr)"
+            logger.warning("aplay exited immediately for %s: %s", device, err)
+            return None
+        if proc_holder is not None:
+            proc_holder.append(proc)
         return proc
     except FileNotFoundError:
         logger.warning("aplay not found; cannot play to ALSA device %s", device)
@@ -57,29 +75,22 @@ def start_server_speaker_playback(
 
 
 def stop_server_speaker_playback(proc: Optional[subprocess.Popen]) -> None:
-    """
-    Stop the aplay subprocess and release the device.
-
-    Args:
-        proc: The subprocess returned by start_server_speaker_playback.
-    """
+    """Close stdin and wait for aplay to finish, or terminate if it doesn't exit."""
     if proc is None:
         return
-    
     try:
-        if proc.stdin:
+        if proc.stdin and not proc.stdin.closed:
             proc.stdin.close()
-    except Exception:
-        pass
-    
-    try:
-        proc.terminate()
         proc.wait(timeout=2)
-    except Exception:
+    except subprocess.TimeoutExpired:
+        proc.terminate()
         try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
             proc.kill()
+    except Exception as e:
+        logger.debug("Stop server speaker playback: %s", e)
+        try:
+            proc.terminate()
         except Exception:
             pass
-    
-    logger.debug("ALSA playback stopped")
-
