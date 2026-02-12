@@ -570,6 +570,73 @@ function pinLlmFieldToDefault(fieldName) {
     }
 }
 
+/**
+ * Warm up the LLM model by sending a minimal prompt.
+ * This loads the model into GPU memory before the user starts a session,
+ * reducing first-response latency.
+ */
+let _lastWarmupKey = '';
+let _warmupInProgress = false;
+
+async function warmupLLM() {
+    const config = currentConfig.llm || {};
+    const apiBase = (config.api_base || '').trim();
+    const model = (config.model || '').trim();
+    
+    if (!apiBase || !model) {
+        console.log('[Warmup] Skipping - no api_base or model configured');
+        return;
+    }
+    
+    // Avoid duplicate warmups for same config
+    const warmupKey = `${apiBase}|${model}`;
+    if (warmupKey === _lastWarmupKey) {
+        console.log('[Warmup] Already warmed up:', model);
+        return;
+    }
+    
+    if (_warmupInProgress) {
+        console.log('[Warmup] Already in progress, skipping');
+        return;
+    }
+    
+    _warmupInProgress = true;
+    console.log('[Warmup] Warming up model:', model, '@', apiBase);
+    
+    try {
+        const response = await fetch('/api/llm/warmup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                api_base: apiBase,
+                api_key: config.api_key || '',
+                model: model,
+            }),
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s`);
+            _lastWarmupKey = warmupKey;
+        } else {
+            console.warn('[Warmup] Failed:', result.error);
+        }
+    } catch (e) {
+        console.warn('[Warmup] Error:', e);
+    } finally {
+        _warmupInProgress = false;
+    }
+}
+
+/** Trigger warmup when LLM settings change (debounced) */
+let _warmupDebounceTimer = null;
+function scheduleWarmup() {
+    if (_warmupDebounceTimer) clearTimeout(_warmupDebounceTimer);
+    _warmupDebounceTimer = setTimeout(() => {
+        warmupLLM();
+    }, 1000);  // Wait 1 second after last change before warming up
+}
+
 function renderConfigSection(title, data) {
     const rows = Object.entries(data).map(([key, value]) => {
         // Format key nicely
@@ -1832,6 +1899,11 @@ function updateConfig(section, key, value) {
         } catch (e) {
             console.warn('Failed to persist config to localStorage:', e);
         }
+    }
+
+    // Trigger LLM warmup when api_base or model changes
+    if (section === 'llm' && (key === 'api_base' || key === 'model')) {
+        scheduleWarmup();
     }
 
     // Re-render the config panel to show/hide conditional fields
@@ -6378,6 +6450,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+
+    // Warm up LLM model on page load (reduces first-response latency)
+    console.log('Scheduling LLM warmup...');
+    setTimeout(() => {
+        warmupLLM();
+    }, 2000);  // Wait 2 seconds for page to fully load
 
     var pipelineEl = document.getElementById('pipeline-config');
     if (pipelineEl && typeof ResizeObserver !== 'undefined') {
