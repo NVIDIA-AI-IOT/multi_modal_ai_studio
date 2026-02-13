@@ -515,6 +515,71 @@ function pinLlmFieldToDefault(fieldName) {
  */
 let _lastWarmupKey = '';
 let _warmupInProgress = false;
+let _warmupResult = null;  // Stores last warmup result {is_vlm, model, etc.}
+
+/**
+ * Update the START button UI based on warmup state
+ * Only 2 states: 'loading' and 'ready'
+ */
+function updateStartButtonState(state, info = {}) {
+    const startBtn = document.getElementById('start-session-btn');
+    if (!startBtn) return;
+    
+    if (state === 'loading') {
+        startBtn.disabled = true;
+        startBtn.classList.add('loading');
+        startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span> Loading Session...`;
+    } else {
+        // 'ready' or 'error' - both enable the button, pipeline shows status
+        startBtn.disabled = false;
+        startBtn.classList.remove('loading');
+        startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="play" class="lucide-inline"></i></span> START Session`;
+    }
+    
+    // Update pipeline status indicator
+    updatePipelineLLMStatus(info);
+    
+    // Refresh lucide icons
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
+/**
+ * Update the LLM segment in the pipeline with status indicator
+ */
+function updatePipelineLLMStatus(info) {
+    const pipelineEl = document.getElementById('pipeline-config');
+    if (!pipelineEl) return;
+    
+    // Find the LLM segment (class is pipeline-seg-llm)
+    const llmSeg = pipelineEl.querySelector('.pipeline-seg-llm .pipeline-seg-label');
+    if (!llmSeg) return;
+    
+    // Get the model name from config
+    const model = info.model || currentConfig?.llm?.model || '';
+    const isVlm = info.is_vlm || false;
+    const isError = info.error ? true : false;
+    
+    // Build status indicator
+    let statusIcon = '';
+    if (info.loading) {
+        statusIcon = '<i data-lucide="loader-2" class="lucide-inline spin pipeline-status"></i>';
+    } else if (isError) {
+        statusIcon = '<i data-lucide="x-circle" class="lucide-inline pipeline-status pipeline-status--error"></i>';
+    } else if (info.success !== false) {
+        statusIcon = '<i data-lucide="check-circle" class="lucide-inline pipeline-status pipeline-status--ok"></i>';
+    }
+    
+    // Build badge
+    const badge = isVlm ? '<span class="pipeline-badge vlm">VLM</span>' : '';
+    
+    // Update the label
+    llmSeg.innerHTML = `${statusIcon} ${model} ${badge}`;
+    
+    // Refresh icons
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
+// showWarmupStatus is no longer used - model info is shown in the button itself
 
 async function warmupLLM() {
     const config = currentConfig.llm || {};
@@ -523,13 +588,15 @@ async function warmupLLM() {
     
     if (!apiBase || !model) {
         console.log('[Warmup] Skipping - no api_base or model configured');
+        updateStartButtonState('ready', {});
         return;
     }
     
     // Avoid duplicate warmups for same config
     const warmupKey = `${apiBase}|${model}`;
-    if (warmupKey === _lastWarmupKey) {
+    if (warmupKey === _lastWarmupKey && _warmupResult) {
         console.log('[Warmup] Already warmed up:', model);
+        updateStartButtonState('ready', _warmupResult);
         return;
     }
     
@@ -541,6 +608,9 @@ async function warmupLLM() {
     _warmupInProgress = true;
     console.log('[Warmup] Warming up model:', model, '@', apiBase);
     
+    // Show loading state on START button and pipeline
+    updateStartButtonState('loading', { model: model.split('/').pop(), loading: true });
+    
     try {
         const response = await fetch('/api/llm/warmup', {
             method: 'POST',
@@ -549,18 +619,23 @@ async function warmupLLM() {
                 api_base: apiBase,
                 api_key: config.api_key || '',
                 model: model,
+                detect_vlm: true,
             }),
         });
         
         const result = await response.json();
         if (result.success) {
-            console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s`);
+            console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s (VLM: ${result.is_vlm})`);
             _lastWarmupKey = warmupKey;
+            _warmupResult = result;
+            updateStartButtonState('ready', result);
         } else {
             console.warn('[Warmup] Failed:', result.error);
+            updateStartButtonState('error', { model, error: result.error || 'Model not available' });
         }
     } catch (e) {
         console.warn('[Warmup] Error:', e);
+        updateStartButtonState('error', { model, error: e.message || 'Connection failed' });
     } finally {
         _warmupInProgress = false;
     }

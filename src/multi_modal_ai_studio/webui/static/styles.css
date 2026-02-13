@@ -1826,6 +1826,47 @@ code, pre {
     box-shadow: var(--shadow-lg);
 }
 
+/* Start button loading state */
+.start-btn.loading {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    cursor: wait;
+}
+.spin {
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Pipeline status indicators */
+.pipeline-status {
+    width: 14px;
+    height: 14px;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+.pipeline-status--ok {
+    color: var(--nvidia-green, #76b900);
+}
+.pipeline-status--error {
+    color: var(--error, #ef4444);
+}
+.pipeline-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.pipeline-badge.vlm {
+    background: var(--nvidia-green, #76b900);
+    color: white;
+}
+
 /* ===== Live ASR label (updated on every partial; like Live RIVA WebUI) ===== */
 .live-asr-label-wrap {
     flex-shrink: 0;

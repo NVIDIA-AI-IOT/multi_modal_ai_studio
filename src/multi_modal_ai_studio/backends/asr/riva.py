@@ -332,19 +332,49 @@ class RivaASRBackend(ASRBackend):
             return out
 
         def run_riva_in_executor():
-            """Run entire Riva stream in this thread so main loop can feed audio."""
-            try:
-                responses = self.asr_service.streaming_response_generator(
-                    audio_chunks=audio_chunk_generator(),
-                    streaming_config=config,
-                )
-                for response in responses:
-                    for asr_result in process_response(response):
-                        results_sync_queue.put(asr_result)
-            except Exception as e:
-                self.logger.error("Riva streaming error: %s", e, exc_info=True)
-            finally:
-                results_sync_queue.put(None)
+            """Run entire Riva stream in this thread so main loop can feed audio.
+            Auto-reconnects on stream failure up to max_retries times.
+            """
+            max_retries = 5
+            retry_delay = 1.0
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    if retry_count > 0:
+                        self.logger.info("Riva ASR reconnecting (attempt %d/%d)...", retry_count + 1, max_retries)
+                        import time as _time
+                        _time.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 2, 10.0)  # Exponential backoff, max 10s
+                    
+                    responses = self.asr_service.streaming_response_generator(
+                        audio_chunks=audio_chunk_generator(),
+                        streaming_config=config,
+                    )
+                    for response in responses:
+                        for asr_result in process_response(response):
+                            results_sync_queue.put(asr_result)
+                    # Normal exit (stream ended cleanly)
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    self.logger.error("Riva streaming error (attempt %d/%d): %s", retry_count, max_retries, e)
+                    if retry_count >= max_retries:
+                        self.logger.error("Riva ASR max retries reached, giving up")
+                        break
+                    # Clear any stale audio from queue before reconnecting
+                    q = self._sync_audio_queue
+                    if q:
+                        try:
+                            while not q.empty():
+                                item = q.get_nowait()
+                                if item is None:  # Stop signal
+                                    results_sync_queue.put(None)
+                                    return
+                        except Exception:
+                            pass
+            
+            results_sync_queue.put(None)
 
         try:
             loop = asyncio.get_running_loop()
