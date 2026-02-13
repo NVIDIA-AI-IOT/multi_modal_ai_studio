@@ -352,15 +352,166 @@ class WebUIServer:
                 status=500
             )
 
+    async def _detect_vlm_capability(self, api_base: str, api_key: Optional[str], model: str) -> dict:
+        """
+        Detect if a model supports vision (VLM) across different backends.
+        
+        Detection methods (in order of preference):
+        1. Ollama API: Check /api/show for "projector" field
+        2. Name pattern: Check for known VLM patterns (vl, vision, llava, etc.)
+        3. Image probe: Try sending a tiny image (universal fallback)
+        
+        Returns: {"is_vlm": bool, "detection_method": str, "confidence": str}
+        """
+        import aiohttp
+        import re
+        
+        result = {"is_vlm": False, "detection_method": "unknown", "confidence": "low"}
+        
+        # -------------------------------------------------------------------------
+        # Method 1: Ollama-specific detection (fast, no inference)
+        # -------------------------------------------------------------------------
+        if "11434" in api_base or "ollama" in api_base.lower():
+            try:
+                # Ollama's /api/show returns model details including vision components
+                ollama_base = api_base.replace("/v1", "").rstrip("/")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{ollama_base}/api/show",
+                        json={"name": model},
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            # VLMs have a "projector" component (vision encoder)
+                            if data.get("projector"):
+                                result = {"is_vlm": True, "detection_method": "ollama_projector", "confidence": "high"}
+                                logger.info("[VLM Detect] Ollama projector found → VLM")
+                                return result
+                            # Check model family for "vl" suffix
+                            families = data.get("details", {}).get("families", [])
+                            if any("vl" in f.lower() for f in families):
+                                result = {"is_vlm": True, "detection_method": "ollama_family", "confidence": "high"}
+                                logger.info("[VLM Detect] Ollama family contains 'vl' → VLM")
+                                return result
+                            # Model exists but no vision components
+                            result = {"is_vlm": False, "detection_method": "ollama_api", "confidence": "high"}
+                            logger.info("[VLM Detect] Ollama model has no projector → LLM")
+                            return result
+            except Exception as e:
+                logger.debug("[VLM Detect] Ollama API check failed: %s", e)
+        
+        # -------------------------------------------------------------------------
+        # Method 2: Name pattern detection (fast, works for all backends)
+        # -------------------------------------------------------------------------
+        vlm_patterns = [
+            r"[-_]vl[-_:]",      # qwen3-vl:8b, Qwen2.5-VL-7B
+            r"vl\d",            # vl7b, vl8b
+            r"vision",          # gpt-4-vision, llama-vision
+            r"llava",           # llava-llama3, llava-v1.6
+            r"cosmos.*reason",  # Cosmos-Reason2-8B
+            r"moondream",       # moondream
+            r"cogvlm",          # CogVLM
+            r"internvl",        # InternVL
+            r"qwen.*vl",        # Qwen-VL, Qwen2-VL
+            r"phi.*vision",     # Phi-3-vision
+            r"gemini.*pro",     # Gemini Pro Vision (via API)
+            r"gpt-4o",          # GPT-4o (vision capable)
+            r"gpt-4-turbo",     # GPT-4 Turbo (vision capable)
+            r"claude-3",        # Claude 3 (vision capable)
+        ]
+        
+        model_lower = model.lower()
+        for pattern in vlm_patterns:
+            if re.search(pattern, model_lower):
+                result = {"is_vlm": True, "detection_method": "name_pattern", "confidence": "medium"}
+                logger.info("[VLM Detect] Name pattern '%s' matched → VLM", pattern)
+                return result
+        
+        # Known LLM-only patterns (definitely not VLM)
+        llm_only_patterns = [
+            r"^llama-?\d",      # llama2, llama3 (without vision suffix)
+            r"^mistral",        # mistral-7b
+            r"^gemma[^-]",      # gemma, gemma2 (not gemma-vision)
+            r"^phi-?\d",        # phi-2, phi-3 (not phi-3-vision)
+            r"^qwen\d?:",       # qwen:7b, qwen2:7b (not qwen-vl)
+            r"gpt-3\.5",        # GPT-3.5 (no vision)
+            r"gpt-4(?!o|-turbo|-vision)",  # GPT-4 base (no vision)
+        ]
+        
+        for pattern in llm_only_patterns:
+            if re.search(pattern, model_lower):
+                result = {"is_vlm": False, "detection_method": "name_pattern_llm", "confidence": "medium"}
+                logger.info("[VLM Detect] LLM pattern '%s' matched → LLM", pattern)
+                return result
+        
+        # -------------------------------------------------------------------------
+        # Method 3: Image probe (universal, works for any backend)
+        # Send a tiny 1x1 image and see if model accepts it
+        # -------------------------------------------------------------------------
+        try:
+            # 1x1 white PNG (smallest possible valid image)
+            tiny_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+            
+            config = LLMConfig(
+                api_base=api_base,
+                api_key=api_key,
+                model=model,
+                max_tokens=1,
+                temperature=0.0,
+            )
+            backend = OpenAILLMBackend(config)
+            
+            # Create multimodal message with image
+            test_messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": tiny_image}},
+                    {"type": "text", "text": "1"}
+                ]
+            }]
+            
+            # Try to generate with image - VLMs will accept, LLMs will error
+            async for token in backend.generate_stream("", test_messages):
+                # If we get any response, model accepted the image → VLM
+                result = {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
+                logger.info("[VLM Detect] Image probe succeeded → VLM")
+                return result
+                
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for specific error messages that indicate image rejection
+            if any(x in error_str for x in ["image", "vision", "multimodal", "unsupported"]):
+                result = {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
+                logger.info("[VLM Detect] Image probe rejected → LLM")
+                return result
+            # Other errors might be network issues, etc.
+            logger.debug("[VLM Detect] Image probe error: %s", e)
+        
+        # Default: unknown, assume LLM for safety
+        result = {"is_vlm": False, "detection_method": "default", "confidence": "low"}
+        logger.info("[VLM Detect] Could not determine, defaulting to LLM")
+        return result
+
     async def handle_llm_warmup(self, request: web.Request) -> web.Response:
         """
         Warm up an LLM/VLM model by sending a minimal prompt.
+        Also detects if the model supports vision (VLM).
         
         This loads the model into GPU memory before the user starts a session,
         reducing first-response latency. Works with any OpenAI-compatible backend
-        (Ollama, vLLM, OpenAI, etc.).
+        (Ollama, vLLM, SGLang, OpenAI, etc.).
         
-        POST body: {"api_base": "...", "api_key": "...", "model": "..."}
+        POST body: {"api_base": "...", "api_key": "...", "model": "...", "detect_vlm": true}
+        
+        Returns: {
+            "success": true,
+            "model": "...",
+            "warmup_time_seconds": X.XX,
+            "is_vlm": true/false,
+            "vlm_detection_method": "...",
+            "vlm_confidence": "high/medium/low"
+        }
         """
         try:
             body = await request.json()
@@ -370,6 +521,7 @@ class WebUIServer:
         api_base = (body.get("api_base") or "").strip().rstrip("/")
         api_key = body.get("api_key") or None
         model = (body.get("model") or "").strip()
+        detect_vlm = body.get("detect_vlm", True)  # Default: detect VLM capability
         
         if not api_base or not model:
             return web.json_response(
@@ -383,6 +535,12 @@ class WebUIServer:
             import time
             start_time = time.time()
             
+            # Detect VLM capability (if requested)
+            vlm_info = {"is_vlm": False, "detection_method": "skipped", "confidence": "none"}
+            if detect_vlm:
+                vlm_info = await self._detect_vlm_capability(api_base, api_key, model)
+            
+            # Create config and backend for warmup
             config = LLMConfig(
                 api_base=api_base,
                 api_key=api_key,
@@ -399,12 +557,16 @@ class WebUIServer:
                 break  # We only need the first token to confirm model is loaded
             
             elapsed = time.time() - start_time
-            logger.info("[LLM Warmup] Model %s warmed up in %.2fs", model, elapsed)
+            logger.info("[LLM Warmup] Model %s warmed up in %.2fs (VLM: %s)", 
+                       model, elapsed, vlm_info["is_vlm"])
             
             return web.json_response({
                 "success": True,
                 "model": model,
                 "warmup_time_seconds": round(elapsed, 2),
+                "is_vlm": vlm_info["is_vlm"],
+                "vlm_detection_method": vlm_info["detection_method"],
+                "vlm_confidence": vlm_info["confidence"],
             })
         except Exception as e:
             logger.warning("[LLM Warmup] Failed to warm up %s: %s", model, e)
