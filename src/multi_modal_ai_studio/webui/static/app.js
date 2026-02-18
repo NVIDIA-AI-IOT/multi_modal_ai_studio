@@ -418,7 +418,14 @@ const defaultConfig = {
         minimal_output: false,
         stream: true,
         system_prompt: 'You are a helpful AI assistant.',
-        extra_request_body: ''
+        extra_request_body: '',
+        enable_vision: false,
+        vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.',
+        vision_detail: 'auto',
+        vision_frames: 4,
+        vision_quality: 0.7,
+        vision_max_width: 640,
+        vision_buffer_fps: 3.0
     },
     tts: {
         backend: 'riva',
@@ -836,12 +843,41 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" ${disabled} id="llm-enable-vision" ${config.enable_vision ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'enable_vision', this.checked); toggleVlmSettings();">
+                    Enable Vision (VLM)
+                </label>
+                ${!readonly ? '<span class="input-hint">Send camera frames to VLM during speech (requires camera)</span>' : ''}
+            </div>
+
+            <div id="vlm-settings" class="form-group" style="display: ${config.enable_vision ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid var(--border-color);">
+                <label>Frames per Turn</label>
+                <input type="range" ${disabled} id="llm-vision-frames" min="1" max="10" step="1" value="${config.vision_frames || 4}"
+                       oninput="updateConfig('llm', 'vision_frames', parseInt(this.value)); document.getElementById('vision-frames-value').textContent = this.value;">
+                <span id="vision-frames-value" class="range-value">${config.vision_frames || 4}</span>
+                ${!readonly ? '<span class="input-hint">1 = single frame at end, 2-10 = multiple frames during speech</span>' : ''}
+
+                <label style="margin-top: 10px;">Frame Quality</label>
+                <input type="range" ${disabled} id="llm-vision-quality" min="0.3" max="1.0" step="0.1" value="${config.vision_quality || 0.7}"
+                       oninput="updateConfig('llm', 'vision_quality', parseFloat(this.value)); document.getElementById('vision-quality-value').textContent = this.value;">
+                <span id="vision-quality-value" class="range-value">${config.vision_quality || 0.7}</span>
+                ${!readonly ? '<span class="input-hint">JPEG quality: lower = smaller, higher = better</span>' : ''}
+
+                <label style="margin-top: 10px;">Max Frame Width</label>
+                <input type="range" ${disabled} id="llm-vision-max-width" min="320" max="1280" step="64" value="${config.vision_max_width || 640}"
+                       oninput="updateConfig('llm', 'vision_max_width', parseInt(this.value)); document.getElementById('vision-max-width-value').textContent = this.value + 'px';">
+                <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
+            </div>
+
+            <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">System Prompt</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
+                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', currentConfig.llm.enable_vision ? \'vision_system_prompt\' : \'system_prompt\', el.value); pinLlmFieldToDefault(currentConfig.llm.enable_vision ? \'vision_system_prompt\' : \'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
                 </div>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
-                          onchange="updateConfig('llm', 'system_prompt', this.value)">${config.system_prompt}</textarea>
+                          onchange="updateConfig('llm', currentConfig.llm.enable_vision ? 'vision_system_prompt' : 'system_prompt', this.value)">${config.enable_vision ? (config.vision_system_prompt || 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.') : config.system_prompt}</textarea>
+                ${!readonly ? `<span class="input-hint">${config.enable_vision ? 'Vision system prompt (used when Enable Vision is checked)' : 'Text LLM system prompt'}</span>` : ''}
             </div>
 
             <div class="form-group">
@@ -874,6 +910,42 @@ function onLLMMinimalOutputChange(checked) {
         if (el) { el.value = jsonStr; }
     }
 }
+
+function toggleVlmSettings() {
+    const vlmSettings = document.getElementById('vlm-settings');
+    const enableVision = document.getElementById('llm-enable-vision');
+    const systemPrompt = document.getElementById('llm-system-prompt');
+    
+    if (vlmSettings && enableVision) {
+        vlmSettings.style.display = enableVision.checked ? 'block' : 'none';
+    }
+    
+    // Swap system prompt content based on vision state and update config
+    if (systemPrompt && currentConfig.llm) {
+        if (enableVision.checked) {
+            // Switching to vision mode - use vision system prompt
+            const visionPrompt = currentConfig.llm.vision_system_prompt || 
+                'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.';
+            systemPrompt.value = visionPrompt;
+            currentConfig.llm.system_prompt = visionPrompt;
+            
+            // Vision ON → Camera cannot be "none", auto-switch to browser
+            if (currentConfig.devices.video_source === 'none' || currentConfig.devices.camera === 'none') {
+                currentConfig.devices.video_source = 'browser';
+                currentConfig.devices.camera = 'browser';
+                console.log('Vision enabled: auto-switching camera from "none" to "browser"');
+                // Update camera dropdown if visible
+                const cameraSelect = document.getElementById('device-camera-list');
+                if (cameraSelect) cameraSelect.value = '';
+            }
+        } else {
+            // Switching to text mode - use generic system prompt
+            systemPrompt.value = 'You are a helpful AI assistant.';
+            currentConfig.llm.system_prompt = 'You are a helpful AI assistant.';
+        }
+    }
+}
+
 
 function renderTTSConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
@@ -1075,10 +1147,10 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             <div class="form-group">
                 <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
-                    <option value="none" ${camValue === 'none' ? 'selected' : ''}>&#128683;None (No vision-modality)</option>
+                    <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
                 </select>
-                <div class="input-hint input-hint-camera">Lists cameras on this PC (Browser) and USB cameras attached to the server (Server USB). Default uses the browser’s default camera.</div>
+                <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser) and USB cameras attached to the server (Server USB).</div>
             </div>
             <div class="form-group">
                 <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
@@ -1102,19 +1174,37 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
 
 function onDeviceListChange(type, value) {
     if (type === 'camera') {
+        // Prevent selecting "none" when VLM is enabled
+        if (value === 'none' && currentConfig.llm && currentConfig.llm.enable_vision) {
+            console.warn('Cannot set camera to "none" when VLM is enabled - camera is required');
+            // Reset dropdown to current valid value
+            const select = document.getElementById('device-camera-list');
+            if (select) {
+                select.value = currentConfig.devices.camera === 'browser' ? '' : currentConfig.devices.camera;
+            }
+            return;
+        }
+        
         if (value === 'none') {
             currentConfig.devices.camera = 'none';
+            currentConfig.devices.video_source = 'none';
             state.selectedBrowserCameraId = null;
         } else if (value === '') {
             currentConfig.devices.camera = 'browser';
+            currentConfig.devices.video_source = 'browser';
             state.selectedBrowserCameraId = null;
         } else if (value.indexOf('/dev/') === 0) {
             currentConfig.devices.camera = value;
+            currentConfig.devices.video_source = 'usb';
+            currentConfig.devices.video_device = value;
             state.selectedBrowserCameraId = null;
         } else {
             currentConfig.devices.camera = value;
+            currentConfig.devices.video_source = 'browser';
             state.selectedBrowserCameraId = value;
         }
+        // Update VLM warning if vision is enabled but camera is none
+        toggleVlmSettings();
     } else if (type === 'microphone') {
         if (value === 'none') {
             currentConfig.devices.microphone = 'none';
@@ -3781,7 +3871,7 @@ function startPreviewStream(options) {
         state.cameraWebrtcPc = pc;
         pc.addTransceiver('video', { direction: 'recvonly' });
         pc.ontrack = function (e) {
-            if (!state.isLiveSession || state.sessionState !== 'setup') return;
+            // Always show video from server camera WebRTC - during setup AND live session
             if (e.streams && e.streams[0] && videoFeed) {
                 videoFeed.srcObject = e.streams[0];
                 videoFeed.style.display = 'block';
@@ -3999,14 +4089,45 @@ function updateLiveSessionUI() {
                 imagePlaceholder.style.display = hasVideo ? 'none' : 'flex';
                 if (!hasVideo) updateImagePlaceholderContent();
             }
-            if (videoFeed) videoFeed.style.display = hasVideo ? 'block' : 'none';
+            // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
+            // Only show one to avoid overlap
+            var mjpegFeedSetup = document.getElementById('video-feed-mjpeg');
+            var hasWebRTCSetup = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
+            var hasMjpegSetup = mjpegFeedSetup && mjpegFeedSetup.src && mjpegFeedSetup.src !== '';
+            if (hasVideo) {
+                if (hasWebRTCSetup) {
+                    videoFeed.style.display = 'block';
+                    if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+                } else if (hasMjpegSetup) {
+                    if (videoFeed) videoFeed.style.display = 'none';
+                    mjpegFeedSetup.style.display = 'block';
+                } else if (videoFeed) {
+                    videoFeed.style.display = 'block';
+                }
+            } else {
+                if (videoFeed) videoFeed.style.display = 'none';
+                if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+            }
         } else if (state.sessionState === 'live') {
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
             if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: #ef4444;"><i data-lucide="circle" class="lucide-inline" style="fill: currentColor;"></i> RECORDING</span>';
             if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
-            if (videoFeed) videoFeed.style.display = 'block';
+            // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
+            // Only show one to avoid overlap (empty video covering the MJPEG img)
+            var mjpegFeedLive = document.getElementById('video-feed-mjpeg');
+            var hasWebRTC = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
+            var hasMjpeg = mjpegFeedLive && mjpegFeedLive.src && mjpegFeedLive.src !== '';
+            if (hasWebRTC) {
+                videoFeed.style.display = 'block';
+                if (mjpegFeedLive) mjpegFeedLive.style.display = 'none';
+            } else if (hasMjpeg) {
+                if (videoFeed) videoFeed.style.display = 'none';
+                mjpegFeedLive.style.display = 'block';
+            } else if (videoFeed) {
+                videoFeed.style.display = 'block';
+            }
             if (startOverlay) startOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'flex';
@@ -4404,9 +4525,244 @@ function handleVoiceWsMessage(ev) {
         } else if (msg.type === 'error') {
             console.error('Voice pipeline error:', msg.error);
             appendLiveChatError(msg.error);
+        } else if (msg.type === 'request_frame') {
+            // VLM: Legacy single frame request (backwards compatibility)
+            console.log('[VLM] Server requested single frame');
+            captureAndSendVideoFrame();
+        } else if (msg.type === 'vlm_start_capture') {
+            // VLM: Start continuous frame capture into ring buffer
+            const fps = msg.fps || 3.0;
+            const quality = msg.quality || 0.7;
+            const maxWidth = msg.max_width || 640;
+            vlmStartCapture(fps, quality, maxWidth);
+        } else if (msg.type === 'vlm_get_frames') {
+            // VLM: Get frames from ring buffer
+            const tStart = msg.t_start || 0;
+            const tEnd = msg.t_end || 0;
+            const nFrames = msg.n_frames || 4;
+            vlmSendFrames(tStart, tEnd, nFrames);
+        } else if (msg.type === 'vlm_stop_capture') {
+            // VLM: Stop frame capture
+            vlmStopCapture();
         }
     } catch (e) {
         console.error('Parse WS message error:', e);
+    }
+}
+
+/**
+ * VLM Ring Buffer: Continuous frame capture for multi-frame VLM requests.
+ * Frames are stored with timestamps and selected based on speech timing.
+ */
+const vlmRingBuffer = {
+    frames: [],           // Array of {data: dataUrl, timestamp: sessionTime}
+    maxFrames: 60,        // ~20 seconds at 3 fps
+    captureInterval: null,
+    fps: 3.0,
+    quality: 0.7,
+    maxWidth: 640,
+    isCapturing: false
+};
+
+/**
+ * Start VLM frame capture into ring buffer.
+ * Called by server when session starts with vlm_start_capture message.
+ */
+function vlmStartCapture(fps, quality, maxWidth) {
+    if (vlmRingBuffer.isCapturing) {
+        console.log('[VLM] Capture already running');
+        return;
+    }
+    
+    vlmRingBuffer.fps = fps || 3.0;
+    vlmRingBuffer.quality = quality || 0.7;
+    vlmRingBuffer.maxWidth = maxWidth || 640;
+    vlmRingBuffer.frames = [];
+    vlmRingBuffer.isCapturing = true;
+    
+    const intervalMs = 1000 / vlmRingBuffer.fps;
+    vlmRingBuffer.captureInterval = setInterval(vlmCaptureFrame, intervalMs);
+    
+    console.log('[VLM] Started capture: fps=' + vlmRingBuffer.fps + ', quality=' + vlmRingBuffer.quality + ', maxWidth=' + vlmRingBuffer.maxWidth);
+}
+
+/**
+ * Stop VLM frame capture.
+ */
+function vlmStopCapture() {
+    if (vlmRingBuffer.captureInterval) {
+        clearInterval(vlmRingBuffer.captureInterval);
+        vlmRingBuffer.captureInterval = null;
+    }
+    vlmRingBuffer.isCapturing = false;
+    vlmRingBuffer.frames = [];
+    console.log('[VLM] Stopped capture');
+}
+
+/**
+ * Capture a single frame into the ring buffer.
+ */
+function vlmCaptureFrame() {
+    const videoFeed = document.getElementById('video-feed');
+    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
+        return; // No video available
+    }
+    
+    try {
+        const canvas = document.createElement('canvas');
+        const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
+        canvas.width = Math.min(videoFeed.videoWidth, vlmRingBuffer.maxWidth);
+        canvas.height = Math.round(canvas.width / aspectRatio);
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', vlmRingBuffer.quality);
+        const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
+        
+        // Add to ring buffer
+        vlmRingBuffer.frames.push({
+            data: dataUrl,
+            timestamp: sessionTime,
+            width: canvas.width,
+            height: canvas.height
+        });
+        
+        // Trim if over max
+        while (vlmRingBuffer.frames.length > vlmRingBuffer.maxFrames) {
+            vlmRingBuffer.frames.shift();
+        }
+    } catch (e) {
+        // Silently ignore capture errors
+    }
+}
+
+/**
+ * Get frames from ring buffer, evenly spaced between t_start and t_end.
+ */
+function vlmGetFrames(tStart, tEnd, nFrames) {
+    const frames = vlmRingBuffer.frames;
+    if (frames.length === 0 || nFrames <= 0) {
+        return [];
+    }
+    
+    // Filter frames within time range
+    const inRange = frames.filter(f => f.timestamp >= tStart && f.timestamp <= tEnd);
+    if (inRange.length === 0) {
+        // If no frames in range, return latest frame(s)
+        console.log('[VLM] No frames in range [' + tStart.toFixed(2) + ', ' + tEnd.toFixed(2) + '], using latest');
+        const latest = frames.slice(-Math.min(nFrames, frames.length));
+        return latest;
+    }
+    
+    // If we have fewer frames than requested, return all
+    if (inRange.length <= nFrames) {
+        return inRange;
+    }
+    
+    // Select evenly spaced frames
+    const result = [];
+    const duration = tEnd - tStart;
+    for (let i = 0; i < nFrames; i++) {
+        const targetTime = tStart + (i * duration / (nFrames - 1));
+        // Find closest frame to target time
+        let closest = inRange[0];
+        let minDiff = Math.abs(inRange[0].timestamp - targetTime);
+        for (const f of inRange) {
+            const diff = Math.abs(f.timestamp - targetTime);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = f;
+            }
+        }
+        // Avoid duplicates
+        if (result.length === 0 || result[result.length - 1] !== closest) {
+            result.push(closest);
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * Send frames to server in response to vlm_get_frames request.
+ */
+function vlmSendFrames(tStart, tEnd, nFrames) {
+    const selectedFrames = vlmGetFrames(tStart, tEnd, nFrames);
+    
+    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+        const payload = {
+            type: 'vlm_frames',
+            frames: selectedFrames.map(f => ({
+                data: f.data,
+                timestamp: f.timestamp,
+                width: f.width,
+                height: f.height
+            })),
+            t_start: tStart,
+            t_end: tEnd,
+            n_requested: nFrames
+        };
+        state.voiceWs.send(JSON.stringify(payload));
+        console.log('[VLM] Sent ' + selectedFrames.length + ' frames (requested ' + nFrames + ') for t=[' + tStart.toFixed(2) + ', ' + tEnd.toFixed(2) + ']');
+    }
+}
+
+/**
+ * Legacy: Single frame capture for backwards compatibility.
+ */
+function captureAndSendVideoFrame() {
+    // Use ring buffer if available, otherwise capture fresh
+    if (vlmRingBuffer.frames.length > 0) {
+        const latest = vlmRingBuffer.frames[vlmRingBuffer.frames.length - 1];
+        if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            state.voiceWs.send(JSON.stringify({
+                type: 'vlm_frames',
+                frames: [latest],
+                t_start: latest.timestamp,
+                t_end: latest.timestamp,
+                n_requested: 1
+            }));
+        }
+        return;
+    }
+    
+    // Fallback: capture fresh frame
+    const videoFeed = document.getElementById('video-feed');
+    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
+        if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            state.voiceWs.send(JSON.stringify({
+                type: 'vlm_frames',
+                frames: [],
+                t_start: 0,
+                t_end: 0,
+                n_requested: 1
+            }));
+        }
+        return;
+    }
+    
+    try {
+        const canvas = document.createElement('canvas');
+        const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
+        canvas.width = Math.min(videoFeed.videoWidth, 640);
+        canvas.height = Math.round(canvas.width / aspectRatio);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
+        
+        if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            state.voiceWs.send(JSON.stringify({
+                type: 'vlm_frames',
+                frames: [{data: dataUrl, timestamp: sessionTime, width: canvas.width, height: canvas.height}],
+                t_start: sessionTime,
+                t_end: sessionTime,
+                n_requested: 1
+            }));
+        }
+    } catch (e) {
+        console.error('[VLM] Frame capture error:', e);
     }
 }
 
@@ -4414,6 +4770,7 @@ function handleVoiceWsClose(ev) {
     console.log('[Voice] WebSocket closed: code=' + (ev && ev.code) + ' reason=' + (ev && ev.reason) + ' clean=' + (ev && ev.wasClean));
     state.voiceWs = null;
     stopVoiceMicStream();
+    vlmStopCapture();  // Stop VLM frame capture
     if (state.sessionState === 'live') {
         stopLiveSystemStatsPoll();
         if (state.liveTimelineRafId != null) {

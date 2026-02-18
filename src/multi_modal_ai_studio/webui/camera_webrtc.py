@@ -7,17 +7,38 @@ Requires: aiortc, av, opencv-python-headless (optional extra: pip install -e ".[
 Encoding: aiortc/av use software encoding (VP8/H.264) on the server. If CPU load is too high,
 consider feeding a hardware-encoded stream (e.g. NVENC, PyNvVideoCodec) into the
 WebRTC pipeline instead; see docs/AUDIO_MODES.md "Encoding load and hardware acceleration".
+
+Frame Broker Integration:
+Frames captured here are also stored in FrameBroker so VLM can access them
+without opening the camera again. This solves the camera lock issue.
+See: https://github.com/NVIDIA-AI-IOT/live-vlm-webui for inspiration.
 """
 
 import asyncio
 import json
 import logging
 import re
+import time
 from typing import Optional
 
 from aiohttp import web
 
 logger = logging.getLogger(__name__)
+
+# Frame broker for VLM access to server camera frames
+_frame_broker = None
+
+def _get_frame_broker():
+    """Lazy import frame broker to avoid circular imports."""
+    global _frame_broker
+    if _frame_broker is None:
+        try:
+            from multi_modal_ai_studio.backends.vision.frame_broker import get_frame_broker
+            _frame_broker = get_frame_broker()
+        except ImportError:
+            logger.debug("FrameBroker not available")
+            _frame_broker = False  # Mark as unavailable
+    return _frame_broker if _frame_broker else None
 
 # Lazy imports so the app runs without aiortc/av/cv2
 _cv2 = None
@@ -145,6 +166,17 @@ def _make_track_class():
             if not ret or frame is None:
                 # aiortc encoder expects a frame, not None; ending the track is the clean response
                 raise MediaStreamError("Camera read failed")
+            
+            # Store frame in FrameBroker for VLM access (every frame for smooth capture)
+            broker = _get_frame_broker()
+            if broker:
+                try:
+                    # Store asynchronously to not block WebRTC
+                    frame_copy = frame.copy()  # Copy to avoid race with next recv()
+                    await loop.run_in_executor(None, lambda: broker.store_frame(frame_copy, jpeg_quality=70))
+                except Exception as e:
+                    logger.debug("FrameBroker store failed: %s", e)
+            
             vf = VideoFrame.from_ndarray(frame, format="bgr24")
             vf.pts = pts
             vf.time_base = time_base

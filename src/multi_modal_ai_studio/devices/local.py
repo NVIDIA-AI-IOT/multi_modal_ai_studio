@@ -16,8 +16,30 @@ from typing import Any, Dict, List, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _can_capture_video(device_path: str) -> bool:
+    """Check if a V4L2 device can actually capture video frames.
+    
+    Some cameras create multiple /dev/video* nodes where only one is the actual
+    capture device (others are metadata/control devices).
+    """
+    try:
+        import cv2
+        cap = cv2.VideoCapture(device_path)
+        if not cap.isOpened():
+            return False
+        ret, _ = cap.read()
+        cap.release()
+        return ret
+    except Exception as e:
+        logger.debug("Check capture capability for %s: %s", device_path, e)
+        return False
+
+
 def list_local_cameras() -> List[Dict[str, str]]:
     """List V4L2 video devices on this machine (e.g. /dev/video0).
+
+    Only includes devices that can actually capture video frames (filters out
+    metadata/control devices that some cameras create).
 
     Returns:
         List of {"id": "/dev/video0", "label": "UVC Camera (046d:0825) (Server USB)"}.
@@ -34,6 +56,12 @@ def list_local_cameras() -> List[Dict[str, str]]:
                 and "_" not in p.name
             ):
                 device_id = str(p)
+                
+                # Skip devices that can't actually capture video
+                if not _can_capture_video(device_id):
+                    logger.debug("Skipping %s: not a capture device", device_id)
+                    continue
+                
                 label = device_id
                 try:
                     out = subprocess.run(
