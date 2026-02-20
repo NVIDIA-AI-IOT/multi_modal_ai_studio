@@ -59,6 +59,9 @@ user_presets/
 *.pem
 credentials.json
 
+# Debug videos
+debug_videos/
+
 # Test outputs
 .pytest_cache/
 .coverage

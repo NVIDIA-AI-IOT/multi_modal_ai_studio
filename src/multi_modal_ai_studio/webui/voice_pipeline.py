@@ -1079,13 +1079,26 @@ async def _run_voice_pipeline(
                         continue
 
                 if not is_final:
+                    # VLM: Track speech start time for frame synchronization.
+                    # Detect "ghost partial" gaps — if the previous partial was
+                    # > SPEECH_GAP_THRESH seconds ago, the earlier partial was
+                    # likely triggered by background noise.  Reset so the frame
+                    # window starts from the *real* speech, not the ghost.
+                    nonlocal speech_start_time
+                    if vision_enabled:
+                        SPEECH_GAP_THRESH = 3.0  # seconds – generous enough for natural pauses
+                        if speech_start_time is None:
+                            speech_start_time = ts
+                            logger.debug("[VLM] Speech started at t=%.2f", ts)
+                        elif last_partial_ts is not None and (ts - last_partial_ts) > SPEECH_GAP_THRESH:
+                            logger.info(
+                                "[VLM] Partial gap %.1fs detected (ghost partial?) — "
+                                "resetting speech_start from %.2f to %.2f",
+                                ts - last_partial_ts, speech_start_time, ts,
+                            )
+                            speech_start_time = ts
                     last_partial_text = text
                     last_partial_ts = ts
-                    # VLM: Track speech start time for frame synchronization
-                    nonlocal speech_start_time
-                    if speech_start_time is None and vision_enabled:
-                        speech_start_time = ts
-                        logger.debug("[VLM] Speech started at t=%.2f", ts)
                     session.timeline.add_event(ev_type, Lane.SPEECH, data={"text": text, "confidence": getattr(result, "confidence", 1.0)})
                     # Fire-and-forget so we don't block on slow client; keeps asr_consumer able to receive 2nd turn
                     asyncio.create_task(send_event({
@@ -1177,24 +1190,59 @@ async def _run_voice_pipeline(
                 })
                 session.timeline.add_event("llm_start", Lane.LLM)
                 
-                # VLM: Request frames from browser's ring buffer (time-synchronized with speech)
+                # VLM: Request frames (time-synchronized with speech)
                 image_data_urls: list = []
+                speech_duration_secs: float = 0.0
+                _model_lower = (llm_config.model or "").lower()
+                is_cosmos = "cosmos" in _model_lower and "reason" in _model_lower
                 if vision_enabled:
                     # Calculate speech time window
                     t_end = ts_llm_start  # End time is now (ASR final arrived)
                     # Use speech_start_time if tracked, otherwise use a default window
                     t_start = speech_start_time if speech_start_time is not None else max(0, t_end - 3.0)
-                    speech_duration = t_end - t_start
+                    # ASR produces its first partial ~0.5s after the user actually
+                    # starts speaking.  Pull t_start back to capture those early
+                    # frames so the video has full context.
+                    ASR_LATENCY_LOOKBACK = 0.5  # seconds
+                    t_start = max(0, t_start - ASR_LATENCY_LOOKBACK)
+                    speech_duration_secs = t_end - t_start
+                    
+                    # Guard: cap the speech window to MAX_SPEECH_WINDOW_SECS.
+                    # Ghost asr_partials (background noise triggering a partial) can
+                    # set speech_start_time far too early, inflating the window to
+                    # 15-30s when the real speech was only 2-3s.  Capping prevents
+                    # pulling in dozens of irrelevant frames.
+                    MAX_SPEECH_WINDOW_SECS = 10.0
+                    if speech_duration_secs > MAX_SPEECH_WINDOW_SECS:
+                        logger.warning(
+                            "[VLM] Speech window %.1fs exceeds cap %.1fs — likely ghost partial. "
+                            "Clamping t_start from %.2f to %.2f",
+                            speech_duration_secs, MAX_SPEECH_WINDOW_SECS,
+                            t_start, t_end - MAX_SPEECH_WINDOW_SECS,
+                        )
+                        t_start = t_end - MAX_SPEECH_WINDOW_SECS
+                        speech_duration_secs = MAX_SPEECH_WINDOW_SECS
+                    
+                    # Cosmos models: request ALL available frames for video encoding.
+                    # Video preserves temporal info (motion, actions, state changes).
+                    # FrameBroker stores at ~10fps → 3s speech ≈ 30 frames, 5s ≈ 50.
+                    # Non-Cosmos: keep few frames (each image ≈ 1000 tokens).
+                    if is_cosmos:
+                        n_frames_request = 100  # large cap; FrameBroker returns what's available
+                    else:
+                        n_frames_request = vision_frames_count  # default 4
                     
                     source = "FrameBroker" if use_server_camera else "browser"
-                    logger.info("[VLM] Requesting %d frames from %s (speech: %.2fs to %.2fs, duration=%.2fs)",
-                               vision_frames_count, source, t_start, t_end, speech_duration)
+                    logger.info(
+                        "[VLM] Requesting %d frames from %s (speech: %.2fs–%.2fs, dur=%.2fs, cosmos=%s)",
+                        n_frames_request, source, t_start, t_end, speech_duration_secs, is_cosmos,
+                    )
                     
                     ts_frame_request = time.time()
                     image_data_urls = await request_vlm_frames(
                         t_start=t_start,
                         t_end=t_end,
-                        n_frames=vision_frames_count,
+                        n_frames=n_frames_request,
                         timeout=3.0,
                     )
                     
@@ -1205,9 +1253,10 @@ async def _run_voice_pipeline(
                             "n_frames": len(image_data_urls),
                             "t_start": round(t_start, 2),
                             "t_end": round(t_end, 2),
-                            "speech_duration": round(speech_duration, 2),
+                            "speech_duration": round(speech_duration_secs, 2),
                             "latency_ms": round(frame_latency_ms),
-                            "source": "browser",
+                            "source": source,
+                            "cosmos_video": is_cosmos,
                         })
                     else:
                         logger.warning("[VLM] Vision enabled but frame capture failed")
@@ -1226,12 +1275,28 @@ async def _run_voice_pipeline(
                 elif vision_enabled and not image_data_urls:
                     logger.warning("[VLM] Vision enabled but no frames captured")
                 
+                # ── History management for VLM turns ──
+                # Cosmos VLM: limit history to prevent "answer anchoring".
+                # Each turn has a NEW video, but history is text-only.
+                # The model sees old (possibly wrong) answers and repeats them.
+                # Keep last 4 messages (2 turns) for minimal context.
+                vlm_history = conversation_history
+                if is_cosmos and image_data_urls:
+                    MAX_VLM_HISTORY = 4  # 2 turns: (user, assistant, user, assistant)
+                    if len(conversation_history) > MAX_VLM_HISTORY:
+                        vlm_history = conversation_history[-MAX_VLM_HISTORY:]
+                        logger.info(
+                            "[VLM] Cosmos: trimmed history from %d to %d messages to prevent answer anchoring",
+                            len(conversation_history), len(vlm_history),
+                        )
+                
                 try:
                     async for token in llm.generate_stream(
                         prompt=text,
-                        history=conversation_history,
+                        history=vlm_history,
                         system_prompt=effective_system_prompt,
                         image_data_urls=image_data_urls if image_data_urls else None,
+                        speech_duration=speech_duration_secs if speech_duration_secs > 0 else None,
                     ):
                         if stopped.is_set():
                             break
