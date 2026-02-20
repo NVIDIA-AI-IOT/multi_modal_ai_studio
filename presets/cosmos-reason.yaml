@@ -1,0 +1,45 @@
+name: "Cosmos-Reason2 VLM"
+description: "Optimized for Cosmos-Reason2 vision model with temporal video encoding"
+
+asr:
+  scheme: riva
+  server: localhost:50051
+  model: conformer
+  language: en-US
+  vad_start_threshold: 0.5
+  vad_stop_threshold: 0.3
+  speech_timeout_ms: 500
+
+llm:
+  scheme: openai
+  api_base: http://localhost:8003/v1
+  model: /root/.cache/huggingface/hub/models--nvidia--Cosmos-Reason2-8B/snapshots/7d6a645088b550bbd45daaf782e2430bba9c82bb
+  temperature: 0.3          # Low temp — critical for precise, consistent vision responses
+  max_tokens: 256           # Short spoken answers (voice assistant)
+  system_prompt: "You are a vision assistant observing the user through a live camera. Describe what you see accurately and concisely. Focus on actions, gestures, objects, and changes. One short sentence only."
+  enable_vision: true
+  vision_system_prompt: "You are a vision assistant observing the user through a live camera. Describe what you see accurately and concisely. Focus on actions, gestures, objects, and changes. One short sentence only."
+  vision_frames: 4          # Overridden to ~100 for Cosmos in voice_pipeline (temporal video)
+  vision_detail: auto
+  vision_quality: 0.7
+  vision_max_width: 640
+  vision_buffer_fps: 3.0
+
+tts:
+  scheme: riva
+  server: localhost:50051
+  voice: ""
+  sample_rate: 22050
+
+devices:
+  video_source: browser
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  timeline_position: right
+  session_auto_save: true
+  session_output_dir: ./sessions
+  theme: dark
+

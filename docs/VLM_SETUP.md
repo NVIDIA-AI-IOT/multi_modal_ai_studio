@@ -35,11 +35,7 @@ This guide explains how to set up and run Vision-Language Models (VLMs) with Mul
 | Model | Provider | Backend | Use Case |
 |-------|----------|---------|----------|
 | **Cosmos-Reason2-8B** | NVIDIA | vLLM | Physical world reasoning, spatial understanding |
-| **llava-llama3** | Meta/LLaVA | Ollama | General vision, easiest setup |
-| **llava-phi3** | Microsoft/LLaVA | Ollama | Faster, smaller model |
-| **moondream** | Vikhyat | Ollama | Lightweight vision (~1.7GB) |
-| **LLaVA-v1.6** | Open Source | vLLM | General vision-language tasks |
-| **GPT-4V** | OpenAI | OpenAI API | Best quality (requires API key) |
+
 
 ## Prerequisites
 
