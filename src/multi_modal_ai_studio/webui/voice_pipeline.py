@@ -140,7 +140,6 @@ async def _run_voice_pipeline(
         return None
 
     await asr.start_stream()
-    conversation_history = []
     stopped = asyncio.Event()
     finals_queue: asyncio.Queue = asyncio.Queue()
     pipeline_live = asyncio.Event()  # when set, Server USB capture feeds ASR + timeline (after client sent start_session)
@@ -317,7 +316,6 @@ async def _run_voice_pipeline(
 
     async def receive_loop() -> None:
         """Read from WebSocket: config (first), then binary PCM or stop."""
-        nonlocal conversation_history
         last_amplitude_time = 0.0
         last_amplitude_log_time = 0.0  # throttle debug log to ~1s (see INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md)
         amplitude_interval = 0.05  # record amplitude at most every 50ms
@@ -580,7 +578,7 @@ async def _run_voice_pipeline(
     async def turn_executor() -> None:
         """Process ASR finals one at a time: LLM -> TTS. Waits on finals_queue (fed by asr_consumer).
         Future: can be cancelled when new final arrives for barge-in."""
-        nonlocal conversation_history, speech_start_time
+        nonlocal speech_start_time
         turn_index = 0
         try:
             while not stopped.is_set():
@@ -692,25 +690,17 @@ async def _run_voice_pipeline(
                 elif vision_enabled and not image_data_urls:
                     logger.warning("[VLM] Vision enabled but no frames captured")
                 
-                # ── History management for VLM turns ──
-                # Cosmos VLM: limit history to prevent "answer anchoring".
-                # Each turn has a NEW video, but history is text-only.
-                # The model sees old (possibly wrong) answers and repeats them.
-                # Keep last 4 messages (2 turns) for minimal context.
-                vlm_history = conversation_history
-                if is_cosmos and image_data_urls:
-                    MAX_VLM_HISTORY = 4  # 2 turns: (user, assistant, user, assistant)
-                    if len(conversation_history) > MAX_VLM_HISTORY:
-                        vlm_history = conversation_history[-MAX_VLM_HISTORY:]
-                        logger.info(
-                            "[VLM] Cosmos: trimmed history from %d to %d messages to prevent answer anchoring",
-                            len(conversation_history), len(vlm_history),
-                        )
+                # ── No conversation history ──
+                # Each turn is independent — no history is sent to the LLM.
+                # For VLM models, text-only history from previous turns biases
+                # the model to repeat old answers ("answer anchoring").
+                # For text-only models, the voice assistant use-case is
+                # turn-by-turn Q&A; history was never in the original codebase.
                 
                 try:
                     async for token in llm.generate_stream(
                         prompt=text,
-                        history=vlm_history,
+                        history=None,
                         system_prompt=effective_system_prompt,
                         image_data_urls=image_data_urls if image_data_urls else None,
                         speech_duration=speech_duration_secs if speech_duration_secs > 0 else None,
@@ -746,8 +736,6 @@ async def _run_voice_pipeline(
                 })
 
                 session.update_turn_response(full_response)
-                conversation_history.append({"role": "user", "content": text})
-                conversation_history.append({"role": "assistant", "content": full_response})
 
                 await send_event({
                     "event_type": "chat",
