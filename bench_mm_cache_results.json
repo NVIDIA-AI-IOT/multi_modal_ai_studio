@@ -1,0 +1,263 @@
+{
+  "config": {
+    "api_base": "http://localhost:8003/v1",
+    "model": "/root/.cache/huggingface/hub/models--nvidia--Cosmos-Reason2-8B/snapshots/7d6a645088b550bbd45daaf782e2430bba9c82bb",
+    "temperature": 0.3,
+    "max_tokens": 256,
+    "n_turns": 3,
+    "n_runs": 3,
+    "videos": [
+      "cosmos_20260220_014518_9f_3fps.mp4",
+      "cosmos_20260220_014528_8f_3fps.mp4",
+      "cosmos_20260220_014535_6f_3fps.mp4"
+    ],
+    "prompts": [
+      "What do you see?",
+      "What changed from before?",
+      "How many fingers am I showing?"
+    ],
+    "system_prompt": "You are a vision assistant observing the user through a live camera. Describe what you see accurately and concisely. Focus on actions, gestures, objects, and changes. One short sentence only.",
+    "case2_uses_uuid_hints": true
+  },
+  "case1_text_history": [
+    [
+      {
+        "turn": 1,
+        "prompt": "What do you see?",
+        "video": "cosmos_20260220_014518_9f_3fps.mp4",
+        "history_msgs": 0,
+        "payload_kb": 182.4,
+        "ttft_ms": 218,
+        "total_ms": 2959,
+        "response": "The man is seated indoors, wearing a dark blue t-shirt with a graphic design, and raises his right hand to show differen",
+        "prompt_tokens": 981,
+        "completion_tokens": 28
+      },
+      {
+        "turn": 2,
+        "prompt": "What changed from before?",
+        "video": "cosmos_20260220_014528_8f_3fps.mp4",
+        "history_msgs": 2,
+        "payload_kb": 164.4,
+        "ttft_ms": 305,
+        "total_ms": 2220,
+        "response": "The man lowers his hand and then raises his right hand again, forming a peace sign with his index and middle fingers.",
+        "prompt_tokens": 1023,
+        "completion_tokens": 25
+      },
+      {
+        "turn": 3,
+        "prompt": "How many fingers am I showing?",
+        "video": "cosmos_20260220_014535_6f_3fps.mp4",
+        "history_msgs": 4,
+        "payload_kb": 121.3,
+        "ttft_ms": 190,
+        "total_ms": 578,
+        "response": "You are showing one finger.",
+        "prompt_tokens": 756,
+        "completion_tokens": 7
+      }
+    ],
+    [
+      {
+        "turn": 1,
+        "prompt": "What do you see?",
+        "video": "cosmos_20260220_014518_9f_3fps.mp4",
+        "history_msgs": 0,
+        "payload_kb": 182.4,
+        "ttft_ms": 134,
+        "total_ms": 1992,
+        "response": "The man is seated indoors, wearing a dark t-shirt with a visible graphic design, and raises his right hand to make a pea",
+        "prompt_tokens": 981,
+        "completion_tokens": 30
+      },
+      {
+        "turn": 2,
+        "prompt": "What changed from before?",
+        "video": "cosmos_20260220_014528_8f_3fps.mp4",
+        "history_msgs": 2,
+        "payload_kb": 164.4,
+        "ttft_ms": 247,
+        "total_ms": 2050,
+        "response": "The man changes his hand gesture from an open palm to a peace sign, then to a closed fist, and finally to a pointing ges",
+        "prompt_tokens": 1025,
+        "completion_tokens": 29
+      },
+      {
+        "turn": 3,
+        "prompt": "How many fingers am I showing?",
+        "video": "cosmos_20260220_014535_6f_3fps.mp4",
+        "history_msgs": 4,
+        "payload_kb": 121.4,
+        "ttft_ms": 197,
+        "total_ms": 390,
+        "response": "One finger.",
+        "prompt_tokens": 762,
+        "completion_tokens": 4
+      }
+    ],
+    [
+      {
+        "turn": 1,
+        "prompt": "What do you see?",
+        "video": "cosmos_20260220_014518_9f_3fps.mp4",
+        "history_msgs": 0,
+        "payload_kb": 182.4,
+        "ttft_ms": 141,
+        "total_ms": 2774,
+        "response": "The man is seated indoors, wearing a dark blue t-shirt with a graphic design, and he raises his right hand to show diffe",
+        "prompt_tokens": 981,
+        "completion_tokens": 42
+      },
+      {
+        "turn": 2,
+        "prompt": "What changed from before?",
+        "video": "cosmos_20260220_014528_8f_3fps.mp4",
+        "history_msgs": 2,
+        "payload_kb": 164.4,
+        "ttft_ms": 111,
+        "total_ms": 1266,
+        "response": "The man transitions from showing his open palm to making a peace sign with his right hand.",
+        "prompt_tokens": 1037,
+        "completion_tokens": 19
+      },
+      {
+        "turn": 3,
+        "prompt": "How many fingers am I showing?",
+        "video": "cosmos_20260220_014535_6f_3fps.mp4",
+        "history_msgs": 4,
+        "payload_kb": 121.4,
+        "ttft_ms": 165,
+        "total_ms": 359,
+        "response": "One finger.",
+        "prompt_tokens": 764,
+        "completion_tokens": 4
+      }
+    ]
+  ],
+  "case2_mm_uuid_hints": [
+    [
+      {
+        "turn": 1,
+        "prompt": "What do you see?",
+        "video": "cosmos_20260220_014518_9f_3fps.mp4",
+        "history_msgs": 0,
+        "payload_kb": 182.4,
+        "ttft_ms": 148,
+        "total_ms": 3817,
+        "response": "The individual is seated indoors, wearing a dark blue t-shirt with a visible graphic design, and has short, dark hair. T",
+        "prompt_tokens": 981,
+        "completion_tokens": 50,
+        "videos_in_hist": 0
+      },
+      {
+        "turn": 2,
+        "prompt": "What changed from before?",
+        "video": "cosmos_20260220_014528_8f_3fps.mp4",
+        "history_msgs": 2,
+        "payload_kb": 346.7,
+        "ttft_ms": 366,
+        "total_ms": 1790,
+        "response": "The individual's hand gesture has changed from showing all five fingers to forming a peace sign with their right hand.",
+        "prompt_tokens": 1969,
+        "completion_tokens": 23,
+        "videos_in_hist": 1
+      },
+      {
+        "turn": 3,
+        "prompt": "How many fingers am I showing?",
+        "video": "cosmos_20260220_014535_6f_3fps.mp4",
+        "history_msgs": 4,
+        "payload_kb": 467.5,
+        "ttft_ms": 328,
+        "total_ms": 1176,
+        "response": "You are showing one finger, pointing upwards with your right hand.",
+        "prompt_tokens": 2624,
+        "completion_tokens": 14,
+        "videos_in_hist": 2
+      }
+    ],
+    [
+      {
+        "turn": 1,
+        "prompt": "What do you see?",
+        "video": "cosmos_20260220_014518_9f_3fps.mp4",
+        "history_msgs": 0,
+        "payload_kb": 182.4,
+        "ttft_ms": 151,
+        "total_ms": 3184,
+        "response": "The individual is seated indoors, wearing a dark t-shirt with visible text and graphics, and has short hair. They are ma",
+        "prompt_tokens": 981,
+        "completion_tokens": 47,
+        "videos_in_hist": 0
+      },
+      {
+        "turn": 2,
+        "prompt": "What changed from before?",
+        "video": "cosmos_20260220_014528_8f_3fps.mp4",
+        "history_msgs": 2,
+        "payload_kb": 346.7,
+        "ttft_ms": 232,
+        "total_ms": 1663,
+        "response": "The individual's hand gesture has changed from showing all five fingers to forming a peace sign with their right hand.",
+        "prompt_tokens": 1966,
+        "completion_tokens": 23,
+        "videos_in_hist": 1
+      },
+      {
+        "turn": 3,
+        "prompt": "How many fingers am I showing?",
+        "video": "cosmos_20260220_014535_6f_3fps.mp4",
+        "history_msgs": 4,
+        "payload_kb": 467.5,
+        "ttft_ms": 241,
+        "total_ms": 1089,
+        "response": "You are showing one finger, pointing upwards with your right hand.",
+        "prompt_tokens": 2621,
+        "completion_tokens": 14,
+        "videos_in_hist": 2
+      }
+    ],
+    [
+      {
+        "turn": 1,
+        "prompt": "What do you see?",
+        "video": "cosmos_20260220_014518_9f_3fps.mp4",
+        "history_msgs": 0,
+        "payload_kb": 182.4,
+        "ttft_ms": 147,
+        "total_ms": 3284,
+        "response": "The individual is seated indoors, wearing a dark blue t-shirt with a graphic design, and has short dark hair; they are m",
+        "prompt_tokens": 981,
+        "completion_tokens": 45,
+        "videos_in_hist": 0
+      },
+      {
+        "turn": 2,
+        "prompt": "What changed from before?",
+        "video": "cosmos_20260220_014528_8f_3fps.mp4",
+        "history_msgs": 2,
+        "payload_kb": 346.6,
+        "ttft_ms": 231,
+        "total_ms": 1533,
+        "response": "The individual's hand transitions from an open palm to a peace sign, then to a closed fist.",
+        "prompt_tokens": 1964,
+        "completion_tokens": 21,
+        "videos_in_hist": 1
+      },
+      {
+        "turn": 3,
+        "prompt": "How many fingers am I showing?",
+        "video": "cosmos_20260220_014535_6f_3fps.mp4",
+        "history_msgs": 4,
+        "payload_kb": 467.5,
+        "ttft_ms": 241,
+        "total_ms": 633,
+        "response": "One finger is being shown.",
+        "prompt_tokens": 2617,
+        "completion_tokens": 7,
+        "videos_in_hist": 2
+      }
+    ]
+  ]
+}
