@@ -81,7 +81,7 @@ Cosmos-Reason2 is a **gated model**. You must:
 2. Get your token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
 3. Pass the token as an environment variable (see below)
 
-### For Jetson:
+### For Jetson / Thor (ARM64):
 
 ```bash
 docker run -d --gpus all \
@@ -92,12 +92,12 @@ docker run -d --gpus all \
   ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor \
   python3 -m vllm.entrypoints.openai.api_server \
     --model nvidia/Cosmos-Reason2-8B \
-    --max-model-len 16384 \
-    --gpu-memory-utilization 0.8 \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.6 \
     --port 8000
 ```
 
-### For Desktop GPU:
+### For Desktop GPU (x86_64):
 
 ```bash
 docker run -d --gpus all \
@@ -107,14 +107,14 @@ docker run -d --gpus all \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
   vllm/vllm-openai:latest \
   --model nvidia/Cosmos-Reason2-8B \
-  --max-model-len 16384 \
+  --max-model-len 8192 \
   --gpu-memory-utilization 0.8 \
   --port 8000
 ```
 
 > **Note**: First run downloads the model (~16GB). This may take several minutes.
-> 
-> **Memory Issues?** Lower `--gpu-memory-utilization` to 0.7 or reduce `--max-model-len` to 8192.
+>
+> **Memory tuning**: On shared/unified-memory systems (Jetson Thor), use `--gpu-memory-utilization 0.6` to leave room for the OS, Riva, and the AI Studio app. On discrete GPUs with dedicated VRAM, `0.8` is safe. If you hit OOM, lower `--max-model-len` to `4096`.
 
 ### Verify vLLM is Running:
 
@@ -143,9 +143,17 @@ cd /path/to/riva-quickstart
 bash riva_start.sh
 ```
 
-Verify Riva is running on port 50051:
+The Riva container (`riva-speech`) should expose these ports:
+
+| Port | Service |
+|------|---------|
+| `50051` | gRPC (ASR/TTS — this is what AI Studio connects to) |
+| `8888` | Riva HTTP API |
+
+Verify Riva is running:
 ```bash
 docker ps | grep riva
+# Should show riva-speech container with port 50051 mapped
 ```
 
 ---
@@ -164,18 +172,30 @@ pip install -e .
 ### Run the Application:
 
 ```bash
-# Start with defaults
-python -m multi_modal_ai_studio
+# Recommended: use the Cosmos-Reason preset (sets temperature, prompts, vision, etc.)
+python -m multi_modal_ai_studio --preset cosmos-reason --host 0.0.0.0
 
-# Or with CLI options
+# Or with explicit CLI options
 python -m multi_modal_ai_studio \
+  --host 0.0.0.0 \
   --llm-api-base http://localhost:8003/v1 \
   --llm-model nvidia/Cosmos-Reason2-8B
+
+# Debug mode: save encoded videos to disk for inspection
+MMAS_DEBUG_VIDEOS=1 python -m multi_modal_ai_studio --preset cosmos-reason --host 0.0.0.0
 ```
+
+> **`--host 0.0.0.0`** is required if you want to access the UI from another machine (not just localhost).
+>
+> **`MMAS_DEBUG_VIDEOS=1`** saves every MP4 video sent to the VLM into `src/debug_videos/` for offline inspection.
 
 Then enable vision in the UI (see Step 5).
 
-Open your browser: **http://localhost:8000**
+Open your browser: **https://localhost:8092**
+
+> **HTTPS Note**: The app defaults to HTTPS with a self-signed certificate (required for browser camera/mic access via WebRTC). On first visit, your browser will show a security warning — click **"Advanced" → "Proceed"** to accept the self-signed cert.
+>
+> To disable HTTPS (not recommended): `python -m multi_modal_ai_studio --no-ssl`
 
 ---
 
@@ -207,10 +227,28 @@ Open your browser: **http://localhost:8000**
 
 When you speak, the system:
 
-1. **Continuously captures** frames from your camera into a ring buffer
-2. **On speech end** (ASR final), selects N frames evenly spaced across your speech duration
-3. **Sends frames + text** to the VLM in OpenAI-compatible format
-4. **VLM responds** with visual understanding
+1. **Continuously captures** JPEG frames from your camera into a ring buffer (~10fps)
+2. **On speech end** (ASR final), retrieves all frames from the speech time window
+3. **For Cosmos models**: encodes frames into an **H.264 MP4 video** with dynamic FPS, sent as a single `video_url`
+4. **For other VLMs** (LLaVA, GPT-4V): selects N evenly-spaced frames, sent as individual `image_url` entries
+5. **VLM responds** with visual understanding
+
+### Cosmos Video Encoding (Temporal)
+
+Cosmos-Reason2 is optimized for video input and can decode frame deltas, using far fewer tokens than equivalent individual images (~2x reduction). The system dynamically calculates FPS from your speech duration:
+
+```
+Speech: "What did I just do?"
+        |<-------- 3 seconds -------->|
+        t_start                    t_end
+
+All frames in window retrieved from ring buffer (e.g. 30 frames @ 10fps)
+  → Encoded into H.264 MP4 @ fps = 30/3 = 10fps
+  → Sent as single video_url to Cosmos
+  → Encoding overhead: ~100-200ms (ultrafast preset)
+```
+
+### Standard VLM Frame Selection (Non-Cosmos)
 
 ```
 Speech: "What am I holding?"
@@ -222,6 +260,14 @@ Frames per Turn = 4:
        Frame1  Frame2  Frame3  Frame4
         @0.5s   @1.0s   @1.5s   @2.0s
 ```
+
+### Per-Component Encoding Summary
+
+| Encode | When | Rate | Purpose |
+|--------|------|------|---------|
+| JPEG (FrameBroker) | Every frame | ~10fps continuous | VLM frame storage |
+| VP8/H.264 (WebRTC) | Every frame | ~30fps continuous | UI live camera display |
+| H.264 MP4 (Cosmos) | Per speech turn | ~1 call / 3-10s | VLM inference |
 
 ---
 
@@ -253,6 +299,18 @@ vision_detail: str = "auto"      # OpenAI vision detail level
 | **CLI arguments** | Scripting, automation |
 | **Custom preset YAML** | Reproducible deployments |
 
+### Built-in Cosmos Preset
+
+The `cosmos-reason` preset (`presets/cosmos-reason.yaml`) is pre-configured with optimized settings:
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| `temperature` | 0.3 | Low temp for precise, consistent vision responses |
+| `max_tokens` | 256 | Short spoken answers (voice assistant use case) |
+| `enable_vision` | true | Camera frames sent to VLM |
+| `vision_frames` | 4 | Overridden at runtime — Cosmos receives all frames as MP4 video |
+| `system_prompt` | "You are a vision assistant..." | Tuned for concise visual descriptions |
+
 ### Creating a Custom Preset
 
 Create your own preset file (e.g., `presets/my-vlm.yaml`):
@@ -270,7 +328,8 @@ llm:
   api_base: http://localhost:8003/v1
   model: nvidia/Cosmos-Reason2-8B
   enable_vision: true
-  vision_frames: 4
+  temperature: 0.3
+  max_tokens: 256
   system_prompt: "You are a vision assistant. Be concise."
 
 tts:
@@ -278,7 +337,9 @@ tts:
   server: localhost:50051
 ```
 
-Run with: `python -m multi_modal_ai_studio --preset presets/my-vlm.yaml`
+Run with a preset name: `python -m multi_modal_ai_studio --preset cosmos-reason`
+
+Or load a custom config file: `python -m multi_modal_ai_studio --config presets/my-vlm.yaml`
 
 ---
 
@@ -306,8 +367,45 @@ Run with: `python -m multi_modal_ai_studio --preset presets/my-vlm.yaml`
 | Issue | Solution |
 |-------|----------|
 | Container won't start | Check GPU memory: `nvidia-smi` |
-| Model download fails | Check disk space, HuggingFace access |
-| CUDA out of memory | Reduce `--max-model-len` to 8192 |
+| Model download fails | Check disk space, HuggingFace token, network |
+| CUDA out of memory | Reduce `--max-model-len` to `4096` or lower `--gpu-memory-utilization` |
+| Container crashes on restart | See "GPU Memory Not Released" below |
+
+#### GPU Memory Not Released After Restart
+
+If `docker restart vllm-cosmos` fails with:
+```
+ValueError: Free memory on device (27.92/122.82 GiB) is less than desired GPU memory utilization
+```
+
+The previous vLLM process didn't fully release GPU memory. Fix:
+
+```bash
+# 1. Stop the container completely
+docker stop vllm-cosmos
+
+# 2. Verify GPU memory is freed
+nvidia-smi --query-compute-apps=pid,used_memory --format=csv
+# Only Riva processes should remain (~7 GiB)
+
+# 3. Wait a few seconds, then start
+sleep 5
+docker start vllm-cosmos
+
+# 4. Monitor startup (model loading takes 1-2 minutes)
+docker logs -f vllm-cosmos
+# Wait for: "INFO: Application startup complete"
+```
+
+#### Verifying vLLM Health
+
+```bash
+# Health check (returns empty 200 when ready)
+curl -s http://localhost:8003/health && echo "READY" || echo "NOT READY"
+
+# List available models
+curl -s http://localhost:8003/v1/models | python3 -m json.tool
+```
 
 ### Camera Issues
 
@@ -341,9 +439,11 @@ Run with: `python -m multi_modal_ai_studio --preset presets/my-vlm.yaml`
 | Issue | Solution |
 |-------|----------|
 | Slow responses | Reduce `vision_frames`, lower `max_tokens` |
-| Generic answers | Improve system prompt, increase frames |
+| Generic answers | Lower `temperature` (try 0.3), improve system prompt |
+| Repeats old answers | History is disabled by default; verify no custom history logic |
 | "I can't see" errors | Check `enable_vision: true`, camera working |
 | VLM hallucinates scenes | See "VLM vs LLM Behavior" below |
+| Short/empty video | Check that speech duration is >0.5s; ghost ASR partials can inflate the capture window |
 
 #### VLM vs LLM Behavior (Important!)
 
@@ -429,11 +529,34 @@ llm:
 
 ## API Format Reference
 
-VLM requests use OpenAI-compatible multi-modal format:
+### Cosmos-Reason2 (Video Input)
+
+Cosmos models receive a single MP4 video per turn:
 
 ```json
 {
   "model": "nvidia/Cosmos-Reason2-8B",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "video_url", "video_url": {"url": "data:video/mp4;base64,AAAAIG..."}},
+        {"type": "text", "text": "What am I doing?"}
+      ]
+    }
+  ],
+  "temperature": 0.3,
+  "max_tokens": 256
+}
+```
+
+### Standard VLMs (Multi-Image Input)
+
+Other VLMs (LLaVA, GPT-4V) receive individual JPEG frames:
+
+```json
+{
+  "model": "llava-llama3",
   "messages": [
     {
       "role": "user",
@@ -447,6 +570,12 @@ VLM requests use OpenAI-compatible multi-modal format:
   "max_tokens": 128
 }
 ```
+
+### Conversation History
+
+Conversation history is **not passed** for VLM turns. Each turn is independent — the VLM sees only the current video/frames and text. This prevents "answer anchoring" where the model repeats previous (potentially wrong) answers instead of analyzing the current visual input.
+
+> **Why no history?** Testing showed that when text history from prior turns was included, Cosmos would anchor on old answers (e.g., repeating "5 to 2" when the score had changed). Without history, each turn gets a fresh analysis of the current video.
 
 ---
 
