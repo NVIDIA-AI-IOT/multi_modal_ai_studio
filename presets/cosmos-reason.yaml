@@ -30,6 +30,7 @@ tts:
   server: localhost:50051
   voice: ""
   sample_rate: 22050
+  stream_tts: true
 
 devices:
   video_source: browser

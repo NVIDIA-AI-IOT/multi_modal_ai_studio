@@ -42,6 +42,43 @@ from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend
 
 logger = logging.getLogger(__name__)
 
+
+class TTSChunkBuffer:
+    """Word-count based buffer that chunks LLM tokens for streamed TTS.
+
+    Uses a smaller word threshold for the first chunk (fast time-to-first-audio)
+    and a larger threshold for subsequent chunks (better prosody).  Flushes
+    eagerly at natural break characters when enough words have accumulated.
+    """
+
+    FIRST_CHUNK_WORDS = 6
+    MAX_CHUNK_WORDS = 18
+    TTS_BREAKS = frozenset(".!?,;:\n\u2014-")
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._first_sent = False
+
+    def add(self, token: str) -> Optional[str]:
+        """Add a token. Returns a chunk when one is ready to speak."""
+        self._buf += token
+        words = len(self._buf.split())
+        limit = self.FIRST_CHUNK_WORDS if not self._first_sent else self.MAX_CHUNK_WORDS
+        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= 2
+        if hit_break or words >= limit:
+            chunk = self._buf.strip()
+            self._buf = ""
+            self._first_sent = True
+            return chunk or None
+        return None
+
+    def flush(self) -> Optional[str]:
+        """Return whatever remains in the buffer (call when LLM stream ends)."""
+        remainder = self._buf.strip()
+        self._buf = ""
+        return remainder or None
+
+
 # Only one mic-preview capture at a time (ALSA device is exclusive).
 _mic_preview_lock = threading.Lock()
 
@@ -681,22 +718,94 @@ async def _run_voice_pipeline(
                 
                 full_response = ""
                 llm_first_token_sent = False
-                
-                # Use vision_system_prompt when vision is enabled and we have frames
+
                 effective_system_prompt = llm_config.system_prompt
                 if vision_enabled and image_data_urls:
-                    # VLM with frames - use vision-specific prompt
                     effective_system_prompt = getattr(llm_config, "vision_system_prompt", llm_config.system_prompt)
                 elif vision_enabled and not image_data_urls:
                     logger.warning("[VLM] Vision enabled but no frames captured")
-                
-                # ── No conversation history ──
-                # Each turn is independent — no history is sent to the LLM.
-                # For VLM models, text-only history from previous turns biases
-                # the model to repeat old answers ("answer anchoring").
-                # For text-only models, the voice assistant use-case is
-                # turn-by-turn Q&A; history was never in the original codebase.
-                
+
+                # ── Interleaved vs sequential TTS ──
+                use_stream_tts = getattr(tts_config, "stream_tts", True)
+
+                # ── Shared TTS state ──
+                tts_first_sent = False
+                ts_tts_first = 0.0
+                last_tts_amplitude_time = 0.0
+                tts_amplitude_interval = 0.05
+                server_speaker_proc = None
+                tts_consumer_error: Optional[Exception] = None
+
+                async def _send_tts_audio(chunk):
+                    nonlocal tts_first_sent, ts_tts_first, last_tts_amplitude_time, server_speaker_proc
+                    if not tts_first_sent:
+                        ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                        ref_label = "llm_first_token" if use_stream_tts else "llm_complete"
+                        ref_ts = ts_first if use_stream_tts else ts_llm_complete
+                        logger.info("[timing] tts_first_audio @ %.2fs (%.2fs after %s)", ts_tts_first, ts_tts_first - ref_ts, ref_label)
+                        session.timeline.add_event("tts_first_audio", Lane.TTS)
+                        await send_event({"event_type": "tts_first_audio", "lane": "tts", "data": {}, "timestamp": ts_tts_first})
+                        tts_first_sent = True
+                    _use_speaker = session.config.devices.audio_output_source in ("alsa", "usb") and bool(
+                        session.config.devices.audio_output_device
+                    )
+                    _out_device = session.config.devices.audio_output_device
+                    if _use_speaker and chunk.audio:
+                        if server_speaker_proc is None:
+                            server_speaker_proc = start_server_speaker_playback(_out_device, chunk.sample_rate)
+                            if server_speaker_proc is None:
+                                logger.warning(
+                                    "Server speaker playback could not start for %s; check aplay and device",
+                                    _out_device,
+                                )
+                        if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
+                            try:
+                                server_speaker_proc.stdin.write(chunk.audio)
+                                server_speaker_proc.stdin.flush()
+                            except (BrokenPipeError, OSError) as e:
+                                logger.debug("Server speaker write failed: %s", e)
+                                server_speaker_proc = None
+                    if session.timeline.start_time is not None and chunk.audio:
+                        now = time.time() - session.timeline.start_time
+                        if now - last_tts_amplitude_time >= tts_amplitude_interval:
+                            amp = _pcm_rms_to_amplitude(chunk.audio)
+                            session.timeline.add_audio_amplitude(amplitude=amp, source="tts")
+                            last_tts_amplitude_time = now
+                    b64 = base64.b64encode(chunk.audio).decode("ascii")
+                    await ws.send_str(json.dumps({
+                        "type": "tts_audio",
+                        "data": b64,
+                        "sample_rate": chunk.sample_rate,
+                        "is_final": chunk.is_final,
+                    }))
+
+                async def _tts_consumer(tts_q: asyncio.Queue) -> None:
+                    """Background task: pull text chunks from queue, synthesize, send audio."""
+                    nonlocal tts_consumer_error
+                    try:
+                        chunk_idx = 0
+                        while True:
+                            text_chunk = await tts_q.get()
+                            if text_chunk is None:
+                                break
+                            chunk_idx += 1
+                            logger.info("[stream_tts] TTS chunk #%d (%d words, %d chars)", chunk_idx, len(text_chunk.split()), len(text_chunk))
+                            async for audio_chunk in tts.synthesize_stream(text_chunk):
+                                if stopped.is_set():
+                                    return
+                                await _send_tts_audio(audio_chunk)
+                    except Exception as e:
+                        logger.exception("[stream_tts] TTS consumer error: %s", e)
+                        tts_consumer_error = e
+
+                # ── LLM generation + TTS ──
+                ts_first = ts_llm_start
+                ts_llm_complete = ts_llm_start
+                tts_started = False
+                chunk_buf = TTSChunkBuffer() if use_stream_tts else None
+                tts_q: Optional[asyncio.Queue] = None
+                tts_task: Optional[asyncio.Task] = None
+
                 try:
                     async for token in llm.generate_stream(
                         prompt=text,
@@ -714,116 +823,77 @@ async def _run_voice_pipeline(
                                 ts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                                 logger.info("[timing] llm_first_token @ %.2fs (prefill took %.2fs)", ts_first, ts_first - ts_llm_start)
                                 session.timeline.add_event("llm_first_token", Lane.LLM)
-                                await send_event({
-                                    "event_type": "llm_first_token",
-                                    "lane": "llm",
-                                    "data": {},
-                                    "timestamp": ts_first,
-                                })
+                                await send_event({"event_type": "llm_first_token", "lane": "llm", "data": {}, "timestamp": ts_first})
+
+                            if use_stream_tts:
+                                ready = chunk_buf.add(token.token)
+                                if ready:
+                                    if not tts_started:
+                                        tts_started = True
+                                        tts_q = asyncio.Queue()
+                                        tts_task = asyncio.create_task(_tts_consumer(tts_q))
+                                        session.timeline.add_event("tts_start", Lane.TTS)
+                                        await send_event({"event_type": "tts_start", "lane": "tts", "data": {"stream_tts": True}, "timestamp": (time.time() - session.timeline.start_time) if session.timeline.start_time else 0})
+                                        await ws.send_str(json.dumps({"type": "tts_start"}))
+                                    await tts_q.put(ready)
+
                     session.timeline.add_event("llm_complete", Lane.LLM, data={"text": full_response})
                 except Exception as e:
                     logger.exception("LLM error: %s", e)
-                    full_response = "Sorry, I had an error."
+                    full_response = full_response or "Sorry, I had an error."
                     session.timeline.add_event("llm_complete", Lane.LLM, data={"text": full_response, "error": str(e)})
 
                 ts_llm_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 logger.info("[timing] llm_complete @ %.2fs (llm took %.2fs)", ts_llm_complete, ts_llm_complete - ts_llm_start)
-                await send_event({
-                    "event_type": "llm_complete",
-                    "lane": "llm",
-                    "data": {"text": full_response},
-                    "timestamp": ts_llm_complete,
-                })
+                await send_event({"event_type": "llm_complete", "lane": "llm", "data": {"text": full_response}, "timestamp": ts_llm_complete})
 
                 session.update_turn_response(full_response)
-
-                await send_event({
-                    "event_type": "chat",
-                    "user": text,
-                    "assistant": full_response,
-                })
+                await send_event({"event_type": "chat", "user": text, "assistant": full_response})
 
                 if not full_response.strip():
                     session.end_turn()
                     continue
 
-                ts_tts_start = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                session.timeline.add_event("tts_start", Lane.TTS)
-                await send_event({
-                    "event_type": "tts_start",
-                    "lane": "tts",
-                    "data": {},
-                    "timestamp": ts_tts_start,
-                })
-                await ws.send_str(json.dumps({"type": "tts_start"}))
-
-                tts_first_sent = False
-                last_tts_amplitude_time = 0.0
-                tts_amplitude_interval = 0.05
-                server_speaker_proc = None
                 try:
-                    async for chunk in tts.synthesize_stream(full_response):
-                        if stopped.is_set():
-                            break
-                        if not tts_first_sent:
-                            ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                            logger.info("[timing] tts_first_audio @ %.2fs (tts first chunk after %.2fs from llm_complete)", ts_tts_first, ts_tts_first - ts_llm_complete)
-                            session.timeline.add_event("tts_first_audio", Lane.TTS)
-                            await send_event({
-                                "event_type": "tts_first_audio",
-                                "lane": "tts",
-                                "data": {},
-                                "timestamp": ts_tts_first,
-                            })
-                            tts_first_sent = True
-                        # Use session.config so speaker selection sent in start_session is applied (initial config may have browser)
-                        _use_speaker = session.config.devices.audio_output_source in ("alsa", "usb") and bool(
-                            session.config.devices.audio_output_device
-                        )
-                        _out_device = session.config.devices.audio_output_device
-                        if _use_speaker and chunk.audio:
-                            if server_speaker_proc is None:
-                                server_speaker_proc = start_server_speaker_playback(
-                                    _out_device,
-                                    chunk.sample_rate,
-                                )
-                                if server_speaker_proc is None:
-                                    logger.warning(
-                                        "Server speaker playback could not start for %s; check aplay and device (e.g. same device as mic may be busy)",
-                                        _out_device,
-                                    )
-                            if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
-                                try:
-                                    server_speaker_proc.stdin.write(chunk.audio)
-                                    server_speaker_proc.stdin.flush()
-                                except (BrokenPipeError, OSError) as e:
-                                    logger.debug("Server speaker write failed (aplay may have exited): %s", e)
-                                    server_speaker_proc = None
-                        if session.timeline.start_time is not None and chunk.audio:
-                            now = time.time() - session.timeline.start_time
-                            if now - last_tts_amplitude_time >= tts_amplitude_interval:
-                                amp = _pcm_rms_to_amplitude(chunk.audio)
-                                session.timeline.add_audio_amplitude(amplitude=amp, source="tts")
-                                last_tts_amplitude_time = now
-                        b64 = base64.b64encode(chunk.audio).decode("ascii")
-                        await ws.send_str(json.dumps({
-                            "type": "tts_audio",
-                            "data": b64,
-                            "sample_rate": chunk.sample_rate,
-                            "is_final": chunk.is_final,
-                        }))
+                    if use_stream_tts:
+                        remainder = chunk_buf.flush()
+                        if remainder:
+                            if not tts_started:
+                                tts_started = True
+                                tts_q = asyncio.Queue()
+                                tts_task = asyncio.create_task(_tts_consumer(tts_q))
+                                session.timeline.add_event("tts_start", Lane.TTS)
+                                await send_event({"event_type": "tts_start", "lane": "tts", "data": {"stream_tts": True}, "timestamp": (time.time() - session.timeline.start_time) if session.timeline.start_time else 0})
+                                await ws.send_str(json.dumps({"type": "tts_start"}))
+                            await tts_q.put(remainder)
+                        if tts_q is not None:
+                            await tts_q.put(None)
+                        if tts_task is not None:
+                            await tts_task
+                        if tts_consumer_error:
+                            raise tts_consumer_error
+                    else:
+                        session.timeline.add_event("tts_start", Lane.TTS)
+                        await send_event({"event_type": "tts_start", "lane": "tts", "data": {}, "timestamp": (time.time() - session.timeline.start_time) if session.timeline.start_time else 0})
+                        await ws.send_str(json.dumps({"type": "tts_start"}))
+                        async for audio_chunk in tts.synthesize_stream(full_response):
+                            if stopped.is_set():
+                                break
+                            await _send_tts_audio(audio_chunk)
+
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                    logger.info("[timing] tts_complete @ %.2fs (tts stream took %.2fs)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0)
+                    logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0)
                     session.timeline.add_event("tts_complete", Lane.TTS)
-                    await send_event({
-                        "event_type": "tts_complete",
-                        "lane": "tts",
-                        "data": {},
-                        "timestamp": ts_tts_complete,
-                    })
+                    await send_event({"event_type": "tts_complete", "lane": "tts", "data": {}, "timestamp": ts_tts_complete})
                 except Exception as e:
                     logger.exception("TTS error: %s", e)
                 finally:
+                    if tts_task is not None and not tts_task.done():
+                        tts_task.cancel()
+                        try:
+                            await tts_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
                     if server_speaker_proc is not None:
                         stop_server_speaker_playback(server_speaker_proc)
 

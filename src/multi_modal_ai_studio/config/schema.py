@@ -180,6 +180,7 @@ class TTSConfig:
     sample_rate: int = 24000
     speed: float = 1.0
     response_format: str = "pcm"
+    stream_tts: bool = True
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
