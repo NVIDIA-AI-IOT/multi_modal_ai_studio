@@ -23,6 +23,7 @@ tts:
   server: localhost:50051
   voice: ""  # Empty = use Riva's default voice
   sample_rate: 22050  # Riva's native rate
+  stream_tts: true
 
 devices:
   video_source: browser

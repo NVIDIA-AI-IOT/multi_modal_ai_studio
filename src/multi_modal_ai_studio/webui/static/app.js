@@ -480,7 +480,8 @@ const defaultConfig = {
         language: 'en-US',
         sample_rate: 22050,
         quality: 'high',
-        realtime_transport: 'websocket'
+        realtime_transport: 'websocket',
+        stream_tts: true
     },
     devices: {
         camera: 'browser',
@@ -1362,6 +1363,15 @@ function renderTTSConfig(config, readonly = false) {
                     <option value="medium" ${config.quality === 'medium' ? 'selected' : ''}>Medium</option>
                     <option value="high" ${config.quality === 'high' ? 'selected' : ''}>High (Better)</option>
                 </select>
+            </div>
+
+            <div class="form-group" style="margin-top: 12px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" ${disabled} ${config.stream_tts !== false ? 'checked' : ''}
+                           onchange="updateConfig('tts', 'stream_tts', this.checked)">
+                    <span>Start speaking before LLM finishes</span>
+                </label>
+                <span class="input-hint">Streams TTS sentence-by-sentence as the LLM generates, reducing time to first audio</span>
             </div>
         </div>
     `;
