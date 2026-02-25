@@ -109,6 +109,7 @@ class LLMConfig:
         vision_quality: JPEG quality for captured frames (0.3-1.0)
         vision_max_width: Maximum frame width in pixels (smaller = faster, larger = more detail)
         vision_buffer_fps: Frame capture rate for ring buffer (frames per second)
+        history_turns: Number of previous turns to include as context (0=no history)
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
     api_base: str = "http://localhost:11434/v1"
@@ -122,6 +123,7 @@ class LLMConfig:
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
+    history_turns: int = 3  # Previous turns sent as text-only context (0=disabled)
     
     # -------------------------------------------------------------------------
     # Vision (VLM) settings - send camera frames with prompts

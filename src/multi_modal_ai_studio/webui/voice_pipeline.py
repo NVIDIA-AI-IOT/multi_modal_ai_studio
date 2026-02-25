@@ -1216,6 +1216,8 @@ async def _run_voice_pipeline(
         Future: can be cancelled when new final arrives for barge-in."""
         nonlocal speech_start_time
         turn_index = 0
+        max_history = getattr(llm_config, "history_turns", 3)
+        conversation_history: list = []
         try:
             while not stopped.is_set():
                 result = await finals_queue.get()
@@ -1487,10 +1489,14 @@ async def _run_voice_pipeline(
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 
+                # Build text-only history from recent turns (no images/video
+                # from past turns — only current turn gets multimodal input).
+                history_slice = conversation_history[-(max_history * 2):] if max_history > 0 else None
+
                 try:
                     async for token in llm.generate_stream(
                         prompt=text,
-                        history=None,
+                        history=history_slice or None,
                         system_prompt=effective_system_prompt,
                         image_data_urls=image_data_urls if image_data_urls else None,
                         speech_duration=speech_duration_secs if speech_duration_secs > 0 else None,
@@ -1649,6 +1655,17 @@ async def _run_voice_pipeline(
                             pass
                     if server_speaker_proc is not None:
                         stop_server_speaker_playback(server_speaker_proc)
+
+                # Append this turn to conversation history (text-only).
+                if max_history > 0 and full_response.strip():
+                    conversation_history.append({"role": "user", "content": text})
+                    conversation_history.append({"role": "assistant", "content": full_response})
+                    if len(conversation_history) > max_history * 2:
+                        conversation_history[:] = conversation_history[-(max_history * 2):]
+                    logger.info(
+                        "[history] Stored turn #%d; history now has %d messages (%d turns)",
+                        turn_index, len(conversation_history), len(conversation_history) // 2,
+                    )
 
                 session.end_turn()
         except asyncio.CancelledError:
