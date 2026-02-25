@@ -228,6 +228,21 @@ async def _run_voice_pipeline(
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
     
+    # Cosmos-Reason models benefit from video encoding with many frames.
+    # Raise browser capture FPS to match USB camera (~10fps) so both
+    # camera sources provide similar temporal resolution.  Non-Cosmos
+    # VLMs keep the user-configured FPS (default 3) since they only
+    # use a small number of individual images.
+    _model_lower_init = (llm_config.model or "").lower()
+    _is_cosmos_init = "cosmos" in _model_lower_init and "reason" in _model_lower_init
+    COSMOS_BROWSER_FPS = 10.0
+    if _is_cosmos_init and vision_buffer_fps < COSMOS_BROWSER_FPS:
+        logger.info(
+            "[VLM] Cosmos model detected: raising browser capture FPS from %.1f to %.1f",
+            vision_buffer_fps, COSMOS_BROWSER_FPS,
+        )
+        vision_buffer_fps = COSMOS_BROWSER_FPS
+    
     # Determine if using server-side camera (USB)
     use_server_camera = (
         config.devices.video_source == "usb" 
@@ -780,20 +795,102 @@ async def _run_voice_pipeline(
                     }))
 
                 async def _tts_consumer(tts_q: asyncio.Queue) -> None:
-                    """Background task: pull text chunks from queue, synthesize, send audio."""
+                    """Background task: pull text chunks from queue, synthesize, send audio.
+
+                    Uses two phases to minimise silence gaps between sentences:
+                      Phase 1 – Stream the first chunk immediately (lowest time-to-first-audio).
+                                While its audio plays, pre-synthesize the next chunk.
+                      Phase 2 – For every subsequent chunk use look-ahead: pre-collected
+                                audio is sent instantly (no Riva latency gap), and the NEXT
+                                chunk is pre-synthesized concurrently while we send.
+                    """
                     nonlocal tts_consumer_error
+
+                    async def _collect_audio(text_chunk: str) -> list:
+                        """Synthesize a text chunk and return all audio as a list."""
+                        result = []
+                        async for c in tts.synthesize_stream(text_chunk):
+                            result.append(c)
+                        return result
+
                     try:
                         chunk_idx = 0
-                        while True:
-                            text_chunk = await tts_q.get()
-                            if text_chunk is None:
-                                break
-                            chunk_idx += 1
-                            logger.info("[stream_tts] TTS chunk #%d (%d words, %d chars)", chunk_idx, len(text_chunk.split()), len(text_chunk))
-                            async for audio_chunk in tts.synthesize_stream(text_chunk):
+                        lookahead: Optional[asyncio.Task] = None
+                        stream_ended = False
+
+                        # ── Phase 1: stream first chunk immediately ──
+                        first_text = await tts_q.get()
+                        if first_text is None:
+                            return
+                        chunk_idx += 1
+                        logger.info("[stream_tts] TTS chunk #%d (%d words, %d chars)",
+                                    chunk_idx, len(first_text.split()), len(first_text))
+
+                        async for audio_chunk in tts.synthesize_stream(first_text):
+                            if stopped.is_set():
+                                return
+                            await _send_tts_audio(audio_chunk)
+                            if lookahead is None and not stream_ended:
+                                try:
+                                    nxt = tts_q.get_nowait()
+                                    if nxt is None:
+                                        stream_ended = True
+                                    else:
+                                        chunk_idx += 1
+                                        logger.info("[stream_tts] TTS chunk #%d (lookahead, %d words, %d chars)",
+                                                    chunk_idx, len(nxt.split()), len(nxt))
+                                        lookahead = asyncio.create_task(_collect_audio(nxt))
+                                except asyncio.QueueEmpty:
+                                    pass
+
+                        # ── Phase 2: lookahead pattern for remaining chunks ──
+                        while not stream_ended:
+                            if lookahead is not None:
+                                current_audio = await lookahead
+                                lookahead = None
+                            else:
+                                text_chunk = await tts_q.get()
+                                if text_chunk is None:
+                                    break
+                                chunk_idx += 1
+                                logger.info("[stream_tts] TTS chunk #%d (%d words, %d chars)",
+                                            chunk_idx, len(text_chunk.split()), len(text_chunk))
+                                current_audio = await _collect_audio(text_chunk)
+
+                            # Pre-start next chunk synthesis before sending current audio
+                            if not stream_ended and lookahead is None:
+                                try:
+                                    nxt = tts_q.get_nowait()
+                                    if nxt is None:
+                                        stream_ended = True
+                                    else:
+                                        chunk_idx += 1
+                                        logger.info("[stream_tts] TTS chunk #%d (lookahead, %d words, %d chars)",
+                                                    chunk_idx, len(nxt.split()), len(nxt))
+                                        lookahead = asyncio.create_task(_collect_audio(nxt))
+                                except asyncio.QueueEmpty:
+                                    pass
+
+                            for audio_chunk in current_audio:
                                 if stopped.is_set():
+                                    if lookahead:
+                                        lookahead.cancel()
                                     return
                                 await _send_tts_audio(audio_chunk)
+                                # Keep trying to pre-fetch while sending
+                                if lookahead is None and not stream_ended:
+                                    try:
+                                        nxt = tts_q.get_nowait()
+                                        if nxt is None:
+                                            stream_ended = True
+                                        else:
+                                            chunk_idx += 1
+                                            logger.info("[stream_tts] TTS chunk #%d (lookahead, %d words, %d chars)",
+                                                        chunk_idx, len(nxt.split()), len(nxt))
+                                            lookahead = asyncio.create_task(_collect_audio(nxt))
+                                    except asyncio.QueueEmpty:
+                                        pass
+
                     except Exception as e:
                         logger.exception("[stream_tts] TTS consumer error: %s", e)
                         tts_consumer_error = e

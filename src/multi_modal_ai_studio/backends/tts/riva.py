@@ -133,6 +133,19 @@ class RivaTTSBackend(TTSBackend):
     - Multiple sample rates
     """
 
+    # Pre-buffer initial TTS audio before yielding (bytes).
+    # Riva's synthesize_online often produces tiny initial chunks (10-20ms).
+    # Playing those immediately causes stuttering/broken first words because
+    # the browser's AudioContext runs out of audio before the next chunk
+    # arrives.  Accumulating ~400ms first ensures the browser has enough
+    # buffered audio while subsequent chunks stream in.
+    _TTS_PREBUFFER_BYTES = 17640  # ~400ms at 22050 Hz, 16-bit mono
+
+    # Minimum audio size for any yielded chunk AFTER the initial pre-buffer.
+    # Prevents the browser from receiving tiny 10-20ms fragments that cause
+    # playback gaps when there's any jitter in Riva's response timing.
+    _MIN_YIELD_BYTES = 4410  # ~100ms at 22050 Hz, 16-bit mono
+
     def __init__(self, config: TTSConfig, timeline: Optional[Timeline] = None):
         """Initialize Riva TTS backend.
 
@@ -313,35 +326,68 @@ class RivaTTSBackend(TTSBackend):
                 thread = threading.Thread(target=producer)
                 thread.start()
                 audio_idx = 0
+                audio_buf = bytearray()
+                # First text chunk uses a large initial buffer; subsequent
+                # chunks use the smaller minimum-yield threshold.
+                initial_target = self._TTS_PREBUFFER_BYTES if chunk_idx == 0 else self._MIN_YIELD_BYTES
+                initial_flushed = False
+                bytes_per_second = self.config.sample_rate * 2
+
+                def _make_chunk(data: bytes) -> TTSChunk:
+                    nonlocal audio_idx
+                    audio_idx += 1
+                    dur = (len(data) / bytes_per_second) * 1000 if bytes_per_second > 0 else 0
+                    return TTSChunk(
+                        audio=data,
+                        sample_rate=self.config.sample_rate,
+                        is_final=is_last_chunk,
+                        duration_ms=dur,
+                        metadata={
+                            "voice": self.config.voice,
+                            "chunk_index": chunk_idx,
+                            "audio_chunk_index": audio_idx,
+                            "total_text_chunks": total_chunks,
+                        },
+                    )
+
                 try:
                     while True:
                         response = await loop.run_in_executor(None, chunk_queue.get)
                         if response is sentinel:
+                            if audio_buf:
+                                if self.timeline and tts_first_audio_time is None:
+                                    first_audio_event = self.timeline.add_event("tts_first_audio", Lane.TTS)
+                                    tts_first_audio_time = first_audio_event.timestamp
+                                yield _make_chunk(bytes(audio_buf))
                             break
                         if isinstance(response, Exception):
                             raise response
-                        if response.audio:
-                            audio_idx += 1
-                            is_final = is_last_chunk  # We don't know total count; treat as final if last text chunk
+                        if not response.audio:
+                            continue
+
+                        audio_buf.extend(response.audio)
+
+                        # Initial accumulation phase (prebuffer or min-yield)
+                        if not initial_flushed:
+                            if len(audio_buf) >= initial_target:
+                                initial_flushed = True
+                                if self.timeline and tts_first_audio_time is None:
+                                    first_audio_event = self.timeline.add_event("tts_first_audio", Lane.TTS)
+                                    tts_first_audio_time = first_audio_event.timestamp
+                                    self.logger.debug(f"TTS first audio at {tts_first_audio_time:.3f}s")
+                                yield _make_chunk(bytes(audio_buf))
+                                audio_buf.clear()
+                            continue
+
+                        # Post-initial: yield when buffer reaches minimum size
+                        min_yield = self._MIN_YIELD_BYTES
+                        while len(audio_buf) >= min_yield:
+                            out = bytes(audio_buf[:min_yield])
+                            del audio_buf[:min_yield]
                             if self.timeline and tts_first_audio_time is None:
                                 first_audio_event = self.timeline.add_event("tts_first_audio", Lane.TTS)
                                 tts_first_audio_time = first_audio_event.timestamp
-                                self.logger.debug(f"TTS first audio at {tts_first_audio_time:.3f}s")
-                            audio_bytes = len(response.audio)
-                            bytes_per_second = self.config.sample_rate * 2
-                            duration_ms = (audio_bytes / bytes_per_second) * 1000 if bytes_per_second > 0 else 0
-                            yield TTSChunk(
-                                audio=response.audio,
-                                sample_rate=self.config.sample_rate,
-                                is_final=is_final,
-                                duration_ms=duration_ms,
-                                metadata={
-                                    "voice": self.config.voice,
-                                    "chunk_index": chunk_idx,
-                                    "audio_chunk_index": audio_idx,
-                                    "total_text_chunks": total_chunks,
-                                },
-                            )
+                            yield _make_chunk(out)
                 finally:
                     thread.join(timeout=1.0)
 
