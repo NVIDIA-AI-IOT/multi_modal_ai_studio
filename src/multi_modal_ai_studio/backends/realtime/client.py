@@ -123,13 +123,15 @@ class OpenAIRealtimeClient:
     async def _send_session_update(self) -> None:
         """Send session.update. Only include fields the API accepts."""
         # Many session fields are not accepted in session.update. Model is in URL.
-        # Do not send turn_detection: production API returns "Unknown parameter: 'session.turn_detection'".
+        # Top-level input_audio_transcription is rejected; use audio.input.transcription (Realtime API docs).
         session: Dict[str, Any] = {
             "type": "realtime",
             "instructions": self.instructions,
         }
         if self.input_audio_transcription is not None:
-            session["input_audio_transcription"] = self.input_audio_transcription
+            session.setdefault("audio", {})["input"] = {
+                "transcription": self.input_audio_transcription,
+            }
         msg = {"type": "session.update", "session": session}
         await self._send_json(msg)
         logger.info("Sent session.update (session keys: %s)", list(session.keys()))

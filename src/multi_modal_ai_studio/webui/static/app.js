@@ -60,6 +60,8 @@ const state = {
     liveTimelineRafId: null,
     /** Live session: (timestamp_sec, amplitude 0–100) for AUDIO lane waveform; max ~15 sec at ~20 Hz */
     liveAudioAmplitudeHistory: [],
+    /** Running buffer of last N client-side RMS values for smoothing green waveform (avoids saw-tooth from chunk boundaries) */
+    _userAmplitudeSmoothBuf: [],
     /** Server USB: amplitude samples received before session_start; flushed into liveAudioAmplitudeHistory when session starts */
     pendingServerMicAmplitude: [],
     /** Live session: TTS (AI) segments for purple waveform on AUDIO lane: { startTime, endTime, amplitude } */
@@ -217,6 +219,7 @@ function renderSessionList() {
                 <div class="session-item-body" onclick="selectSession(${index})">
                     <div class="session-item-name">${safeName}</div>
                     <div class="session-item-meta">
+                        <span>${formatSessionDateOnly(session.created_at)}</span>
                         <span>${formatDate(session.created_at)}</span>
                         <span>${metrics.total_turns || 0} turns</span>
                     </div>
@@ -368,7 +371,7 @@ function renderConfig() {
     // If in live session mode, show editable forms
     if (state.isLiveSession) {
         contentEl.innerHTML = renderEditableConfigForm(tab, currentConfig[configKey], false);
-        if (tab === 'llm') setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+        if (tab === 'llm' && !isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
         if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
@@ -487,6 +490,21 @@ function saveDefaultConfig() {
     } catch (e) {
         console.error('Failed to save default config:', e);
     }
+}
+
+/** Preset system prompts for voice AI. [1] [2] [3] in the UI apply these. */
+var SYSTEM_PROMPT_PRESETS = [
+    'You are a helpful voice assistant.',
+    'You are a helpful AI assistant.',
+    'You are a concise voice assistant. Keep replies brief and natural for conversation.'
+];
+
+function applySystemPromptPreset(index) {
+    var text = SYSTEM_PROMPT_PRESETS[index];
+    if (text == null) return;
+    updateConfig('llm', 'system_prompt', text);
+    var el = document.getElementById('llm-system-prompt');
+    if (el) el.value = text;
 }
 
 /** Pin an LLM field (e.g. system_prompt, extra_request_body) to the saved default so it is used in other sessions. */
@@ -807,7 +825,9 @@ function renderASRConfig(config, readonly = false) {
 }
 
 function renderLLMConfig(config, readonly = false) {
+    const realtimeFullVoice = !readonly && isRealtimeFullVoiceConfig(config);
     const disabled = readonly ? 'disabled' : '';
+    const disableApiAndModel = readonly || realtimeFullVoice;
     const roClass = readonly ? 'readonly' : '';
     const apiBase = config.api_base || (config.ollama_url ? config.ollama_url.replace(/\/v1$/, '') + '/v1' : 'http://localhost:11434/v1');
     const showApiKey = !readonly && (apiBase.includes('openai.com') || apiBase.includes('integrate.api.nvidia.com'));
@@ -815,10 +835,11 @@ function renderLLMConfig(config, readonly = false) {
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${realtimeFullVoice ? '<p class="config-note"><i data-lucide="message-circle" class="lucide-inline"></i> Realtime full-voice: only <strong>System Prompt</strong> is used (sent as Realtime instructions). API Base and Model are fixed.</p>' : ''}
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">API Base URL</label>
-                    ${!readonly ? `<div style="position: relative;">
+                    ${!disableApiAndModel ? `<div style="position: relative;">
                         <button type="button" class="icon-btn" onclick="togglePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i></button>
                         <div class="api-presets-menu" id="presetsMenu" style="display: none;">
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:11434/v1', 'Ollama')"><strong>Ollama</strong><span>http://localhost:11434/v1</span></div>
@@ -831,9 +852,9 @@ function renderLLMConfig(config, readonly = false) {
                         </div>
                     </div>` : ''}
                 </div>
-                <input type="text" ${disabled} id="llm-api-base" value="${apiBase}" placeholder="http://localhost:11434/v1"
+                <input type="text" ${disableApiAndModel ? 'disabled' : ''} id="llm-api-base" value="${apiBase}" placeholder="http://localhost:11434/v1"
                        onchange="updateConfig('llm', 'api_base', this.value); if(!${readonly}) fetchLLMModels(this.value);">
-                <div class="input-hint">OpenAI-compatible API endpoint (Ollama, vLLM, SGLang, OpenAI, etc.)</div>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice (not used).' : 'OpenAI-compatible API endpoint (Ollama, vLLM, SGLang, OpenAI, etc.)'}</div>
             </div>
 
             <div class="form-group llm-api-key-group" id="llm-api-key-group" style="display: ${showApiKey ? 'block' : 'none'}">
@@ -845,12 +866,12 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">Model</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                    ${!disableApiAndModel ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
                 </div>
-                <select ${disabled} id="llm-model-select" onchange="updateConfig('llm', 'model', this.value)">
-                    <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : 'Loading...'}</option>
+                <select ${disableApiAndModel ? 'disabled' : ''} id="llm-model-select" onchange="updateConfig('llm', 'model', this.value)">
+                    <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
                 </select>
-                <div class="input-hint">Fetched from API Base URL; use reload icon if you added a model</div>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Fetched from API Base URL; use reload icon if you added a model'}</div>
             </div>
 
             <div class="form-group">
@@ -888,10 +909,14 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">System Prompt</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        ${!readonly ? SYSTEM_PROMPT_PRESETS.map((_, i) => '<button type="button" class="system-prompt-preset-btn" onclick="applySystemPromptPreset(' + i + ')" title="Preset ' + (i + 1) + '">[' + (i + 1) + ']</button>').join('') : ''}
+                        ${!readonly ? '<span class="system-prompt-preset-sep" aria-hidden="true">|</span>' : ''}
+                        ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
+                    </div>
                 </div>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
-                          onchange="updateConfig('llm', 'system_prompt', this.value)">${config.system_prompt}</textarea>
+                          onchange="updateConfig('llm', 'system_prompt', this.value)">${escapeHtml(config.system_prompt || '')}</textarea>
             </div>
 
             <div class="form-group">
@@ -1580,14 +1605,14 @@ function applyRealtimeLock() {
     updateConfigTabStates();
 }
 
-/** Update LLM tab disabled state (gray out, prevent click) when Realtime full-voice is selected. */
+/** When Realtime full-voice is selected: LLM tab stays enabled (system prompt = Realtime instructions); tab title explains API Base/Model are fixed. */
 function updateConfigTabStates() {
     const llmTab = document.querySelector('.config-tab[data-tab="llm"]');
     if (!llmTab) return;
-    const locked = isRealtimeFullVoiceLock();
-    llmTab.classList.toggle('config-tab--disabled', locked);
-    llmTab.setAttribute('aria-disabled', locked ? 'true' : 'false');
-    llmTab.title = locked ? 'Disabled when ASR is Realtime API (WebSocket, Full voice)' : '';
+    const realtimeFullVoice = isRealtimeFullVoiceLock();
+    llmTab.classList.remove('config-tab--disabled');
+    llmTab.setAttribute('aria-disabled', 'false');
+    llmTab.title = realtimeFullVoice ? 'System prompt is used as Realtime instructions; API Base and Model are fixed.' : '';
 }
 
 function toggleRealtimePresetsMenu(ev) {
@@ -3204,13 +3229,14 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         return s.slice(0, maxLen) + '\u2026';
     }
 
-    // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only
+    // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only; Realtime = system + TTS output transcript
     pointEvents.forEach(event => {
         let targetLane = event.lane;
         if (targetLane === 'audio') return;
         // Draw user_speech_end on speech lane so TTL boundary is visible (backend sends it as system)
-        if (targetLane === 'system' && event.event_type !== 'user_speech_end') return;
         if (targetLane === 'system' && event.event_type === 'user_speech_end') targetLane = 'speech';
+        // Realtime session_ready and error stay on system lane and are drawn below
+        if (targetLane === 'system' && event.event_type !== 'user_speech_end' && event.event_type !== 'realtime_session_ready' && event.event_type !== 'error') return;
 
         if (combineSpeechLanes && targetLane === 'tts') targetLane = 'speech';
 
@@ -3220,9 +3246,51 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const x = PADDING_LEFT + (event.timestamp - timelineOffset) * timeScale;
         const laneY = getLaneY(laneIndex);
         const laneH = getLaneHeight(laneIndex);
-        const centerY = laneY + laneH / 2;
+        // When ASR and TTS share one lane: top half = ASR, bottom half = TTS (avoids overlap)
+        let centerY = laneY + laneH / 2;
+        if (combineSpeechLanes && targetLane === 'speech') {
+            const et0 = event.event_type || event.eventType || '';
+            if (et0 === 'asr_partial' || et0 === 'asr_final' || et0 === 'user_speech_end') {
+                centerY = laneY + laneH * 0.25;
+            } else if (et0 === 'realtime_output_partial' || et0 === 'realtime_output_final' || et0 === 'tts_complete') {
+                centerY = laneY + laneH * 0.75;
+            }
+        }
 
         const et = event.event_type || event.eventType || '';
+        // System lane: Realtime session_ready (green), error (red)
+        if (targetLane === 'system') {
+            let dotColor = '#888';
+            let dotRadius = 0;
+            let label = '';
+            if (et === 'realtime_session_ready') {
+                dotColor = '#4CAF50';
+                dotRadius = 4;
+                label = 'Realtime ready';
+            } else if (et === 'error') {
+                dotColor = '#D32F2F';
+                dotRadius = 4;
+                label = (event.data && event.data.message) ? String(event.data.message) : 'Error';
+            }
+            if (dotRadius > 0) {
+                ctx.fillStyle = dotColor;
+                ctx.beginPath();
+                ctx.arc(x, centerY, dotRadius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (label) {
+                const shortLabel = truncateTimelineLabel(label, 40);
+                ctx.font = '10px sans-serif';
+                ctx.fillStyle = dotColor;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                const textX = x + dotRadius + 6;
+                if (textX < width - PADDING_RIGHT - 2) {
+                    ctx.fillText(shortLabel, textX, centerY);
+                }
+            }
+            return;
+        }
         // Speech lane: only draw dots for partial (light blue) and final (blue); no phantom blue dots for other events
         let dotColor = laneColors[event.lane] || laneColors[targetLane] || '#888';
         let dotRadius = 4;
@@ -3242,6 +3310,12 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 dotRadius = 2.5;
             } else if (et === 'asr_final') {
                 dotColor = laneColors.speech || '#1976D2';
+                dotRadius = 4;
+            } else if (et === 'realtime_output_partial') {
+                dotColor = laneColors.tts || '#9C27B0';
+                dotRadius = 2.5;
+            } else if (et === 'realtime_output_final') {
+                dotColor = laneColors.tts || '#9C27B0';
                 dotRadius = 4;
             } else if (targetLane === 'llm' || targetLane === 'tts') {
                 dotRadius = 0; // No dots on LLM/TTS lanes; TTS first audio is shown as thin pale magenta line
@@ -3278,6 +3352,21 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 const label = truncateTimelineLabel(text, 60);
                 ctx.font = '11px sans-serif';
                 ctx.fillStyle = laneColors.llm || '#FF9800';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                const textX = x + (dotRadius > 0 ? dotRadius : 4) + 6;
+                if (textX < width - PADDING_RIGHT - 2) {
+                    ctx.fillText(label, textX, centerY);
+                }
+            }
+        }
+        // Realtime AI output: draw transcript to the right of realtime_output_final (and tts_complete when it has text)
+        if ((et === 'realtime_output_final' || (et === 'tts_complete' && event.data && event.data.text)) && targetLane === (combineSpeechLanes ? 'speech' : 'tts')) {
+            const text = (event.data && event.data.text) ? String(event.data.text) : '';
+            if (text) {
+                const label = truncateTimelineLabel(text, 60);
+                ctx.font = '11px sans-serif';
+                ctx.fillStyle = laneColors.tts || '#9C27B0';
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 const textX = x + (dotRadius > 0 ? dotRadius : 4) + 6;
@@ -4521,9 +4610,10 @@ function handleVoiceWsMessage(ev) {
             const evt = msg.event;
             if (evt.event_type === 'session_start') {
                 if (state.liveSessionStartTime <= 0) {
-                    state.liveSessionStartTime = Date.now() / 1000;
-                    startLiveSystemStatsPoll();
-                    state.liveAudioAmplitudeHistory = [];
+        state.liveSessionStartTime = Date.now() / 1000;
+        startLiveSystemStatsPoll();
+        state.liveAudioAmplitudeHistory = [];
+        state._userAmplitudeSmoothBuf = [];
                 }
                 // Flush Server USB amplitude received before session_start so AUDIO lane has data from the first sample.
                 // When Server USB mic is used, client sets liveSessionStartTime before sending start_session so
@@ -4540,6 +4630,8 @@ function handleVoiceWsMessage(ev) {
                 else if (evt.event_type && evt.event_type.startsWith('llm_')) evt.lane = 'llm';
                 else if (evt.event_type && evt.event_type.startsWith('tts_')) evt.lane = 'tts';
                 else if (evt.event_type === 'session_start') evt.lane = 'system';
+                else if (evt.event_type === 'realtime_session_ready' || evt.event_type === 'error') evt.lane = 'system';
+                else if (evt.event_type === 'realtime_output_partial' || evt.event_type === 'realtime_output_final') evt.lane = 'tts';
             } else if (typeof evt.lane === 'string') {
                 evt.lane = evt.lane.toLowerCase();
             }
@@ -4582,6 +4674,14 @@ function handleVoiceWsMessage(ev) {
                     } else {
                         state.liveChatTurns.push({ user: userText, assistant: assistantText });
                     }
+                    renderLiveChat();
+                    requestAnimationFrame(function () { updateLiveSessionUI(); });
+                }
+            } else if (evt.event_type === 'tts_complete' && evt.data && evt.data.text != null) {
+                // Realtime: tts_complete carries the AI response transcript
+                var last = state.liveChatTurns[state.liveChatTurns.length - 1];
+                if (last && last.assistant === '') {
+                    last.assistant = String(evt.data.text).trim();
                     renderLiveChat();
                     requestAnimationFrame(function () { updateLiveSessionUI(); });
                 }
@@ -4659,6 +4759,7 @@ function startSessionRecording() {
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
         state.liveAudioAmplitudeHistory = [];
+        state._userAmplitudeSmoothBuf = [];
         state.pendingServerMicAmplitude = [];
         state.liveTtsAmplitudeHistory = [];
         state.liveTtlBands = [];
@@ -4676,6 +4777,9 @@ function startSessionRecording() {
         if (!state.ttsAudioContext) {
             state.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
             state.ttsNextStartTime = 0;
+        }
+        if (state.ttsAudioContext.state === 'suspended') {
+            state.ttsAudioContext.resume().catch(function (e) { console.warn('[Voice] TTS AudioContext resume on start:', e); });
         }
         startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
@@ -4707,6 +4811,7 @@ function startSessionRecording() {
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
         state.liveAudioAmplitudeHistory = [];
+        state._userAmplitudeSmoothBuf = [];
         state.pendingServerMicAmplitude = [];
         state.liveTtsAmplitudeHistory = [];
         state.liveTtlBands = [];
@@ -4730,6 +4835,9 @@ function startSessionRecording() {
         if (!state.ttsAudioContext) {
             state.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
             state.ttsNextStartTime = 0;
+        }
+        if (state.ttsAudioContext.state === 'suspended') {
+            state.ttsAudioContext.resume().catch(function (e) { console.warn('[Voice] TTS AudioContext resume on start:', e); });
         }
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -4898,16 +5006,13 @@ function connectPcmToWs(stream) {
         ws.send(pcmData.buffer);
         pcmChunkCount++;
         if (pcmChunkCount % 50 === 0) console.log('[Voice] Sent', pcmChunkCount, 'PCM chunks');
-        // Feed live AUDIO lane waveform: RMS amplitude 0–100, timestamp relative to session start
-        if (state.liveSessionStartTime > 0 && state.liveAudioAmplitudeHistory) {
+        // AUDIO lane waveform: use only server user_amplitude (single source). Client used to push here too → double source caused saw/block shape with Realtime. RIVA looks correct because it only uses server.
+        if (state.liveSessionStartTime > 0) {
             let sumSq = 0;
             for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
             const rms = Math.min(100, Math.sqrt(sumSq / input.length) * 400);
             const ts = (Date.now() / 1000) - state.liveSessionStartTime;
-            state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: rms });
-            // No trimming: send full session on stop for consistent dense waveform (Option 1, AMPLITUDE_DATA_SOURCES.md)
-
-            // Browser-side end-of-speech: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
+            // Browser-side end-of-speech for TTL band: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
             const userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
             const SILENCE_CONFIRM_SEC = 0.15;
             if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
@@ -5005,6 +5110,7 @@ function playTtsChunk(base64Data, sampleRate) {
         source.buffer = buffer;
         source.connect(ctx.destination);
         source.start(startTime);
+        console.log('[Voice] Playing TTS chunk, ' + (duration * 1000).toFixed(0) + ' ms (context state: ' + ctx.state + ')');
         // Record TTS segment for purple AI waveform on AUDIO lane using actual playback time (when speaker plays)
         if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory) {
             var nowSec = Date.now() / 1000;
@@ -5517,6 +5623,13 @@ function formatDate(dateString) {
     const date = parseSessionDate(dateString);
     if (!date || isNaN(date.getTime())) return '';
     return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+/** Date only for session list meta (e.g. "Feb 12, 2025"). */
+function formatSessionDateOnly(dateString) {
+    const date = parseSessionDate(dateString);
+    if (!date || isNaN(date.getTime())) return '';
+    return date.toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
 /** Full date and time for session meta line 2 (matches session list context). */
