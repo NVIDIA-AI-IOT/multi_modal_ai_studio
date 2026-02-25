@@ -110,6 +110,18 @@ def _is_cosmos_model(model_name: str) -> bool:
     return "cosmos" in name_lower and "reason" in name_lower
 
 
+# Cosmos-Reason models always use video encoding (even for few frames)
+# for temporal understanding.  The browser capture FPS is raised
+# dynamically for Cosmos so both browser and USB cameras provide a
+# similar number of frames.
+_MIN_FRAMES_FOR_VIDEO = 2
+
+# When sending individual images (non-Cosmos VLMs), cap the count to
+# limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
+# is a good trade-off between visual context and prefill latency.
+_MAX_INDIVIDUAL_IMAGES = 6
+
+
 def _encode_images_to_video_base64(
     image_data_urls: List[str],
     speech_duration_secs: float = 0.0,
@@ -367,9 +379,13 @@ class OpenAILLMBackend(LLMBackend):
         if image_data_urls and len(image_data_urls) > 0:
             user_content = []
             
-            # Cosmos-Reason models: Use video input for ~3x faster inference
-            # Video provides temporal token compression (fewer tokens to process)
-            if _is_cosmos_model(self.config.model) and len(image_data_urls) >= 2:
+            # Cosmos-Reason models: always use video encoding for temporal
+            # understanding.  Browser capture FPS is dynamically raised so
+            # both browser and USB cameras provide similar frame counts.
+            if (
+                _is_cosmos_model(self.config.model)
+                and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
+            ):
                 video_url = _encode_images_to_video_base64(
                     image_data_urls,
                     speech_duration_secs=speech_duration or 0.0,
@@ -381,18 +397,21 @@ class OpenAILLMBackend(LLMBackend):
                     })
                     self.logger.info("VLM request (Cosmos video): %d frames encoded to MP4", len(image_data_urls))
                 else:
-                    # Fall back to multi-image if video encoding fails
                     self.logger.warning("Video encoding failed, falling back to multi-image")
                     video_url = None
             else:
                 video_url = None
             
-            # Multi-image format for non-Cosmos models or if video encoding failed
+            # Multi-image format: used for non-Cosmos models or when video
+            # encoding failed.
             if not video_url:
-                # Multi-modal message format (OpenAI Vision API compatible)
-                # Works with: GPT-4V, LLaVA, Qwen-VL, Gemma-VLM, etc.
                 detail = getattr(self.config, "vision_detail", "auto")
-                for img_url in image_data_urls:
+                imgs = image_data_urls
+                if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
+                    step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
+                    imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
+                    self.logger.info("VLM: sub-sampled %d → %d images", len(image_data_urls), len(imgs))
+                for img_url in imgs:
                     user_content.append({
                         "type": "image_url",
                         "image_url": {
@@ -400,7 +419,7 @@ class OpenAILLMBackend(LLMBackend):
                             "detail": detail,
                         }
                     })
-                self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(image_data_urls))
+                self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
             
             # Add text prompt after images/video
             user_content.append({
