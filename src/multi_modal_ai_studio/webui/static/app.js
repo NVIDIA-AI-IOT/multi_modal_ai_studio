@@ -2845,7 +2845,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            // Green: mic (user) waveform — same density as purple TTS: interpolate amplitude at every tStep so no wide gaps
+            // Green: mic (user) waveform. One amplitude bar = 25ms (tStep = 0.025). User and AI data match this.
             if (liveAmplitudeHistory && liveAmplitudeHistory.length > 0) {
                 const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
                 ctx.fillStyle = audioColor;
@@ -2853,8 +2853,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
                 const barWidthPx = 2;
                 const tStep = 0.025; // same as TTS (~40 Hz) for matching visual density
+                const lastUserTs = liveAmplitudeHistory.length ? (liveAmplitudeHistory[liveAmplitudeHistory.length - 1].timestamp != null ? liveAmplitudeHistory[liveAmplitudeHistory.length - 1].timestamp : liveAmplitudeHistory[liveAmplitudeHistory.length - 1][0]) : 0;
                 for (let t = visibleStart; t <= visibleEnd; t += tStep) {
-                    const amp = Math.min(100, getAmplitudeAtTime(liveAmplitudeHistory, t) * userGain);
+                    const rawAmp = (inLive && t > lastUserTs) ? 0 : getAmplitudeAtTime(liveAmplitudeHistory, t);
+                    const amp = Math.min(100, rawAmp * userGain);
                     if (amp <= 0) continue;
                     const x = visibleLeft + (t - timelineOffset) * timeScale;
                     const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
@@ -4265,8 +4267,8 @@ function handleVoiceWsMessage(ev) {
         if (msg.type === 'user_amplitude') {
             var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
             var serverTs = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
-            // Use client-side session time for AUDIO lane so waveform aligns with timeline (avoids server/client clock skew).
-            var ts = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : serverTs;
+            // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
+            var ts = serverTs;
             if (state.liveSessionStartTime > 0 && Array.isArray(state.liveAudioAmplitudeHistory)) {
                 state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: amp });
                 // Server USB: end-of-speech from sparse user_amplitude (20 Hz). Use consecutive sample count, not wall-clock,
@@ -4390,12 +4392,31 @@ function handleVoiceWsMessage(ev) {
                 if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
             }
         } else if (msg.type === 'tts_audio' && msg.data) {
-            // When Server USB speaker is selected, the server plays TTS to that device; do not play in browser.
-            // Still record TTS segments so the purple waveform and tts_playback_segments are saved.
+            // Server may send 25ms amplitude_segments (matches timeline bar = 25ms) for denser AI waveform.
+            var skipSegmentPush = false;
+            if (Array.isArray(msg.amplitude_segments) && msg.amplitude_segments.length && Array.isArray(state.liveTtsAmplitudeHistory)) {
+                msg.amplitude_segments.forEach(function (seg) {
+                    state.liveTtsAmplitudeHistory.push({
+                        startTime: seg.startTime,
+                        endTime: seg.endTime,
+                        amplitude: seg.amplitude != null ? seg.amplitude : 0
+                    });
+                });
+                var segs = msg.amplitude_segments;
+                var firstSeg = segs[0];
+                if (firstSeg && typeof firstSeg.startTime === 'number') {
+                    if (state.firstTtsPlayTimeThisResponse == null || firstSeg.startTime < state.firstTtsPlayTimeThisResponse)
+                        state.firstTtsPlayTimeThisResponse = firstSeg.startTime;
+                    var firstAmp = firstSeg.amplitude != null ? firstSeg.amplitude : 0;
+                    if (firstAmp > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || firstSeg.startTime < state.earliestTtsPlayTimeAboveThreshold))
+                        state.earliestTtsPlayTimeAboveThreshold = firstSeg.startTime;
+                }
+                skipSegmentPush = true;
+            }
             if (isServerSpeakerSelected()) {
-                recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000);
+                recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             } else {
-                playTtsChunk(msg.data, msg.sample_rate || 24000);
+                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             }
         } else if (msg.type === 'session_saved' && msg.session_id) {
             state.lastSavedSessionId = msg.session_id;
@@ -4506,10 +4527,11 @@ function startSessionRecording() {
         state.voiceWs = ws;
 
     ws.onopen = function () {
-        console.log('[Voice] WebSocket connected, sending config');
+        console.log('[Voice] WebSocket connected, sending config and start_session');
         var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
-        console.log('[Voice] Config sent, starting mic stream');
+        ws.send(JSON.stringify({ type: 'start_session', config: config }));
+        console.log('[Voice] Config and start_session sent, starting mic stream');
         startVoiceMicStream();
     };
 
@@ -4708,8 +4730,26 @@ function stopVoiceMicStream() {
     }
 }
 
-/** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser. */
-function recordTtsSegmentOnly(base64Data, sampleRate) {
+/** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser.
+ * skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push; only run TTL band logic. */
+function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
+    if (state.liveSessionStartTime <= 0 || !state.liveTtsAmplitudeHistory) return;
+    if (skipSegmentPush) {
+        // first/earliest/ttsNextStartTime already set by handler; just run TTL band close if applicable
+        if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+            var bandStart = state.liveTtlBandStartTime;
+            var firstChunk = state.firstTtsPlayTimeThisResponse;
+            var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+            var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+            state.liveTtlBandStartTime = null;
+            state.voiceTurnActive = false;
+            state.lastAsrPartialTime = null;
+            state.firstTtsPlayTimeThisResponse = null;
+            state.earliestTtsPlayTimeAboveThreshold = null;
+            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+        }
+        return;
+    }
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -4717,7 +4757,6 @@ function recordTtsSegmentOnly(base64Data, sampleRate) {
     const samples = new Int16Array(bytes.buffer);
     const numSamples = samples.length;
     const duration = numSamples / sampleRate;
-    if (state.liveSessionStartTime <= 0 || !state.liveTtsAmplitudeHistory) return;
     let startTime = state.ttsNextStartTime;
     if (typeof startTime !== 'number' || startTime < 0) {
         startTime = (Date.now() / 1000) - state.liveSessionStartTime;
@@ -4747,7 +4786,8 @@ function recordTtsSegmentOnly(base64Data, sampleRate) {
     }
 }
 
-function playTtsChunk(base64Data, sampleRate) {
+/** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push segment; first/earliest/ttsNextStartTime already set by handler. */
+function playTtsChunk(base64Data, sampleRate, skipSegmentPush) {
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -4765,14 +4805,14 @@ function playTtsChunk(base64Data, sampleRate) {
     for (let i = 0; i < numSamples; i++) ch[i] = samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF);
     const duration = numSamples / sampleRate;
     let startTime = state.ttsNextStartTime;
-    if (startTime < ctx.currentTime) startTime = ctx.currentTime;
+    if (typeof startTime !== 'number' || startTime < 0 || startTime < ctx.currentTime) startTime = ctx.currentTime;
     state.ttsNextStartTime = startTime + duration;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
     source.start(startTime);
-    // Record TTS segment for purple AI waveform on AUDIO lane using actual playback time (when speaker plays)
-    if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory) {
+    // Record TTS segment for purple AI waveform (or skip when server sent amplitude_segments)
+    if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
         var nowSec = Date.now() / 1000;
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
@@ -4808,6 +4848,17 @@ function playTtsChunk(base64Data, sampleRate) {
             state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: ttlMs });
         }
         // No trimming: keep all TTS segments for full-session dense waveform on stop (Option 1, AMPLITUDE_DATA_SOURCES.md)
+    } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+        var bandStart = state.liveTtlBandStartTime;
+        var firstChunk = state.firstTtsPlayTimeThisResponse;
+        var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+        var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+        state.liveTtlBandStartTime = null;
+        state.voiceTurnActive = false;
+        state.lastAsrPartialTime = null;
+        state.firstTtsPlayTimeThisResponse = null;
+        state.earliestTtsPlayTimeAboveThreshold = null;
+        state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
     }
 }
 

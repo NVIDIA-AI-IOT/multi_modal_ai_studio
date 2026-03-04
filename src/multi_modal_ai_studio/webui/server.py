@@ -474,14 +474,8 @@ class WebUIServer:
             return web.json_response({"ok": False, "error": str(e)})
 
     async def handle_system_stats(self, request: web.Request) -> web.Response:
-        """Return current CPU and GPU utilization for the timeline system lane."""
-        try:
-            loop = asyncio.get_running_loop()
-            stats = await loop.run_in_executor(None, _gather_system_stats)
-            return web.json_response(stats)
-        except Exception as e:
-            logger.debug("System stats error: %s", e)
-            return web.json_response({"cpu_percent": None, "gpu_percent": None})
+        """Return CPU/GPU for timeline system lane. Disabled: no server-side gathering (avoids load). Client sends system_stats on stop from its own polling if needed."""
+        return web.json_response({"cpu_percent": None, "gpu_percent": None})
 
     async def handle_list_cameras(self, request: web.Request) -> web.Response:
         """List local USB video cameras (server). Used for Camera devices (Server USB) dropdown."""
