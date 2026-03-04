@@ -48,11 +48,11 @@ This guide explains how to set up and run Vision-Language Models (VLMs) with Mul
 
 ## Step 1: Get the vLLM Docker Image
 
-### Option A: Jetson (ARM64)
+### Option A: Jetson / Thor (ARM64)
 
 ```bash
-# Pull Jetson-optimized vLLM image
-docker pull ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor
+# Pull Jetson-optimized vLLM 0.14 image
+docker pull ghcr.io/nvidia-ai-iot/vllm:0.14.0-r38.3-arm64-sbsa-cu130-24.04
 ```
 
 ### Option B: Desktop GPU (x86_64)
@@ -84,16 +84,42 @@ Cosmos-Reason2 is a **gated model**. You must:
 ### For Jetson / Thor (ARM64):
 
 ```bash
-docker run -d --gpus all \
+docker run -d --runtime nvidia \
   --name vllm-cosmos \
   -p 8003:8000 \
   -e HUGGING_FACE_HUB_TOKEN=hf_your_token_here \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
-  ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor \
+  ghcr.io/nvidia-ai-iot/vllm:0.14.0-r38.3-arm64-sbsa-cu130-24.04 \
   python3 -m vllm.entrypoints.openai.api_server \
     --model nvidia/Cosmos-Reason2-8B \
     --max-model-len 8192 \
-    --gpu-memory-utilization 0.6 \
+    --gpu-memory-utilization 0.25 \
+    --reasoning-parser qwen3 \
+    --media-io-kwargs '{"video": {"num_frames": -1}}' \
+    --port 8000
+```
+
+#### Using the FP8 Model (Recommended for Jetson):
+
+The FP8 quantized model is faster and uses less memory:
+
+```bash
+# Download FP8 model from NGC (one-time)
+ngc registry model download-version "nim/nvidia/cosmos-reason2-8b:1208-fp8-static-kv8" \
+  --dest ~/.cache/huggingface/hub
+
+# Run with FP8 model
+docker run -d --runtime nvidia \
+  --name vllm-cosmos-fp8 \
+  -p 8003:8000 \
+  -v ~/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8:/model \
+  ghcr.io/nvidia-ai-iot/vllm:0.14.0-r38.3-arm64-sbsa-cu130-24.04 \
+  python3 -m vllm.entrypoints.openai.api_server \
+    --model /model \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.7 \
+    --reasoning-parser qwen3 \
+    --media-io-kwargs '{"video": {"num_frames": -1}}' \
     --port 8000
 ```
 
@@ -114,7 +140,11 @@ docker run -d --gpus all \
 
 > **Note**: First run downloads the model (~16GB). This may take several minutes.
 >
-> **Memory tuning**: On shared/unified-memory systems (Jetson Thor), use `--gpu-memory-utilization 0.6` to leave room for the OS, Riva, and the AI Studio app. On discrete GPUs with dedicated VRAM, `0.8` is safe. If you hit OOM, lower `--max-model-len` to `4096`.
+> **Memory tuning**: On shared/unified-memory systems (Jetson Thor), use `--gpu-memory-utilization 0.25` to leave room for the OS, Riva, and the AI Studio app. On discrete GPUs with dedicated VRAM, `0.8` is safe. If you hit OOM, lower `--max-model-len` to `4096`.
+>
+> **`--reasoning-parser qwen3`**: Enables parsing of `<think>...</think>` chain-of-thought tokens from Cosmos-Reason2, separating reasoning from the final answer.
+>
+> **`--media-io-kwargs '{"video": {"num_frames": -1}}'`**: Processes all video frames instead of sampling a subset.
 
 ### Verify vLLM is Running:
 
