@@ -48,7 +48,7 @@ docs/*.md
 sessions/*
 !sessions/example_session.json
 !sessions/example_session_2.json
-# mock_sessions/ is not ignored so you can commit sample session JSONs (e.g. for alpha)
+mock_sessions/*
 *.session.json
 user_presets/
 
