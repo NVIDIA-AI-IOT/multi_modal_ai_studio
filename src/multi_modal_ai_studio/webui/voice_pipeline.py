@@ -16,7 +16,7 @@ import struct
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from aiohttp import web
 
@@ -191,6 +191,29 @@ async def _run_voice_pipeline(
         except Exception as e:
             logger.warning("Send event failed: %s", e)
 
+    async def _feed_pcm_to_pipeline(
+        pcm_bytes: bytes,
+        last_amplitude_time: float,
+        amplitude_interval: float,
+    ) -> Tuple[float, bool, float, float]:
+        """Send PCM to ASR; if session is live, throttle, record amplitude, send user_amplitude to client.
+        Returns (new_last_amplitude_time, did_send_amplitude, amp_if_sent, now_if_sent)."""
+        await asr.send_audio(pcm_bytes)
+        if session.timeline.start_time is None:
+            return (last_amplitude_time, False, 0.0, 0.0)
+        now = time.time() - session.timeline.start_time
+        if now - last_amplitude_time < amplitude_interval:
+            return (last_amplitude_time, False, 0.0, 0.0)
+        amp = _pcm_rms_to_amplitude(pcm_bytes)
+        session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+        try:
+            await ws.send_str(
+                json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(amp, 2)})
+            )
+        except Exception as e:
+            logger.warning("Send user_amplitude failed: %s", e)
+        return (now, True, amp, now)
+
     async def receive_loop() -> None:
         """Read from WebSocket: config (first), then binary PCM or stop."""
         nonlocal conversation_history
@@ -253,42 +276,37 @@ async def _run_voice_pipeline(
                 if msg.type == web.WSMsgType.BINARY:
                     # When using Server USB mic, audio comes from server capture task; ignore browser PCM.
                     if not use_server_mic:
-                        await asr.send_audio(msg.data)
-                        # Record audio amplitude for timeline (throttled)
-                        if session.timeline.start_time is not None:
-                            now = time.time() - session.timeline.start_time
-                            if now - last_amplitude_time >= amplitude_interval:
-                                amp = _pcm_rms_to_amplitude(msg.data)
-                                session.timeline.add_audio_amplitude(amplitude=amp, source="user")
-                                last_amplitude_time = now
-                                # Log every high user amplitude so we can trace false green on replay (live was correct; replay shows bars = they're in saved timeline)
-                                if amp >= 20.0:
-                                    try:
-                                        n = len(msg.data) // 2
-                                        raw_rms = math.sqrt(sum(s * s for s in struct.unpack(f"{n}h", msg.data)) / n) if n else 0.0
-                                        logger.warning(
-                                            "[user_amplitude_high] session_t=%.2fs amp_0_100=%.2f raw_rms=%.1f chunk_len=%d (no ASR nearby => false green on replay)",
-                                            now, amp, raw_rms, len(msg.data),
-                                        )
-                                    except Exception:
-                                        pass
-                                # Debug: log user mic amplitude ~every 1s (INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md)
-                                if now - last_amplitude_log_time >= 1.0:
-                                    try:
-                                        n = len(msg.data) // 2
-                                        if n:
-                                            samples = struct.unpack(f"{n}h", msg.data)
-                                            sum_sq = sum(s * s for s in samples)
-                                            raw_rms = math.sqrt(sum_sq / n)
-                                        else:
-                                            raw_rms = 0.0
-                                        logger.info(
-                                            "[user_amplitude] session_t=%.1fs chunk_len=%d raw_rms=%.1f amp_0_100=%.2f",
-                                            now, len(msg.data), raw_rms, amp,
-                                        )
-                                        last_amplitude_log_time = now
-                                    except Exception:
-                                        pass
+                        last_amplitude_time, did_send, amp, now = await _feed_pcm_to_pipeline(
+                            msg.data, last_amplitude_time, amplitude_interval
+                        )
+                        # Log every high user amplitude so we can trace false green on replay (live was correct; replay shows bars = they're in saved timeline)
+                        if did_send and amp >= 20.0:
+                            try:
+                                n = len(msg.data) // 2
+                                raw_rms = math.sqrt(sum(s * s for s in struct.unpack(f"{n}h", msg.data)) / n) if n else 0.0
+                                logger.warning(
+                                    "[user_amplitude_high] session_t=%.2fs amp_0_100=%.2f raw_rms=%.1f chunk_len=%d (no ASR nearby => false green on replay)",
+                                    now, amp, raw_rms, len(msg.data),
+                                )
+                            except Exception:
+                                pass
+                        # Debug: log user mic amplitude ~every 1s (INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md)
+                        if did_send and now - last_amplitude_log_time >= 1.0:
+                            try:
+                                n = len(msg.data) // 2
+                                if n:
+                                    samples = struct.unpack(f"{n}h", msg.data)
+                                    sum_sq = sum(s * s for s in samples)
+                                    raw_rms = math.sqrt(sum_sq / n)
+                                else:
+                                    raw_rms = 0.0
+                                logger.info(
+                                    "[user_amplitude] session_t=%.1fs chunk_len=%d raw_rms=%.1f amp_0_100=%.2f",
+                                    now, len(msg.data), raw_rms, amp,
+                                )
+                                last_amplitude_log_time = now
+                            except Exception:
+                                pass
                 if msg.type in (web.WSMsgType.CLOSE, web.WSMsgType.ERROR):
                     stopped.set()
                     return
@@ -611,25 +629,15 @@ async def _run_voice_pipeline(
                 break
             first_get = False
             if pipeline_live.is_set():
-                await asr.send_audio(chunk)
-                if session.timeline.start_time is not None:
-                    now = time.time() - session.timeline.start_time
-                    # Reset throttle when switching from preview to live (last_amplitude_time was in preview seconds, now is session-relative)
-                    if last_amplitude_time > 1.0:
-                        last_amplitude_time = 0.0
-                    if now - last_amplitude_time >= amplitude_interval:
-                        amp = _pcm_rms_to_amplitude(chunk)
-                        session.timeline.add_audio_amplitude(amplitude=amp, source="user")
-                        last_amplitude_time = now
-                        try:
-                            await ws.send_str(
-                                json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(amp, 2)})
-                            )
-                            if not _user_amplitude_sent:
-                                _user_amplitude_sent = True
-                                logger.info("First user_amplitude sent to client (live); amp=%.2f", amp)
-                        except Exception as e:
-                            logger.warning("Send user_amplitude failed: %s", e)
+                # Reset throttle when switching from preview to live (last_amplitude_time was in preview seconds, now is session-relative)
+                if last_amplitude_time > 1.0:
+                    last_amplitude_time = 0.0
+                last_amplitude_time, did_send, amp, _ = await _feed_pcm_to_pipeline(
+                    chunk, last_amplitude_time, amplitude_interval
+                )
+                if did_send and not _user_amplitude_sent:
+                    _user_amplitude_sent = True
+                    logger.info("First user_amplitude sent to client (live); amp=%.2f", amp)
             else:
                 # Preview: stream amplitude only (50 Hz), timestamp relative to connection
                 now = time.time() - preview_start_time
