@@ -231,6 +231,8 @@ async def _run_voice_pipeline(
             if t < 0:
                 continue
             if t - last_amplitude_time >= amplitude_interval:
+                # Clamp so timestamps are strictly increasing (avoids non-monotonic when now jitters)
+                t = max(t, last_amplitude_time + amplitude_interval)
                 last_amplitude_time = t
                 amp = a
                 did_send = True
@@ -260,6 +262,8 @@ async def _run_voice_pipeline(
             if t < 0:
                 continue
             if t - last_amplitude_time >= amplitude_interval:
+                # Clamp so timestamps are strictly increasing (avoids non-monotonic when now jitters)
+                t = max(t, last_amplitude_time + amplitude_interval)
                 last_amplitude_time = t
                 amp = a
                 did_send = True

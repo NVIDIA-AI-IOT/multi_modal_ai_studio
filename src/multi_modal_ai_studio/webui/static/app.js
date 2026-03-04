@@ -2805,6 +2805,9 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const inTts = ttsTimeRanges.length > 0 && isInsideTtsSegment(t);
 
         if (!inLive && !hasStoppedLiveData && isUser) {
+            // Replay: skip sparse user bars when we draw the dense user waveform (2b1). Otherwise we get
+            // near-duplicate bars (sparse at e.g. 0.04021 and dense at 0.025/0.05 grid) with 3–5 ms offset.
+            if (replayAudioAmplitudeHistory && replayAudioAmplitudeHistory.length > 0) return;
             // During TTS: hide only low user amplitude (ambient); show significant level (possible interruption)
             if (inTts && amp < userVoiceTh) return;
             // NOTE: Near-full user amplitude with no nearby asr_final is NOT hidden here — it indicates a bug
