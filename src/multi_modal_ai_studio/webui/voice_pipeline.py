@@ -71,7 +71,8 @@ class TTSChunkBuffer:
     eagerly at natural break characters when enough words have accumulated.
     """
 
-    FIRST_CHUNK_WORDS = 6
+    FIRST_CHUNK_WORDS = 10
+    MIN_BREAK_WORDS = 6
     MAX_CHUNK_WORDS = 18
     TTS_BREAKS = frozenset(".!?,;:\n\u2014-")
 
@@ -84,7 +85,7 @@ class TTSChunkBuffer:
         self._buf += token
         words = len(self._buf.split())
         limit = self.FIRST_CHUNK_WORDS if not self._first_sent else self.MAX_CHUNK_WORDS
-        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= 2
+        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self.MIN_BREAK_WORDS
         if hit_break or words >= limit:
             chunk = self._buf.strip()
             self._buf = ""
@@ -764,15 +765,13 @@ async def _run_voice_pipeline(
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
     
-    # Cosmos-Reason models benefit from video encoding with many frames.
-    # Raise browser capture FPS to match USB camera (~10fps) so both
-    # camera sources provide similar temporal resolution.  Non-Cosmos
-    # VLMs keep the user-configured FPS (default 3) since they only
-    # use a small number of individual images.
-    _model_lower_init = (llm_config.model or "").lower()
-    _is_cosmos_init = "cosmos" in _model_lower_init and "reason" in _model_lower_init
-    COSMOS_BROWSER_FPS = 10.0
-    if _is_cosmos_init and vision_buffer_fps < COSMOS_BROWSER_FPS:
+    # Video-encoding models (vision_video_encode=true in config/preset)
+    # benefit from more frames.  Raise browser capture FPS to match USB
+    # camera (~10fps).  Non-video VLMs keep the user-configured FPS
+    # (default 3) since they only use a small number of individual images.
+    _use_video_encode = bool(getattr(llm_config, "vision_video_encode", False))
+    COSMOS_BROWSER_FPS = 5.0
+    if _use_video_encode and vision_buffer_fps < COSMOS_BROWSER_FPS:
         logger.info(
             "[VLM] Cosmos model detected: raising browser capture FPS from %.1f to %.1f",
             vision_buffer_fps, COSMOS_BROWSER_FPS,
@@ -1246,17 +1245,20 @@ async def _run_voice_pipeline(
                 # VLM: Request frames (time-synchronized with speech)
                 image_data_urls: list = []
                 speech_duration_secs: float = 0.0
-                _model_lower = (llm_config.model or "").lower()
-                is_cosmos = "cosmos" in _model_lower and "reason" in _model_lower
+                is_cosmos = _use_video_encode
                 if vision_enabled:
-                    # Calculate speech time window
-                    t_end = ts_llm_start  # End time is now (ASR final arrived)
-                    # Use speech_start_time if tracked, otherwise use a default window
+                    # Use the ASR final's original timestamp as end-of-speech,
+                    # NOT ts_llm_start (which is when the turn is dequeued).
+                    # When TTS from a previous turn is still playing, the turn
+                    # sits in the queue for seconds, inflating the window.
+                    asr_event_ts = (result.metadata or {}).get("event_timestamp")
+                    t_end = asr_event_ts if asr_event_ts is not None else ts_llm_start
                     t_start = speech_start_time if speech_start_time is not None else max(0, t_end - 3.0)
-                    # ASR produces its first partial ~0.5s after the user actually
-                    # starts speaking.  Pull t_start back to capture those early
-                    # frames so the video has full context.
-                    ASR_LATENCY_LOOKBACK = 0.5  # seconds
+                    # Pull t_start back before speech start to capture frames
+                    # from before the user started speaking.  This ensures the
+                    # model sees the full action context (e.g. user picks up an
+                    # object then asks "what did I just do?").
+                    ASR_LATENCY_LOOKBACK = 1.0  # seconds
                     t_start = max(0, t_start - ASR_LATENCY_LOOKBACK)
                     speech_duration_secs = t_end - t_start
                     
@@ -1489,10 +1491,17 @@ async def _run_voice_pipeline(
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 
-                # Build text-only history from recent turns (no images/video
-                # from past turns — only current turn gets multimodal input).
-                history_slice = conversation_history[-(max_history * 2):] if max_history > 0 else None
+                # Text-only history anchors VLM answers to prior responses,
+                # causing repeated outputs even when the visual scene changes.
+                # Skip history when vision input is present — the video/images
+                # provide all the temporal context the model needs.
+                if image_data_urls:
+                    history_slice = None
+                else:
+                    history_slice = conversation_history[-(max_history * 2):] if max_history > 0 else None
 
+                reasoning_text = ""
+                reasoning_start_logged = False
                 try:
                     async for token in llm.generate_stream(
                         prompt=text,
@@ -1503,6 +1512,13 @@ async def _run_voice_pipeline(
                     ):
                         if stopped.is_set():
                             break
+                        if token.metadata and token.metadata.get("reasoning_start") and not reasoning_start_logged:
+                            reasoning_start_logged = True
+                            ts_rs = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                            logger.info("[timing] reasoning_start @ %.2fs (prefill took %.2fs)", ts_rs, ts_rs - ts_llm_start)
+                            await send_event({"event_type": "reasoning_start", "lane": "llm", "data": {}, "timestamp": ts_rs})
+                        if token.is_final and token.metadata:
+                            reasoning_text = token.metadata.get("reasoning", "")
                         if token.token:
                             full_response += token.token
                             if not llm_first_token_sent:
@@ -1524,7 +1540,13 @@ async def _run_voice_pipeline(
                                         await ws.send_str(json.dumps({"type": "tts_start"}))
                                     await tts_q.put(ready)
 
-                    session.timeline.add_event("llm_complete", Lane.LLM, data={"text": full_response})
+                    llm_complete_data: dict = {"text": full_response}
+                    if reasoning_text:
+                        llm_complete_data["reasoning"] = reasoning_text
+                        logger.info("[reasoning] %d chars: %.200s%s",
+                                    len(reasoning_text), reasoning_text,
+                                    "..." if len(reasoning_text) > 200 else "")
+                    session.timeline.add_event("llm_complete", Lane.LLM, data=llm_complete_data)
                 except Exception as e:
                     logger.exception("LLM error: %s", e)
                     full_response = full_response or "Sorry, I had an error."
@@ -1535,7 +1557,10 @@ async def _run_voice_pipeline(
                 await send_event({"event_type": "llm_complete", "lane": "llm", "data": {"text": full_response}, "timestamp": ts_llm_complete})
 
                 session.update_turn_response(full_response)
-                await send_event({"event_type": "chat", "user": text, "assistant": full_response})
+                chat_event: dict = {"event_type": "chat", "user": text, "assistant": full_response}
+                if reasoning_text:
+                    chat_event["reasoning"] = reasoning_text
+                await send_event(chat_event)
 
                 if not full_response.strip():
                     session.end_turn()

@@ -132,6 +132,7 @@ class WebUIServer:
         port: int = 8080,
         session_dir: Path = None,
         ssl_context: Optional[object] = None,
+        initial_config: Optional[dict] = None,
     ):
         """Initialize web server.
 
@@ -140,12 +141,14 @@ class WebUIServer:
             port: Port to listen on
             session_dir: Directory containing session JSON files
             ssl_context: Optional ssl.SSLContext for HTTPS (e.g. self-signed cert)
+            initial_config: Optional preset/config dict loaded from YAML (served to frontend)
         """
         self.host = host
         self.port = port
         self.session_dir = session_dir or Path("sessions")
         self._session_dir_override: Optional[str] = None  # "sessions" | "mock_sessions" | None
         self.ssl_context = ssl_context
+        self.initial_config = initial_config
         self.app = web.Application()
         self.app["session_dir"] = self.session_dir
         self.app["_server"] = self  # so voice pipeline can read current effective session dir
@@ -176,6 +179,7 @@ class WebUIServer:
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
         self.app.router.add_get('/api/config/prefills', self.handle_config_prefills)
+        self.app.router.add_get('/api/config/initial', self.handle_initial_config)
         self.app.router.add_get('/ws/voice', handle_voice_ws)
         self.app.router.add_get('/ws/mic-preview', handle_mic_preview_ws)
         self.app.router.add_get('/ws/camera-webrtc', handle_camera_webrtc_ws)
@@ -330,6 +334,12 @@ class WebUIServer:
             "session_dir": effective.name,
             "override": self._session_dir_override,
         })
+
+    async def handle_initial_config(self, request: web.Request) -> web.Response:
+        """GET /api/config/initial: return preset/config loaded from CLI --preset or --config."""
+        if self.initial_config:
+            return web.json_response(self.initial_config)
+        return web.json_response({})
 
     async def handle_llm_models(self, request: web.Request) -> web.Response:
         """List available LLM models at the given API base URL (Ollama, vLLM, OpenAI, etc.)."""

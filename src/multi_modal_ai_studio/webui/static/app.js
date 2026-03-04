@@ -469,9 +469,10 @@ const defaultConfig = {
         vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.',
         vision_detail: 'auto',
         vision_frames: 4,
-        vision_quality: 0.7,
+        vision_quality: 0.8,
         vision_max_width: 640,
-        vision_buffer_fps: 3.0
+        vision_buffer_fps: 3.0,
+        enable_reasoning: false
     },
     tts: {
         backend: 'riva',
@@ -502,6 +503,9 @@ const defaultConfig = {
 
 // Current editable configuration (for new session)
 let currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+
+// Server-side preset config loaded from --preset CLI arg (null until fetched)
+let _serverPresetConfig = null;
 
 // Default config saved by user (for "New Voice Chat with Default Configuration" later)
 const DEFAULT_VOICE_CHAT_CONFIG_KEY = 'defaultVoiceChatConfig';
@@ -551,6 +555,53 @@ function applySystemPromptPreset(index) {
     updateConfig('llm', 'system_prompt', text);
     var el = document.getElementById('llm-system-prompt');
     if (el) el.value = text;
+}
+
+function _deepMerge(target, source) {
+    const result = { ...target };
+    for (const key of Object.keys(source)) {
+        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])
+            && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+            result[key] = _deepMerge(target[key], source[key]);
+        } else {
+            result[key] = source[key];
+        }
+    }
+    return result;
+}
+
+function _normalizePresetToFrontend(preset) {
+    const out = JSON.parse(JSON.stringify(preset));
+    if (out.asr) {
+        if (out.asr.scheme && !out.asr.backend) out.asr.backend = out.asr.scheme;
+        if (out.asr.server && !out.asr.riva_server) out.asr.riva_server = out.asr.server;
+    }
+    if (out.tts) {
+        if (out.tts.scheme && !out.tts.backend) out.tts.backend = out.tts.scheme;
+        if (out.tts.server && !out.tts.riva_server) out.tts.riva_server = out.tts.server;
+    }
+    if (out.llm && out.llm.scheme && !out.llm.backend) out.llm.backend = out.llm.scheme;
+    return out;
+}
+
+async function fetchAndApplyInitialConfig() {
+    try {
+        const resp = await fetch('/api/config/initial');
+        if (!resp.ok) return;
+        const preset = await resp.json();
+        if (!preset || Object.keys(preset).length === 0) return;
+
+        _serverPresetConfig = _normalizePresetToFrontend(preset);
+        console.log('[Preset] Server preset loaded:', _serverPresetConfig.name || '(unnamed)');
+
+        currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
+
+        if (state.isLiveSession) {
+            renderConfig();
+        }
+    } catch (e) {
+        console.warn('[Preset] Failed to fetch initial config:', e);
+    }
 }
 
 /** Pin an LLM field (e.g. system_prompt, extra_request_body) to the saved default so it is used in other sessions. */
@@ -1120,6 +1171,13 @@ function renderLLMConfig(config, readonly = false) {
                 <input type="range" ${disabled} id="llm-vision-max-width" min="320" max="1280" step="64" value="${config.vision_max_width || 640}"
                        oninput="updateConfig('llm', 'vision_max_width', parseInt(this.value)); document.getElementById('vision-max-width-value').textContent = this.value + 'px';">
                 <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
+
+                <label class="checkbox-label" style="margin-top: 12px;">
+                    <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'enable_reasoning', this.checked)">
+                    Enable Reasoning (chain-of-thought)
+                </label>
+                ${!readonly ? '<span class="input-hint">Model thinks in &lt;think&gt; tags before answering. Improves accuracy but increases latency.</span>' : ''}
             </div>
 
             <div class="form-group">
@@ -4806,10 +4864,13 @@ function startNewSession() {
     state.sessionState = 'setup';
     state.selectedSession = null;
 
-    // Restore saved default config when present so system prompt and other edits persist across reloads
+    // Restore saved default config; apply env prefills; then layer server preset if present
     const saved = getDefaultConfig();
     currentConfig = saved ? JSON.parse(JSON.stringify(saved)) : JSON.parse(JSON.stringify(defaultConfig));
     applyEnvPrefillsToCurrentConfig();
+    if (_serverPresetConfig) {
+        currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
+    }
 
     // Clear chat history
     document.getElementById('chat-history').innerHTML = `
@@ -5001,12 +5062,14 @@ function handleVoiceWsMessage(ev) {
             } else if (evt.event_type === 'chat') {
                 var userText = evt.user != null ? String(evt.user) : (evt.data && evt.data.user != null ? String(evt.data.user) : null);
                 var assistantText = evt.assistant != null ? String(evt.assistant) : (evt.data && evt.data.assistant != null ? String(evt.data.assistant) : '');
+                var reasoningText = evt.reasoning != null ? String(evt.reasoning) : '';
                         if (userText != null) {
                             var last = state.liveChatTurns[state.liveChatTurns.length - 1];
                             if (last && last.assistant === '' && last.user === userText) {
                                 last.assistant = assistantText;
+                                if (reasoningText) last.reasoning = reasoningText;
                             } else {
-                                state.liveChatTurns.push({ user: userText, assistant: assistantText });
+                                state.liveChatTurns.push({ user: userText, assistant: assistantText, reasoning: reasoningText || '' });
                             }
                             renderLiveChat();
                             requestAnimationFrame(function () { updateLiveSessionUI(); });
@@ -5485,6 +5548,10 @@ function renderLiveChat() {
     } else {
         chatEl.innerHTML = state.liveChatTurns.map(t => {
             var assistantDisplay = t.assistant ? escapeHtml(t.assistant) : '<span class="chat-placeholder">…</span>';
+            var reasoningHtml = '';
+            if (t.reasoning) {
+                reasoningHtml = `<details class="reasoning-block"><summary>Reasoning</summary><pre class="reasoning-text">${escapeHtml(t.reasoning)}</pre></details>`;
+            }
             return `
             <div class="chat-bubble user">
                 <div class="chat-avatar"><i data-lucide="user" class="lucide-inline"></i></div>
@@ -5492,7 +5559,7 @@ function renderLiveChat() {
             </div>
             <div class="chat-bubble ai">
                 <div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div>
-                <div class="chat-content"><div class="chat-text">${assistantDisplay}</div></div>
+                <div class="chat-content">${reasoningHtml}<div class="chat-text">${assistantDisplay}</div></div>
             </div>
         `;
         }).join('');
@@ -6500,6 +6567,7 @@ function refreshPipelineDisplay() {
         el.innerHTML = getPipelineTableHtml(currentConfig, { condensed: false, deviceLabels: deviceLabels, deviceTypes: deviceTypes });
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         requestAnimationFrame(function () { updatePipelineSegShapes(el); updatePipelineLabelTrimming(el); });
+        if (_warmupResult) updatePipelineLLMStatus(_warmupResult);
         updateImagePlaceholderContent();
     } else if (state.selectedSession && state.selectedSession.config) {
         var c = state.selectedSession.config;
@@ -6540,11 +6608,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 
-    // Warm up LLM model on page load (reduces first-response latency)
-    console.log('Scheduling LLM warmup...');
-    setTimeout(() => {
-        warmupLLM();
-    }, 2000);  // Wait 2 seconds for page to fully load
+    // Fetch server-side preset config (from --preset CLI arg) and apply before warmup
+    fetchAndApplyInitialConfig().then(() => {
+        console.log('Scheduling LLM warmup...');
+        setTimeout(() => {
+            warmupLLM();
+        }, 500);
+    });
 
     var pipelineEl = document.getElementById('pipeline-config');
     if (pipelineEl && typeof ResizeObserver !== 'undefined') {
