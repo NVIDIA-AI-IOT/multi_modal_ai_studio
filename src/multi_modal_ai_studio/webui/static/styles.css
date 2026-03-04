@@ -2442,6 +2442,31 @@ code, pre {
     transform: scale(0.95);
 }
 
+/* System prompt preset buttons [1] [2] [3] */
+.system-prompt-preset-btn {
+    min-width: 32px;
+    height: 28px;
+    padding: 0 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.system-prompt-preset-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+.system-prompt-preset-sep {
+    color: var(--text-tertiary);
+    font-size: 0.85rem;
+    user-select: none;
+}
+
 /* API Base URL presets (Live RIVA WebUI-style) */
 .api-presets-menu {
     position: absolute;
