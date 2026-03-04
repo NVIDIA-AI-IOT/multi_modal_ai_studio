@@ -2153,10 +2153,12 @@ function renderTimeline() {
     const liveAmplitude = (inLive || hasStoppedLiveData) ? state.liveAudioAmplitudeHistory : null;
     const liveTtsSegments = (inLive || hasStoppedLiveData) ? state.liveTtsAmplitudeHistory : null;
     const liveSystemStats = (inLive || hasStoppedLiveData) ? state.liveSystemStats : (state.selectedSession && state.selectedSession.system_stats) || null;
-    const replayTtsSegments = (!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.tts_playback_segments) ? state.selectedSession.tts_playback_segments : null;
-    const rawReplayUserAmplitude = (!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.audio_amplitude_history) ? state.selectedSession.audio_amplitude_history : null;
-    const replayAudioAmplitudeHistory = rawReplayUserAmplitude;
-    const replayUserAmplitudeForTtl = (!inLive && !hasStoppedLiveData && state.selectedSession && timeline && timeline.length) ? buildMergedUserAmplitudeForReplay(rawReplayUserAmplitude || [], timeline) : rawReplayUserAmplitude;
+    // Replay: use timeline as single source for waveforms (simplifies session JSON). Fallback to client-sent lists for old sessions.
+    const timelineUserAmp = (!inLive && !hasStoppedLiveData && timeline && timeline.length) ? buildUserAmplitudeFromTimeline(timeline) : [];
+    const replayAudioAmplitudeHistory = (timelineUserAmp.length > 0) ? timelineUserAmp : ((!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.audio_amplitude_history) ? state.selectedSession.audio_amplitude_history : null);
+    const timelineTtsSegments = (!inLive && !hasStoppedLiveData && timeline && timeline.length) ? buildTtsSegmentsFromTimeline(timeline) : [];
+    const replayTtsSegments = (timelineTtsSegments.length > 0) ? timelineTtsSegments : ((!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.tts_playback_segments) ? state.selectedSession.tts_playback_segments : null);
+    const replayUserAmplitudeForTtl = replayAudioAmplitudeHistory;
     const liveSessionTime = (state.liveSessionStartTime > 0) ? (Date.now() / 1000 - state.liveSessionStartTime) : null;
     drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP, PADDING_LEFT,
                        PADDING_RIGHT, width, timeScale, state.timelineOffset, laneColors, combineSpeechLanes,
@@ -2215,22 +2217,31 @@ function renderTimeline() {
     updateTimelineScrollbar(maxTime, visibleTimeWindow);
 }
 
-// Merge session audio_amplitude_history with timeline user amplitude events so replay has full coverage (fixes trimmed history and consistent density)
-function buildMergedUserAmplitudeForReplay(history, timeline) {
-    if (!timeline || !timeline.length) return history || [];
+// Single source: build user amplitude list from timeline (server already has every user_amplitude). Fallback to session.audio_amplitude_history for old sessions.
+function buildUserAmplitudeFromTimeline(timeline) {
+    if (!timeline || !timeline.length) return [];
     const userEvents = timeline.filter(function (e) {
         return e.event_type === 'audio_amplitude' && e.source !== 'tts' && e.source !== 'ai';
     });
-    if (!userEvents.length) return history || [];
-    const fromTimeline = userEvents.map(function (e) {
+    return userEvents.map(function (e) {
         var a = e.amplitude != null ? Number(e.amplitude) : 0;
         if (a > 0 && a < 1) a = a * 100;
         return { timestamp: e.timestamp != null ? Number(e.timestamp) : 0, amplitude: a };
+    }).sort(function (a, b) { return a.timestamp - b.timestamp; });
+}
+
+// Build TTS segments from timeline (tts_start / tts_complete pairs). Fallback to session.tts_playback_segments for old sessions.
+function buildTtsSegmentsFromTimeline(timeline) {
+    if (!timeline || !timeline.length) return [];
+    const starts = timeline.filter(function (e) { return e.event_type === 'tts_start'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+    const completes = timeline.filter(function (e) { return e.event_type === 'tts_complete'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+    if (!starts.length) return [];
+    return starts.map(function (s, i) {
+        const startTime = s.timestamp != null ? Number(s.timestamp) : 0;
+        const endEvent = completes[i];
+        const endTime = endEvent && endEvent.timestamp != null ? Number(endEvent.timestamp) : startTime + 0.1;
+        return { startTime: startTime, endTime: endTime, amplitude: 50 };
     });
-    const getT = function (s) { return s.timestamp != null ? s.timestamp : s[0]; };
-    const combined = (history && history.length ? history.slice() : []).concat(fromTimeline);
-    combined.sort(function (a, b) { return getT(a) - getT(b); });
-    return combined;
 }
 
 // Get amplitude at time t from live history (nearest sample or linear interpolate)
@@ -4878,8 +4889,6 @@ function stopSessionRecording() {
         state.voiceWs.send(JSON.stringify({
             type: 'stop',
             system_stats: state.liveSystemStats || [],
-            tts_playback_segments: state.liveTtsAmplitudeHistory || [],
-            audio_amplitude_history: state.liveAudioAmplitudeHistory || [],
             ttl_bands: state.liveTtlBands || []
         }));
         // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for
