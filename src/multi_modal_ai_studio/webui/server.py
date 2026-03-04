@@ -34,16 +34,10 @@ from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# High-frequency endpoints to omit from access log (reduces noise during live session)
-_ACCESS_LOG_SKIP_PATHS = frozenset({"/api/system/stats"})
-
-
 class _QuietAccessLogger(AbstractAccessLogger):
-    """Access logger that skips high-frequency polling endpoints (e.g. /api/system/stats)."""
+    """Access logger for HTTP requests (can skip high-frequency paths if needed)."""
 
     def log(self, request: web.BaseRequest, response: web.StreamResponse, time: float) -> None:
-        if request.path in _ACCESS_LOG_SKIP_PATHS:
-            return
         try:
             size = getattr(response, "body_length", None) or getattr(response, "_body_length", None)
             if size is None:
@@ -61,45 +55,6 @@ class _QuietAccessLogger(AbstractAccessLogger):
             )
         except Exception:
             pass
-
-try:
-    import psutil
-except ImportError:
-    psutil = None
-
-
-def _gather_system_stats() -> Dict[str, Any]:
-    """Gather CPU and GPU utilization (run in executor). Returns cpu_percent and gpu_percent (0-100 or None).
-    CPU: system-wide average over a short interval (psutil.cpu_percent(interval=0.05)) so the first call
-    returns a real value and readings are smoothed. With interval=None the first call returns 0 and
-    readings can be spikey (e.g. always 100% if sampled at busy moments).
-    GPU: first GPU utilization from nvidia-smi (percentage 0-100)."""
-    cpu_percent = None
-    if psutil is not None:
-        try:
-            # Block 50ms to get a proper average; avoids first-call 0 and reduces "always 100%" spikes
-            cpu_percent = round(psutil.cpu_percent(interval=0.05), 1)
-        except Exception:
-            pass
-    gpu_percent = None
-    try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            # First GPU only; nvidia-smi may return " 45 %" or "45"
-            val = out.stdout.strip().split("\n")[0].strip().replace("%", "").strip()
-            try:
-                gpu_percent = float(val)
-            except ValueError:
-                gpu_percent = None
-    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
-        pass
-    return {"cpu_percent": cpu_percent, "gpu_percent": gpu_percent}
-
 
 def get_app_config_dir() -> Path:
     """Get the application config directory following OS conventions (same as Live RIVA WebUI)."""
@@ -207,7 +162,6 @@ class WebUIServer:
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
         self.app.router.add_get('/api/health/llm', self.handle_health_llm)
         self.app.router.add_get('/api/health/riva', self.handle_health_riva)
-        self.app.router.add_get('/api/system/stats', self.handle_system_stats)
         self.app.router.add_get('/api/devices/cameras', self.handle_list_cameras)
         self.app.router.add_get('/api/devices/audio-inputs', self.handle_list_audio_inputs)
         self.app.router.add_get('/api/devices/audio-outputs', self.handle_list_audio_outputs)
@@ -473,10 +427,6 @@ class WebUIServer:
         except Exception as e:
             return web.json_response({"ok": False, "error": str(e)})
 
-    async def handle_system_stats(self, request: web.Request) -> web.Response:
-        """Return CPU/GPU for timeline system lane. Disabled: no server-side gathering (avoids load). Client sends system_stats on stop from its own polling if needed."""
-        return web.json_response({"cpu_percent": None, "gpu_percent": None})
-
     async def handle_list_cameras(self, request: web.Request) -> web.Response:
         """List local USB video cameras (server). Used for Camera devices (Server USB) dropdown."""
         try:
@@ -600,7 +550,6 @@ class WebUIServer:
 
     async def start(self):
         """Start the web server."""
-        # Custom access log: skip high-frequency /api/system/stats; same format for others
         runner = web.AppRunner(
             self.app,
             access_log_class=_QuietAccessLogger,

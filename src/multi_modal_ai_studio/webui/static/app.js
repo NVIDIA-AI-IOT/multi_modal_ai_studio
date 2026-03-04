@@ -4227,29 +4227,6 @@ function scheduleLiveTimelineTick() {
     }
 }
 
-const LIVE_SYSTEM_STATS_POLL_MS = 100;
-const LIVE_SYSTEM_STATS_MAX_SAMPLES = 900; // ~90 s at 100ms
-
-function startLiveSystemStatsPoll() {
-    stopLiveSystemStatsPoll();
-    state.liveSystemStatsPollIntervalId = setInterval(function () {
-        if (state.liveSessionStartTime <= 0 || !state.liveSystemStats) return;
-        fetch(getApiBase() + '/api/system/stats')
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var t = (Date.now() / 1000) - state.liveSessionStartTime;
-                state.liveSystemStats.push({
-                    t: t,
-                    cpu: data.cpu_percent != null ? data.cpu_percent : null,
-                    gpu: data.gpu_percent != null ? data.gpu_percent : null
-                });
-                if (state.liveSystemStats.length > LIVE_SYSTEM_STATS_MAX_SAMPLES)
-                    state.liveSystemStats = state.liveSystemStats.slice(-LIVE_SYSTEM_STATS_MAX_SAMPLES);
-            })
-            .catch(function () {});
-    }, LIVE_SYSTEM_STATS_POLL_MS);
-}
-
 function stopLiveSystemStatsPoll() {
     if (state.liveSystemStatsPollIntervalId != null) {
         clearInterval(state.liveSystemStatsPollIntervalId);
@@ -4284,8 +4261,6 @@ function handleVoiceWsMessage(ev) {
                     cpu: msg.cpu_percent != null ? msg.cpu_percent : null,
                     gpu: msg.gpu_percent != null ? msg.gpu_percent : null
                 });
-                if (state.liveSystemStats.length > LIVE_SYSTEM_STATS_MAX_SAMPLES)
-                    state.liveSystemStats = state.liveSystemStats.slice(-LIVE_SYSTEM_STATS_MAX_SAMPLES);
                 renderTimeline();
             }
         } else if (msg.type === 'user_amplitude') {
