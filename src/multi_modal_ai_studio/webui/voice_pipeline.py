@@ -44,6 +44,7 @@ from multi_modal_ai_studio.config.schema import (
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.core.session import Session
 from multi_modal_ai_studio.core.timeline import Lane
+from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
@@ -317,7 +318,7 @@ async def _run_voice_pipeline(
                                 logger.info("Voice pipeline: start_session received; pipeline live (ASR + timeline)")
                         if obj.get("type") == "stop":
                             stats = obj.get("system_stats")
-                            if isinstance(stats, list):
+                            if isinstance(stats, list) and (not getattr(session, "system_stats", None) or len(session.system_stats) == 0):
                                 session.system_stats = stats
                             tts_segments = obj.get("tts_playback_segments")
                             if isinstance(tts_segments, list):
@@ -716,6 +717,36 @@ async def _run_voice_pipeline(
     recv_task = asyncio.create_task(receive_loop())
     asr_task: Optional[asyncio.Task] = None
     turn_task: Optional[asyncio.Task] = None
+    system_stats_task: Optional[asyncio.Task] = None
+
+    async def _system_stats_loop() -> None:
+        """Send CPU/GPU at 10 Hz over WebSocket and append to session.system_stats for save."""
+        loop = asyncio.get_event_loop()
+        interval = 0.1
+        while not stopped.is_set():
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
+            if stopped.is_set():
+                break
+            if session.timeline.start_time is None:
+                continue
+            try:
+                stats = await loop.run_in_executor(None, system_stats_module.gather_system_stats)
+            except Exception as e:
+                logger.debug("System stats gather failed: %s", e)
+                continue
+            t = time.time() - session.timeline.start_time
+            cpu = stats.get("cpu_percent")
+            gpu = stats.get("gpu_percent")
+            session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
+            try:
+                await ws.send_str(
+                    json.dumps({"type": "system_stats", "timestamp": t, "cpu_percent": cpu, "gpu_percent": gpu})
+                )
+            except Exception as e:
+                logger.debug("Send system_stats failed: %s", e)
 
     # Wait for client to send start_session (both mics); then start ASR stream and turn executor
     await asyncio.wait(
@@ -723,14 +754,22 @@ async def _run_voice_pipeline(
         return_when=asyncio.FIRST_COMPLETED,
     )
     if not stopped.is_set():
+        session.system_stats = []
         await asr.start_stream()
         asr_task = asyncio.create_task(asr_consumer())
         turn_task = asyncio.create_task(turn_executor())
+        system_stats_task = asyncio.create_task(_system_stats_loop())
         await stopped.wait()
     if stop_capture is not None:
         stop_capture.set()
     if server_capture_task is not None:
         server_capture_task.cancel()
+    if system_stats_task is not None:
+        system_stats_task.cancel()
+        try:
+            await system_stats_task
+        except asyncio.CancelledError:
+            pass
     await asr.stop_stream()
     recv_task.cancel()
     if asr_task is not None:

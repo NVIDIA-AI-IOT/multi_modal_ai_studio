@@ -1,9 +1,9 @@
 """
-Shared CPU/GPU stats gathering for timeline and /api/system/stats.
+CPU/GPU stats for timeline system lane.
 
-Single source of load: only the voice pipeline calls gather_system_stats() at 10 Hz
-during a live session and updates the cache. The HTTP endpoint returns the cache
-when fresh so browser polling does not double the query rate (no 20 Hz).
+The voice pipeline calls gather_system_stats() at 10 Hz during a live session,
+sends each sample over the voice WebSocket (type=system_stats), and appends to
+session.system_stats for save. No HTTP polling; client renders from WS messages.
 """
 
 import subprocess

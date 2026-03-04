@@ -3549,20 +3549,18 @@ function drawMicWaveform() {
         console.log('[MicWaveform] Drawing server waveform (buffer len=' + ring.length + '); if you see this but no green bars, check canvas/overlay.');
     }
     var green = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
-    ctx.strokeStyle = green;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([2, 3]);
+    ctx.fillStyle = green;
     var waveformLeft = margin + innerPadding;
     var waveformWidth = Math.max(0, drawW - innerPadding * 2);
-    var step = ring.length > 1 ? waveformWidth / (ring.length - 1) : 0;
+    var barWidthPx = 2;
+    var step = ring.length > 1 ? Math.max(barWidthPx, (waveformWidth - barWidthPx) / (ring.length - 1)) : barWidthPx;
     for (var j = 0; j < ring.length; j++) {
         var x = waveformLeft + j * step;
-        var yTop = centerY - ring[j] * scale;
-        var yBottom = centerY + ring[j] * scale;
-        ctx.beginPath();
-        ctx.moveTo(x, yTop);
-        ctx.lineTo(x, yBottom);
-        ctx.stroke();
+        var halfH = ring[j] * scale;
+        var yTop = centerY - halfH;
+        var yBottom = centerY + halfH;
+        var barHeight = Math.max(1, yBottom - yTop);
+        ctx.fillRect(x, yTop, barWidthPx, barHeight);
     }
     state.micWaveformAnimId = requestAnimationFrame(drawMicWaveform);
 }
@@ -4278,7 +4276,19 @@ function handleVoiceWsMessage(ev) {
                 : msg;
             pushVoiceMessageLog(toLog);
         }
-        if (msg.type === 'user_amplitude') {
+        if (msg.type === 'system_stats') {
+            var t = typeof msg.timestamp === 'number' ? msg.timestamp : (Date.now() / 1000 - state.liveSessionStartTime);
+            if (Array.isArray(state.liveSystemStats)) {
+                state.liveSystemStats.push({
+                    t: t,
+                    cpu: msg.cpu_percent != null ? msg.cpu_percent : null,
+                    gpu: msg.gpu_percent != null ? msg.gpu_percent : null
+                });
+                if (state.liveSystemStats.length > LIVE_SYSTEM_STATS_MAX_SAMPLES)
+                    state.liveSystemStats = state.liveSystemStats.slice(-LIVE_SYSTEM_STATS_MAX_SAMPLES);
+                renderTimeline();
+            }
+        } else if (msg.type === 'user_amplitude') {
             var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
             var serverTs = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
             // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
@@ -4334,7 +4344,6 @@ function handleVoiceWsMessage(ev) {
             if (evt.event_type === 'session_start') {
                 if (state.liveSessionStartTime <= 0) {
                     state.liveSessionStartTime = Date.now() / 1000;
-                    startLiveSystemStatsPoll();
                     state.liveAudioAmplitudeHistory = [];
                 }
                 // Flush Server USB amplitude received before session_start so AUDIO lane has data from the first sample.
@@ -4488,7 +4497,6 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
-        startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
@@ -4527,9 +4535,7 @@ function startSessionRecording() {
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
-        // Start session clock and CPU/GPU polling immediately so the first few seconds have system stats
         state.liveSessionStartTime = Date.now() / 1000;
-        startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
 
@@ -4888,7 +4894,6 @@ function stopSessionRecording() {
     if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
         state.voiceWs.send(JSON.stringify({
             type: 'stop',
-            system_stats: state.liveSystemStats || [],
             ttl_bands: state.liveTtlBands || []
         }));
         // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for
