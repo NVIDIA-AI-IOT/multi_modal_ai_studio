@@ -182,6 +182,32 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
         else:
             logger.warning("⚠️  SSL disabled with --no-ssl (camera/mic may not work without HTTPS)")
 
+        # Load preset or config YAML if specified
+        initial_config = None
+        if args.preset:
+            import yaml
+            preset_name = args.preset.removesuffix(".yaml")
+            candidates = [
+                Path(args.preset),  # exact/absolute path
+                Path(__file__).resolve().parent.parent.parent.parent / "presets" / f"{preset_name}.yaml",
+                Path("presets") / f"{preset_name}.yaml",
+            ]
+            preset_path = next((p for p in candidates if p.exists()), None)
+            if preset_path:
+                with open(preset_path) as f:
+                    initial_config = yaml.safe_load(f)
+                logger.info(f"Loaded preset '{args.preset}' from {preset_path}")
+            else:
+                logger.warning(f"Preset '{args.preset}' not found (searched: {[str(c) for c in candidates]})")
+        elif args.config:
+            import yaml
+            if args.config.exists():
+                with open(args.config) as f:
+                    initial_config = yaml.safe_load(f)
+                logger.info(f"Loaded config from {args.config}")
+            else:
+                logger.warning(f"Config file not found: {args.config}")
+
         logger.info(f"Starting WebUI server on {args.host}:{args.port}")
         logger.info(f"Session directory: {session_dir}")
         server = WebUIServer(
@@ -189,6 +215,7 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
             port=args.port,
             session_dir=session_dir,
             ssl_context=ssl_context,
+            initial_config=initial_config,
         )
         try:
             asyncio.run(server.start())

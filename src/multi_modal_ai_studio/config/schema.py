@@ -105,6 +105,11 @@ class LLMConfig:
         vision_quality: JPEG quality for captured frames (0.3-1.0)
         vision_max_width: Maximum frame width in pixels (smaller = faster, larger = more detail)
         vision_buffer_fps: Frame capture rate for ring buffer (frames per second)
+        vision_api_format: Image/video payload format for the VLM backend:
+            "openai" — standard OpenAI format (image_url / video_url), works with vLLM, Ollama, SGLang
+            "tensorrt_edge" — TensorRT Edge LLM format ({"type": "image", "image": "<base64>"})
+        vision_video_encode: If True, encode frames as MP4 video for temporal understanding
+            (e.g. Cosmos-Reason models). Must be set explicitly in preset/config.
         history_turns: Number of previous turns to include as context (0=no history)
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
@@ -132,6 +137,9 @@ class LLMConfig:
     vision_quality: float = 0.7  # JPEG quality (0.3=fast/small, 1.0=high quality)
     vision_max_width: int = 640  # Max frame width in pixels (smaller=faster)
     vision_buffer_fps: float = 3.0  # Ring buffer capture rate (fps)
+    vision_api_format: Literal["openai", "tensorrt_edge"] = "openai"
+    vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
+    enable_reasoning: bool = False  # True to allow <think> chain-of-thought; filtered from TTS
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
