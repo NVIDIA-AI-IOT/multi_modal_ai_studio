@@ -109,7 +109,8 @@ class Timeline:
         end_time: Optional[float] = None,
         amplitude: Optional[float] = None,
         source: Optional[str] = None,
-        render_type: Optional[Literal['point', 'rectangle', 'waveform']] = None
+        render_type: Optional[Literal['point', 'rectangle', 'waveform']] = None,
+        timestamp: Optional[float] = None,
     ) -> TimelineEvent:
         """Add event to timeline.
         
@@ -122,14 +123,15 @@ class Timeline:
             amplitude: Optional amplitude for waveform rendering (0-100)
             source: Optional source identifier ('user', 'tts', 'ai')
             render_type: Optional rendering hint ('point', 'rectangle', 'waveform')
+            timestamp: Optional seconds since session start; if None, uses current time
         
         Returns:
             The created TimelineEvent
         """
         if self.start_time is None:
             self.start()
-        
-        timestamp = time.time() - self.start_time
+        if timestamp is None:
+            timestamp = time.time() - self.start_time
         event = TimelineEvent(
             timestamp=timestamp,
             event_type=event_type,
@@ -368,7 +370,8 @@ class Timeline:
         self,
         amplitude: float,
         source: str = 'user',
-        data: Optional[Dict[str, Any]] = None
+        data: Optional[Dict[str, Any]] = None,
+        timestamp: Optional[float] = None,
     ) -> TimelineEvent:
         """Add an audio amplitude sample for waveform visualization.
         
@@ -376,6 +379,7 @@ class Timeline:
             amplitude: Audio amplitude (0-100 scale)
             source: Audio source ('user' or 'tts'/'ai')
             data: Optional metadata
+            timestamp: Optional seconds since session start; if None, uses current time
         
         Returns:
             The created TimelineEvent
@@ -386,6 +390,7 @@ class Timeline:
             data=data,
             amplitude=amplitude,
             source=source,
+            timestamp=timestamp,
         )
     
     def get_summary(self) -> Dict[str, Any]:

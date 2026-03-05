@@ -2153,10 +2153,12 @@ function renderTimeline() {
     const liveAmplitude = (inLive || hasStoppedLiveData) ? state.liveAudioAmplitudeHistory : null;
     const liveTtsSegments = (inLive || hasStoppedLiveData) ? state.liveTtsAmplitudeHistory : null;
     const liveSystemStats = (inLive || hasStoppedLiveData) ? state.liveSystemStats : (state.selectedSession && state.selectedSession.system_stats) || null;
-    const replayTtsSegments = (!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.tts_playback_segments) ? state.selectedSession.tts_playback_segments : null;
-    const rawReplayUserAmplitude = (!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.audio_amplitude_history) ? state.selectedSession.audio_amplitude_history : null;
-    const replayAudioAmplitudeHistory = rawReplayUserAmplitude;
-    const replayUserAmplitudeForTtl = (!inLive && !hasStoppedLiveData && state.selectedSession && timeline && timeline.length) ? buildMergedUserAmplitudeForReplay(rawReplayUserAmplitude || [], timeline) : rawReplayUserAmplitude;
+    // Replay: use timeline as single source for waveforms (simplifies session JSON). Fallback to client-sent lists for old sessions.
+    const timelineUserAmp = (!inLive && !hasStoppedLiveData && timeline && timeline.length) ? buildUserAmplitudeFromTimeline(timeline) : [];
+    const replayAudioAmplitudeHistory = (timelineUserAmp.length > 0) ? timelineUserAmp : ((!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.audio_amplitude_history) ? state.selectedSession.audio_amplitude_history : null);
+    const timelineTtsSegments = (!inLive && !hasStoppedLiveData && timeline && timeline.length) ? buildTtsSegmentsFromTimeline(timeline) : [];
+    const replayTtsSegments = (timelineTtsSegments.length > 0) ? timelineTtsSegments : ((!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.tts_playback_segments) ? state.selectedSession.tts_playback_segments : null);
+    const replayUserAmplitudeForTtl = replayAudioAmplitudeHistory;
     const liveSessionTime = (state.liveSessionStartTime > 0) ? (Date.now() / 1000 - state.liveSessionStartTime) : null;
     drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP, PADDING_LEFT,
                        PADDING_RIGHT, width, timeScale, state.timelineOffset, laneColors, combineSpeechLanes,
@@ -2215,26 +2217,41 @@ function renderTimeline() {
     updateTimelineScrollbar(maxTime, visibleTimeWindow);
 }
 
-// Merge session audio_amplitude_history with timeline user amplitude events so replay has full coverage (fixes trimmed history and consistent density)
-function buildMergedUserAmplitudeForReplay(history, timeline) {
-    if (!timeline || !timeline.length) return history || [];
+// Single source: build user amplitude list from timeline (server already has every user_amplitude). Fallback to session.audio_amplitude_history for old sessions.
+function buildUserAmplitudeFromTimeline(timeline) {
+    if (!timeline || !timeline.length) return [];
     const userEvents = timeline.filter(function (e) {
         return e.event_type === 'audio_amplitude' && e.source !== 'tts' && e.source !== 'ai';
     });
-    if (!userEvents.length) return history || [];
-    const fromTimeline = userEvents.map(function (e) {
+    var out = userEvents.map(function (e) {
         var a = e.amplitude != null ? Number(e.amplitude) : 0;
-        if (a > 0 && a < 1) a = a * 100;
         return { timestamp: e.timestamp != null ? Number(e.timestamp) : 0, amplitude: a };
-    });
-    const getT = function (s) { return s.timestamp != null ? s.timestamp : s[0]; };
-    const combined = (history && history.length ? history.slice() : []).concat(fromTimeline);
-    combined.sort(function (a, b) { return getT(a) - getT(b); });
-    return combined;
+    }).sort(function (a, b) { return a.timestamp - b.timestamp; });
+    // Server stores 0–100. Only normalize 0–1 → 0–100 when data looks like 0–1 (max ≤ 1).
+    if (out.length) {
+        var maxA = Math.max.apply(null, out.map(function (s) { return s.amplitude; }));
+        if (maxA > 0 && maxA <= 1) { out.forEach(function (s) { s.amplitude = s.amplitude * 100; }); }
+    }
+    return out;
 }
 
-// Get amplitude at time t from live history (nearest sample or linear interpolate)
-function getAmplitudeAtTime(history, t) {
+// Build TTS segments from timeline (tts_start / tts_complete pairs). Fallback to session.tts_playback_segments for old sessions.
+function buildTtsSegmentsFromTimeline(timeline) {
+    if (!timeline || !timeline.length) return [];
+    const starts = timeline.filter(function (e) { return e.event_type === 'tts_start'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+    const completes = timeline.filter(function (e) { return e.event_type === 'tts_complete'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+    if (!starts.length) return [];
+    return starts.map(function (s, i) {
+        const startTime = s.timestamp != null ? Number(s.timestamp) : 0;
+        const endEvent = completes[i];
+        const endTime = endEvent && endEvent.timestamp != null ? Number(endEvent.timestamp) : startTime + 0.1;
+        return { startTime: startTime, endTime: endTime, amplitude: 50 };
+    });
+}
+
+// Get amplitude at time t from live history (nearest sample or linear interpolate).
+// If maxGapSec is set and t falls between two samples more than maxGapSec apart, return 0 (don't draw in gaps between turns).
+function getAmplitudeAtTime(history, t, maxGapSec) {
     if (!history.length) return 0;
     const getT = (s) => s.timestamp != null ? s.timestamp : s[0];
     const getA = (s) => s.amplitude != null ? s.amplitude : s[1];
@@ -2243,6 +2260,7 @@ function getAmplitudeAtTime(history, t) {
     for (let i = 0; i < history.length - 1; i++) {
         const t0 = getT(history[i]), t1 = getT(history[i + 1]);
         if (t >= t0 && t <= t1) {
+            if (typeof maxGapSec === 'number' && (t1 - t0) > maxGapSec) return 0;
             const a0 = getA(history[i]), a1 = getA(history[i + 1]);
             const frac = (t - t0) / (t1 - t0 || 1);
             return a0 + frac * (a1 - a0);
@@ -2805,10 +2823,16 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const inTts = ttsTimeRanges.length > 0 && isInsideTtsSegment(t);
 
         if (!inLive && !hasStoppedLiveData && isUser) {
+            // Replay: skip sparse user bars when we draw the dense user waveform (2b1). Otherwise we get
+            // near-duplicate bars (sparse at e.g. 0.04021 and dense at 0.025/0.05 grid) with 3–5 ms offset.
+            if (replayAudioAmplitudeHistory && replayAudioAmplitudeHistory.length > 0) return;
             // During TTS: hide only low user amplitude (ambient); show significant level (possible interruption)
             if (inTts && amp < userVoiceTh) return;
-            // NOTE: Near-full user amplitude with no nearby asr_final is NOT hidden here — it indicates a bug
-            // (e.g. mic artifact, client sending wrong data, or server RMS). See docs/INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md
+            // NOTE: Near-full user amplitude with no nearby asr_final is NOT hidden here — it indicates a bug (e.g. mic artifact, client sending wrong data, or server RMS). See docs/INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md
+        }
+        if (!inLive && !hasStoppedLiveData && !isUser) {
+            // Replay: skip sparse TTS bars when we draw dense TTS from timeline amplitude (2b replay); avoids massive duplicate purple.
+            if (timeline && timeline.some(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); })) return;
         }
 
         const x = PADDING_LEFT + (event.timestamp - timelineOffset) * timeScale;
@@ -2845,7 +2869,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            // Green: mic (user) waveform — same density as purple TTS: interpolate amplitude at every tStep so no wide gaps
+            // Green: mic (user) waveform. One amplitude bar = 25ms (tStep = 0.025). User and AI data match this.
             if (liveAmplitudeHistory && liveAmplitudeHistory.length > 0) {
                 const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
                 ctx.fillStyle = audioColor;
@@ -2853,8 +2877,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
                 const barWidthPx = 2;
                 const tStep = 0.025; // same as TTS (~40 Hz) for matching visual density
+                const lastUserTs = liveAmplitudeHistory.length ? (liveAmplitudeHistory[liveAmplitudeHistory.length - 1].timestamp != null ? liveAmplitudeHistory[liveAmplitudeHistory.length - 1].timestamp : liveAmplitudeHistory[liveAmplitudeHistory.length - 1][0]) : 0;
                 for (let t = visibleStart; t <= visibleEnd; t += tStep) {
-                    const amp = Math.min(100, getAmplitudeAtTime(liveAmplitudeHistory, t) * userGain);
+                    const rawAmp = (inLive && t > lastUserTs) ? 0 : getAmplitudeAtTime(liveAmplitudeHistory, t);
+                    const amp = Math.min(100, rawAmp * userGain);
                     if (amp <= 0) continue;
                     const x = visibleLeft + (t - timelineOffset) * timeScale;
                     const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
@@ -2947,7 +2973,35 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const aiGain = (typeof uiSettings.aiAudioGain === 'number' ? uiSettings.aiAudioGain : 1);
             const barWidthPx = 2;
             const tStep = 0.025;
-            if (replayTtsSegments && replayTtsSegments.length > 0) {
+            // Replay: prefer actual amplitude from timeline; only use segment fill when no timeline TTS amplitude (old sessions).
+            var hasTimelineTtsAmp = timeline && timeline.some(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); });
+            if (hasTimelineTtsAmp) {
+                var ttsFromTimeline = [];
+                timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).forEach(function (e) {
+                    var a = e.amplitude != null ? Number(e.amplitude) : 0;
+                    var ts = e.timestamp != null ? Number(e.timestamp) : 0;
+                    ttsFromTimeline.push({ timestamp: ts, amplitude: a });
+                });
+                ttsFromTimeline.sort(function (a, b) { return a.timestamp - b.timestamp; });
+                // Server stores 0–100 (RMS scale). Only normalize 0–1 → 0–100 when data looks like 0–1 (max ≤ 1).
+                var ttsMaxAmp = ttsFromTimeline.length ? Math.max.apply(null, ttsFromTimeline.map(function (s) { return s.amplitude; })) : 0;
+                if (ttsMaxAmp > 0 && ttsMaxAmp <= 1) {
+                    ttsFromTimeline.forEach(function (s) { s.amplitude = s.amplitude * 100; });
+                }
+                var ttsDataT0 = ttsFromTimeline.length ? ttsFromTimeline[0].timestamp : 0;
+                var ttsDataT1 = ttsFromTimeline.length ? ttsFromTimeline[ttsFromTimeline.length - 1].timestamp : 0;
+                for (var t = visibleStart; t <= visibleEnd; t += tStep) {
+                    if (t < ttsDataT0 || t > ttsDataT1) continue;
+                    var ampTl = getAmplitudeAtTime(ttsFromTimeline, t, 0.1);
+                    var amp = Math.min(100, ampTl * aiGain);
+                    if (amp <= 0) continue;
+                    var ampForBar = Math.max(amp, 2);
+                    var halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
+                    var x = visibleLeft + (t - timelineOffset) * timeScale;
+                    if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
+                    ctx.fillRect(x, centerY - halfH, barWidthPx, Math.max(1, halfH * 2));
+                }
+            } else if (replayTtsSegments && replayTtsSegments.length > 0) {
                 replayTtsSegments.forEach(function (seg) {
                     if (seg.endTime < visibleStart || seg.startTime > visibleEnd) return;
                     const amp = Math.min(100, (seg.amplitude || 0) * aiGain);
@@ -2960,29 +3014,6 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                         ctx.fillRect(x, y1, barWidthPx, Math.max(1, halfH * 2));
                     }
                 });
-            } else if (timeline && timeline.length) {
-                var ttsFromTimeline = [];
-                var ttsT0 = Infinity, ttsT1 = -Infinity;
-                timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).forEach(function (e) {
-                    var a = e.amplitude != null ? Number(e.amplitude) : 0;
-                    if (a > 0 && a < 1) a = a * 100;
-                    var ts = e.timestamp != null ? Number(e.timestamp) : 0;
-                    if (ts < ttsT0) ttsT0 = ts;
-                    if (ts > ttsT1) ttsT1 = ts;
-                    ttsFromTimeline.push({ timestamp: ts, amplitude: a });
-                });
-                ttsFromTimeline.sort(function (a, b) { return a.timestamp - b.timestamp; });
-                for (var t = visibleStart; t <= visibleEnd; t += tStep) {
-                    if (t < ttsT0 || t > ttsT1) continue;
-                    var ampTl = getAmplitudeAtTime(ttsFromTimeline, t);
-                    var amp = Math.min(100, ampTl * aiGain);
-                    if (amp <= 0) continue;
-                    var ampForBar = Math.max(amp, 2);
-                    var halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
-                    var x = visibleLeft + (t - timelineOffset) * timeScale;
-                    if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
-                    ctx.fillRect(x, centerY - halfH, barWidthPx, Math.max(1, halfH * 2));
-                }
             }
             ctx.globalAlpha = 1.0;
         }
@@ -3533,20 +3564,18 @@ function drawMicWaveform() {
         console.log('[MicWaveform] Drawing server waveform (buffer len=' + ring.length + '); if you see this but no green bars, check canvas/overlay.');
     }
     var green = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
-    ctx.strokeStyle = green;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([2, 3]);
+    ctx.fillStyle = green;
     var waveformLeft = margin + innerPadding;
     var waveformWidth = Math.max(0, drawW - innerPadding * 2);
-    var step = ring.length > 1 ? waveformWidth / (ring.length - 1) : 0;
+    var barWidthPx = 2;
+    var step = ring.length > 1 ? Math.max(barWidthPx, (waveformWidth - barWidthPx) / (ring.length - 1)) : barWidthPx;
     for (var j = 0; j < ring.length; j++) {
         var x = waveformLeft + j * step;
-        var yTop = centerY - ring[j] * scale;
-        var yBottom = centerY + ring[j] * scale;
-        ctx.beginPath();
-        ctx.moveTo(x, yTop);
-        ctx.lineTo(x, yBottom);
-        ctx.stroke();
+        var halfH = ring[j] * scale;
+        var yTop = centerY - halfH;
+        var yBottom = centerY + halfH;
+        var barHeight = Math.max(1, yBottom - yTop);
+        ctx.fillRect(x, yTop, barWidthPx, barHeight);
     }
     state.micWaveformAnimId = requestAnimationFrame(drawMicWaveform);
 }
@@ -4213,29 +4242,6 @@ function scheduleLiveTimelineTick() {
     }
 }
 
-const LIVE_SYSTEM_STATS_POLL_MS = 100;
-const LIVE_SYSTEM_STATS_MAX_SAMPLES = 900; // ~90 s at 100ms
-
-function startLiveSystemStatsPoll() {
-    stopLiveSystemStatsPoll();
-    state.liveSystemStatsPollIntervalId = setInterval(function () {
-        if (state.liveSessionStartTime <= 0 || !state.liveSystemStats) return;
-        fetch(getApiBase() + '/api/system/stats')
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                var t = (Date.now() / 1000) - state.liveSessionStartTime;
-                state.liveSystemStats.push({
-                    t: t,
-                    cpu: data.cpu_percent != null ? data.cpu_percent : null,
-                    gpu: data.gpu_percent != null ? data.gpu_percent : null
-                });
-                if (state.liveSystemStats.length > LIVE_SYSTEM_STATS_MAX_SAMPLES)
-                    state.liveSystemStats = state.liveSystemStats.slice(-LIVE_SYSTEM_STATS_MAX_SAMPLES);
-            })
-            .catch(function () {});
-    }, LIVE_SYSTEM_STATS_POLL_MS);
-}
-
 function stopLiveSystemStatsPoll() {
     if (state.liveSystemStatsPollIntervalId != null) {
         clearInterval(state.liveSystemStatsPollIntervalId);
@@ -4262,11 +4268,21 @@ function handleVoiceWsMessage(ev) {
                 : msg;
             pushVoiceMessageLog(toLog);
         }
-        if (msg.type === 'user_amplitude') {
+        if (msg.type === 'system_stats') {
+            var t = typeof msg.timestamp === 'number' ? msg.timestamp : (Date.now() / 1000 - state.liveSessionStartTime);
+            if (Array.isArray(state.liveSystemStats)) {
+                state.liveSystemStats.push({
+                    t: t,
+                    cpu: msg.cpu_percent != null ? msg.cpu_percent : null,
+                    gpu: msg.gpu_percent != null ? msg.gpu_percent : null
+                });
+                renderTimeline();
+            }
+        } else if (msg.type === 'user_amplitude') {
             var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
             var serverTs = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
-            // Use client-side session time for AUDIO lane so waveform aligns with timeline (avoids server/client clock skew).
-            var ts = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : serverTs;
+            // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
+            var ts = serverTs;
             if (state.liveSessionStartTime > 0 && Array.isArray(state.liveAudioAmplitudeHistory)) {
                 state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: amp });
                 // Server USB: end-of-speech from sparse user_amplitude (20 Hz). Use consecutive sample count, not wall-clock,
@@ -4318,7 +4334,6 @@ function handleVoiceWsMessage(ev) {
             if (evt.event_type === 'session_start') {
                 if (state.liveSessionStartTime <= 0) {
                     state.liveSessionStartTime = Date.now() / 1000;
-                    startLiveSystemStatsPoll();
                     state.liveAudioAmplitudeHistory = [];
                 }
                 // Flush Server USB amplitude received before session_start so AUDIO lane has data from the first sample.
@@ -4390,12 +4405,31 @@ function handleVoiceWsMessage(ev) {
                 if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
             }
         } else if (msg.type === 'tts_audio' && msg.data) {
-            // When Server USB speaker is selected, the server plays TTS to that device; do not play in browser.
-            // Still record TTS segments so the purple waveform and tts_playback_segments are saved.
+            // Server may send 25ms amplitude_segments (matches timeline bar = 25ms) for denser AI waveform.
+            var skipSegmentPush = false;
+            if (Array.isArray(msg.amplitude_segments) && msg.amplitude_segments.length && Array.isArray(state.liveTtsAmplitudeHistory)) {
+                msg.amplitude_segments.forEach(function (seg) {
+                    state.liveTtsAmplitudeHistory.push({
+                        startTime: seg.startTime,
+                        endTime: seg.endTime,
+                        amplitude: seg.amplitude != null ? seg.amplitude : 0
+                    });
+                });
+                var segs = msg.amplitude_segments;
+                var firstSeg = segs[0];
+                if (firstSeg && typeof firstSeg.startTime === 'number') {
+                    if (state.firstTtsPlayTimeThisResponse == null || firstSeg.startTime < state.firstTtsPlayTimeThisResponse)
+                        state.firstTtsPlayTimeThisResponse = firstSeg.startTime;
+                    var firstAmp = firstSeg.amplitude != null ? firstSeg.amplitude : 0;
+                    if (firstAmp > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || firstSeg.startTime < state.earliestTtsPlayTimeAboveThreshold))
+                        state.earliestTtsPlayTimeAboveThreshold = firstSeg.startTime;
+                }
+                skipSegmentPush = true;
+            }
             if (isServerSpeakerSelected()) {
-                recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000);
+                recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             } else {
-                playTtsChunk(msg.data, msg.sample_rate || 24000);
+                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             }
         } else if (msg.type === 'session_saved' && msg.session_id) {
             state.lastSavedSessionId = msg.session_id;
@@ -4453,7 +4487,6 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
-        startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
@@ -4492,9 +4525,7 @@ function startSessionRecording() {
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
-        // Start session clock and CPU/GPU polling immediately so the first few seconds have system stats
         state.liveSessionStartTime = Date.now() / 1000;
-        startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
 
@@ -4506,10 +4537,11 @@ function startSessionRecording() {
         state.voiceWs = ws;
 
     ws.onopen = function () {
-        console.log('[Voice] WebSocket connected, sending config');
+        console.log('[Voice] WebSocket connected, sending config and start_session');
         var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
-        console.log('[Voice] Config sent, starting mic stream');
+        ws.send(JSON.stringify({ type: 'start_session', config: config }));
+        console.log('[Voice] Config and start_session sent, starting mic stream');
         startVoiceMicStream();
     };
 
@@ -4708,8 +4740,26 @@ function stopVoiceMicStream() {
     }
 }
 
-/** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser. */
-function recordTtsSegmentOnly(base64Data, sampleRate) {
+/** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser.
+ * skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push; only run TTL band logic. */
+function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
+    if (state.liveSessionStartTime <= 0 || !state.liveTtsAmplitudeHistory) return;
+    if (skipSegmentPush) {
+        // first/earliest/ttsNextStartTime already set by handler; just run TTL band close if applicable
+        if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+            var bandStart = state.liveTtlBandStartTime;
+            var firstChunk = state.firstTtsPlayTimeThisResponse;
+            var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+            var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+            state.liveTtlBandStartTime = null;
+            state.voiceTurnActive = false;
+            state.lastAsrPartialTime = null;
+            state.firstTtsPlayTimeThisResponse = null;
+            state.earliestTtsPlayTimeAboveThreshold = null;
+            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+        }
+        return;
+    }
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -4717,7 +4767,6 @@ function recordTtsSegmentOnly(base64Data, sampleRate) {
     const samples = new Int16Array(bytes.buffer);
     const numSamples = samples.length;
     const duration = numSamples / sampleRate;
-    if (state.liveSessionStartTime <= 0 || !state.liveTtsAmplitudeHistory) return;
     let startTime = state.ttsNextStartTime;
     if (typeof startTime !== 'number' || startTime < 0) {
         startTime = (Date.now() / 1000) - state.liveSessionStartTime;
@@ -4747,7 +4796,8 @@ function recordTtsSegmentOnly(base64Data, sampleRate) {
     }
 }
 
-function playTtsChunk(base64Data, sampleRate) {
+/** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push segment; first/earliest/ttsNextStartTime already set by handler. */
+function playTtsChunk(base64Data, sampleRate, skipSegmentPush) {
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -4765,14 +4815,14 @@ function playTtsChunk(base64Data, sampleRate) {
     for (let i = 0; i < numSamples; i++) ch[i] = samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF);
     const duration = numSamples / sampleRate;
     let startTime = state.ttsNextStartTime;
-    if (startTime < ctx.currentTime) startTime = ctx.currentTime;
+    if (typeof startTime !== 'number' || startTime < 0 || startTime < ctx.currentTime) startTime = ctx.currentTime;
     state.ttsNextStartTime = startTime + duration;
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
     source.start(startTime);
-    // Record TTS segment for purple AI waveform on AUDIO lane using actual playback time (when speaker plays)
-    if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory) {
+    // Record TTS segment for purple AI waveform (or skip when server sent amplitude_segments)
+    if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
         var nowSec = Date.now() / 1000;
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
@@ -4808,6 +4858,17 @@ function playTtsChunk(base64Data, sampleRate) {
             state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: ttlMs });
         }
         // No trimming: keep all TTS segments for full-session dense waveform on stop (Option 1, AMPLITUDE_DATA_SOURCES.md)
+    } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+        var bandStart = state.liveTtlBandStartTime;
+        var firstChunk = state.firstTtsPlayTimeThisResponse;
+        var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+        var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+        state.liveTtlBandStartTime = null;
+        state.voiceTurnActive = false;
+        state.lastAsrPartialTime = null;
+        state.firstTtsPlayTimeThisResponse = null;
+        state.earliestTtsPlayTimeAboveThreshold = null;
+        state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
     }
 }
 
@@ -4823,9 +4884,6 @@ function stopSessionRecording() {
     if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
         state.voiceWs.send(JSON.stringify({
             type: 'stop',
-            system_stats: state.liveSystemStats || [],
-            tts_playback_segments: state.liveTtsAmplitudeHistory || [],
-            audio_amplitude_history: state.liveAudioAmplitudeHistory || [],
             ttl_bands: state.liveTtlBands || []
         }));
         // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for

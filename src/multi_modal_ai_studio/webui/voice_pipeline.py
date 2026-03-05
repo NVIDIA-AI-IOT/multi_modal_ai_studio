@@ -16,7 +16,7 @@ import struct
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from aiohttp import web
 
@@ -44,6 +44,7 @@ from multi_modal_ai_studio.config.schema import (
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.core.session import Session
 from multi_modal_ai_studio.core.timeline import Lane
+from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
@@ -98,6 +99,32 @@ def _pcm_rms_to_amplitude(pcm_bytes: bytes) -> float:
         return 0.0
 
 
+def _pcm_rms_slices(
+    pcm_bytes: bytes,
+    sample_rate: int = 16000,
+    window_s: float = 0.025,
+) -> List[float]:
+    """Compute RMS per fixed-time window (e.g. 25ms) so timeline gets one amplitude per bar.
+    Returns list of 0-100 amplitudes, one per window. Matches client tStep=0.025 (~40 Hz)."""
+    if len(pcm_bytes) < 2:
+        return []
+    try:
+        samples = struct.unpack(f"{len(pcm_bytes) // 2}h", pcm_bytes)
+    except Exception:
+        return []
+    samples_per_window = max(1, int(sample_rate * window_s))
+    result: List[float] = []
+    for i in range(0, len(samples), samples_per_window):
+        window = samples[i : i + samples_per_window]
+        if not window:
+            break
+        sum_sq = sum(s * s for s in window)
+        rms = math.sqrt(sum_sq / len(window))
+        amp = min(100.0, (rms / 32768.0) * 100.0)
+        result.append(amp)
+    return result
+
+
 async def _run_voice_pipeline(
     ws: web.WebSocketResponse,
     config: SessionConfig,
@@ -122,9 +149,7 @@ async def _run_voice_pipeline(
             "Server speaker enabled: device=%s (TTS will play to ALSA)",
             config.devices.audio_output_device,
         )
-    if not use_server_mic:
-        session.start()
-
+    # Session started on start_session (both mics). Browser mic: no session.start() here so preview PCM is amplitude-only until START.
     asr_config = config.asr
     llm_config = config.llm
     tts_config = config.tts
@@ -148,15 +173,13 @@ async def _run_voice_pipeline(
         await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
         return None
 
-    await asr.start_stream()
+    # ASR starts only after client sends start_session (both mics). Avoids Riva timeout during preview and keeps logic identical.
+    asr_stream_started = False
     conversation_history = []
     stopped = asyncio.Event()
     finals_queue: asyncio.Queue = asyncio.Queue()
-    pipeline_live = asyncio.Event()  # when set, Server USB capture feeds ASR + timeline (after client sent start_session)
-    if use_server_mic:
-        pipeline_live.clear()
-    else:
-        pipeline_live.set()
+    pipeline_live = asyncio.Event()  # set when client sends start_session; then we start ASR and feed pipeline
+    pipeline_live.clear()
 
     # When user selected a Server USB microphone, capture on server; preview streams amplitude until start_session.
     logger.info(
@@ -178,8 +201,8 @@ async def _run_voice_pipeline(
         if not capture_thread:
             logger.warning(
                 "Server mic capture could not start (source=%s device=%s); no voice input from server device",
-                _mic_source,
-                _mic_device,
+                getattr(config.devices, "audio_input_source", None),
+                getattr(config.devices, "audio_input_device", None),
             )
             use_server_mic = False
         else:
@@ -191,12 +214,75 @@ async def _run_voice_pipeline(
         except Exception as e:
             logger.warning("Send event failed: %s", e)
 
+    connection_start_time = time.time()
+    _amplitude_window_s = 0.025  # 25ms window so timeline bars get one value per 25ms (matches client tStep=0.025)
+
+    async def _feed_pcm_preview_only(
+        pcm_bytes: bytes,
+        last_amplitude_time: float,
+        amplitude_interval: float,
+    ) -> Tuple[float, bool, float, float]:
+        """Preview (before session start): amplitude only. No ASR, no timeline. Sends user_amplitude at throttle."""
+        now = time.time() - connection_start_time
+        amplitudes = _pcm_rms_slices(pcm_bytes, sample_rate=16000, window_s=_amplitude_window_s)
+        did_send = False
+        amp = 0.0
+        for i, a in enumerate(amplitudes):
+            t = now - (len(amplitudes) - 1 - i) * _amplitude_window_s - _amplitude_window_s / 2
+            if t < 0:
+                continue
+            if t - last_amplitude_time >= amplitude_interval:
+                # Clamp so timestamps are strictly increasing (avoids non-monotonic when now jitters)
+                t = max(t, last_amplitude_time + amplitude_interval)
+                last_amplitude_time = t
+                amp = a
+                did_send = True
+                try:
+                    await ws.send_str(
+                        json.dumps({"type": "user_amplitude", "timestamp": round(t, 3), "amplitude": round(amp, 2)})
+                    )
+                except Exception as e:
+                    logger.warning("Send user_amplitude (preview) failed: %s", e)
+        return (last_amplitude_time, did_send, amp, now)
+
+    async def _feed_pcm_to_pipeline(
+        pcm_bytes: bytes,
+        last_amplitude_time: float,
+        amplitude_interval: float,
+    ) -> Tuple[float, bool, float, float]:
+        """Full feed: ASR + timeline + user_amplitude. Must only be called after start_session."""
+        if session.timeline.start_time is None:
+            return (last_amplitude_time, False, 0.0, 0.0)
+        now = time.time() - session.timeline.start_time
+        await asr.send_audio(pcm_bytes)
+        amplitudes = _pcm_rms_slices(pcm_bytes, sample_rate=16000, window_s=_amplitude_window_s)
+        did_send = False
+        amp = 0.0
+        for i, a in enumerate(amplitudes):
+            t = now - (len(amplitudes) - 1 - i) * _amplitude_window_s - _amplitude_window_s / 2
+            if t < 0:
+                continue
+            if t - last_amplitude_time >= amplitude_interval:
+                # Clamp so timestamps are strictly increasing (avoids non-monotonic when now jitters)
+                t = max(t, last_amplitude_time + amplitude_interval)
+                last_amplitude_time = t
+                amp = a
+                did_send = True
+                session.timeline.add_audio_amplitude(amplitude=amp, source="user", timestamp=t)
+                try:
+                    await ws.send_str(
+                        json.dumps({"type": "user_amplitude", "timestamp": round(t, 3), "amplitude": round(amp, 2)})
+                    )
+                except Exception as e:
+                    logger.warning("Send user_amplitude failed: %s", e)
+        return (last_amplitude_time, did_send, amp, now)
+
     async def receive_loop() -> None:
         """Read from WebSocket: config (first), then binary PCM or stop."""
         nonlocal conversation_history
         last_amplitude_time = 0.0
         last_amplitude_log_time = 0.0  # throttle debug log to ~1s (see INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md)
-        amplitude_interval = 0.05  # record amplitude at most every 50ms
+        amplitude_interval = 0.025  # one per 25ms slice; smoother user waveform
         try:
             async for msg in ws:
                 if msg.type == web.WSMsgType.TEXT:
@@ -224,15 +310,15 @@ async def _run_voice_pipeline(
                                         )
                                 except Exception as e:
                                     logger.warning("Could not merge start_session config: %s", e)
-                            # Server USB: transition from preview to full pipeline (same capture, now feed ASR + timeline)
-                            if use_server_mic and not pipeline_live.is_set():
+                            # Both mics: start session and set pipeline_live so ASR/timeline run from here on
+                            if session.timeline.start_time is None:
                                 session.start()
                                 await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
                                 pipeline_live.set()
-                                logger.info("Voice pipeline: start_session received; capture now feeds ASR + timeline")
+                                logger.info("Voice pipeline: start_session received; pipeline live (ASR + timeline)")
                         if obj.get("type") == "stop":
                             stats = obj.get("system_stats")
-                            if isinstance(stats, list):
+                            if isinstance(stats, list) and (not getattr(session, "system_stats", None) or len(session.system_stats) == 0):
                                 session.system_stats = stats
                             tts_segments = obj.get("tts_playback_segments")
                             if isinstance(tts_segments, list):
@@ -253,42 +339,27 @@ async def _run_voice_pipeline(
                 if msg.type == web.WSMsgType.BINARY:
                     # When using Server USB mic, audio comes from server capture task; ignore browser PCM.
                     if not use_server_mic:
-                        await asr.send_audio(msg.data)
-                        # Record audio amplitude for timeline (throttled)
-                        if session.timeline.start_time is not None:
-                            now = time.time() - session.timeline.start_time
-                            if now - last_amplitude_time >= amplitude_interval:
-                                amp = _pcm_rms_to_amplitude(msg.data)
-                                session.timeline.add_audio_amplitude(amplitude=amp, source="user")
-                                last_amplitude_time = now
-                                # Log every high user amplitude so we can trace false green on replay (live was correct; replay shows bars = they're in saved timeline)
-                                if amp >= 20.0:
-                                    try:
-                                        n = len(msg.data) // 2
-                                        raw_rms = math.sqrt(sum(s * s for s in struct.unpack(f"{n}h", msg.data)) / n) if n else 0.0
-                                        logger.warning(
-                                            "[user_amplitude_high] session_t=%.2fs amp_0_100=%.2f raw_rms=%.1f chunk_len=%d (no ASR nearby => false green on replay)",
-                                            now, amp, raw_rms, len(msg.data),
-                                        )
-                                    except Exception:
-                                        pass
-                                # Debug: log user mic amplitude ~every 1s (INVESTIGATE_USER_AMPLITUDE_ARTIFACT.md)
-                                if now - last_amplitude_log_time >= 1.0:
-                                    try:
-                                        n = len(msg.data) // 2
-                                        if n:
-                                            samples = struct.unpack(f"{n}h", msg.data)
-                                            sum_sq = sum(s * s for s in samples)
-                                            raw_rms = math.sqrt(sum_sq / n)
-                                        else:
-                                            raw_rms = 0.0
-                                        logger.info(
-                                            "[user_amplitude] session_t=%.1fs chunk_len=%d raw_rms=%.1f amp_0_100=%.2f",
-                                            now, len(msg.data), raw_rms, amp,
-                                        )
-                                        last_amplitude_log_time = now
-                                    except Exception:
-                                        pass
+                        if session.timeline.start_time is None:
+                            last_amplitude_time, did_send, amp, now = await _feed_pcm_preview_only(
+                                msg.data, last_amplitude_time, amplitude_interval
+                            )
+                        else:
+                            last_amplitude_time, did_send, amp, now = await _feed_pcm_to_pipeline(
+                                msg.data, last_amplitude_time, amplitude_interval
+                            )
+                        if did_send and amp >= 20.0:
+                            try:
+                                n = len(msg.data) // 2
+                                raw_rms = math.sqrt(sum(s * s for s in struct.unpack(f"{n}h", msg.data)) / n) if n else 0.0
+                                logger.warning(
+                                    "[user_amplitude_high] session_t=%.2fs amp_0_100=%.2f raw_rms=%.1f chunk_len=%d",
+                                    now, amp, raw_rms, len(msg.data),
+                                )
+                            except Exception:
+                                pass
+                        if did_send and now - last_amplitude_log_time >= 1.0:
+                            last_amplitude_log_time = now
+                            logger.info("[user_amplitude] session_t=%.1fs chunk_len=%d amp_0_100=%.2f", now, len(msg.data), amp)
                 if msg.type in (web.WSMsgType.CLOSE, web.WSMsgType.ERROR):
                     stopped.set()
                     return
@@ -505,8 +576,7 @@ async def _run_voice_pipeline(
                 await ws.send_str(json.dumps({"type": "tts_start"}))
 
                 tts_first_sent = False
-                last_tts_amplitude_time = 0.0
-                tts_amplitude_interval = 0.05
+                tts_amplitude_next_t = 0.0  # session-relative time for next 25ms TTS amplitude
                 server_speaker_proc = None
                 try:
                     async for chunk in tts.synthesize_stream(full_response):
@@ -514,6 +584,7 @@ async def _run_voice_pipeline(
                             break
                         if not tts_first_sent:
                             ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                            tts_amplitude_next_t = ts_tts_first
                             logger.info("[timing] tts_first_audio @ %.2fs (tts first chunk after %.2fs from llm_complete)", ts_tts_first, ts_tts_first - ts_llm_complete)
                             session.timeline.add_event("tts_first_audio", Lane.TTS)
                             await send_event({
@@ -546,19 +617,35 @@ async def _run_voice_pipeline(
                                 except (BrokenPipeError, OSError) as e:
                                     logger.debug("Server speaker write failed (aplay may have exited): %s", e)
                                     server_speaker_proc = None
+                        amplitude_segments: List[Dict[str, Any]] = []
                         if session.timeline.start_time is not None and chunk.audio:
-                            now = time.time() - session.timeline.start_time
-                            if now - last_tts_amplitude_time >= tts_amplitude_interval:
-                                amp = _pcm_rms_to_amplitude(chunk.audio)
-                                session.timeline.add_audio_amplitude(amplitude=amp, source="tts")
-                                last_tts_amplitude_time = now
+                            amps = _pcm_rms_slices(
+                                chunk.audio,
+                                sample_rate=chunk.sample_rate,
+                                window_s=_amplitude_window_s,
+                            )
+                            for a in amps:
+                                t_start = tts_amplitude_next_t
+                                t_end = t_start + _amplitude_window_s
+                                session.timeline.add_audio_amplitude(
+                                    amplitude=a, source="tts", timestamp=t_start
+                                )
+                                amplitude_segments.append({
+                                    "startTime": round(t_start, 3),
+                                    "endTime": round(t_end, 3),
+                                    "amplitude": round(a, 2),
+                                })
+                                tts_amplitude_next_t = t_end
                         b64 = base64.b64encode(chunk.audio).decode("ascii")
-                        await ws.send_str(json.dumps({
+                        payload = {
                             "type": "tts_audio",
                             "data": b64,
                             "sample_rate": chunk.sample_rate,
                             "is_final": chunk.is_final,
-                        }))
+                        }
+                        if amplitude_segments:
+                            payload["amplitude_segments"] = amplitude_segments
+                        await ws.send_str(json.dumps(payload))
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                     logger.info("[timing] tts_complete @ %.2fs (tts stream took %.2fs)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0)
                     session.timeline.add_event("tts_complete", Lane.TTS)
@@ -580,20 +667,16 @@ async def _run_voice_pipeline(
         except Exception as e:
             logger.exception("turn_executor error: %s", e)
 
-    if not use_server_mic:
-        await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
-
     _user_amplitude_sent = False
-    preview_start_time = time.time()
 
     async def server_capture_consumer() -> None:
-        """Read PCM from server mic capture queue. Preview: stream user_amplitude at 50 Hz. Live: also feed ASR + timeline."""
+        """Read PCM from server mic capture queue. Preview: _feed_pcm_preview_only. Live: _feed_pcm_to_pipeline."""
         nonlocal _user_amplitude_sent
         if capture_queue is None:
             return
         loop = asyncio.get_event_loop()
         last_amplitude_time = 0.0
-        amplitude_interval = 0.05  # 50 Hz for both preview and live
+        amplitude_interval = 0.025
         first_get = True
         while not stopped.is_set():
             try:
@@ -611,40 +694,21 @@ async def _run_voice_pipeline(
                 break
             first_get = False
             if pipeline_live.is_set():
-                await asr.send_audio(chunk)
-                if session.timeline.start_time is not None:
-                    now = time.time() - session.timeline.start_time
-                    # Reset throttle when switching from preview to live (last_amplitude_time was in preview seconds, now is session-relative)
-                    if last_amplitude_time > 1.0:
-                        last_amplitude_time = 0.0
-                    if now - last_amplitude_time >= amplitude_interval:
-                        amp = _pcm_rms_to_amplitude(chunk)
-                        session.timeline.add_audio_amplitude(amplitude=amp, source="user")
-                        last_amplitude_time = now
-                        try:
-                            await ws.send_str(
-                                json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(amp, 2)})
-                            )
-                            if not _user_amplitude_sent:
-                                _user_amplitude_sent = True
-                                logger.info("First user_amplitude sent to client (live); amp=%.2f", amp)
-                        except Exception as e:
-                            logger.warning("Send user_amplitude failed: %s", e)
+                if last_amplitude_time > 1.0:
+                    last_amplitude_time = 0.0
+                last_amplitude_time, did_send, amp, _ = await _feed_pcm_to_pipeline(
+                    chunk, last_amplitude_time, amplitude_interval
+                )
+                if did_send and not _user_amplitude_sent:
+                    _user_amplitude_sent = True
+                    logger.info("First user_amplitude sent to client (live); amp=%.2f", amp)
             else:
-                # Preview: stream amplitude only (50 Hz), timestamp relative to connection
-                now = time.time() - preview_start_time
-                if now - last_amplitude_time >= amplitude_interval:
-                    amp = _pcm_rms_to_amplitude(chunk)
-                    last_amplitude_time = time.time() - preview_start_time
-                    try:
-                        await ws.send_str(
-                            json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(amp, 2)})
-                        )
-                        if not _user_amplitude_sent:
-                            _user_amplitude_sent = True
-                            logger.info("First user_amplitude sent to client (preview); amp=%.2f", amp)
-                    except Exception as e:
-                        logger.warning("Send user_amplitude failed: %s", e)
+                last_amplitude_time, did_send, amp, _ = await _feed_pcm_preview_only(
+                    chunk, last_amplitude_time, amplitude_interval
+                )
+                if did_send and not _user_amplitude_sent:
+                    _user_amplitude_sent = True
+                    logger.info("First user_amplitude sent to client (preview); amp=%.2f", amp)
 
     server_capture_task: Optional[asyncio.Task] = None
     if use_server_mic and capture_thread is not None and capture_queue is not None:
@@ -653,27 +717,59 @@ async def _run_voice_pipeline(
     recv_task = asyncio.create_task(receive_loop())
     asr_task: Optional[asyncio.Task] = None
     turn_task: Optional[asyncio.Task] = None
+    system_stats_task: Optional[asyncio.Task] = None
 
-    if use_server_mic:
-        # Wait for client to send start_session; then start ASR + turn executor (same capture keeps streaming)
-        done, _ = await asyncio.wait(
-            [asyncio.create_task(stopped.wait()), asyncio.create_task(pipeline_live.wait())],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if stopped.is_set():
-            pass  # goto cleanup
-        else:
-            asr_task = asyncio.create_task(asr_consumer())
-            turn_task = asyncio.create_task(turn_executor())
-            await stopped.wait()
-    else:
+    async def _system_stats_loop() -> None:
+        """Send CPU/GPU at 10 Hz over WebSocket and append to session.system_stats for save."""
+        loop = asyncio.get_event_loop()
+        interval = 0.1
+        while not stopped.is_set():
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
+            if stopped.is_set():
+                break
+            if session.timeline.start_time is None:
+                continue
+            try:
+                stats = await loop.run_in_executor(None, system_stats_module.gather_system_stats)
+            except Exception as e:
+                logger.debug("System stats gather failed: %s", e)
+                continue
+            t = time.time() - session.timeline.start_time
+            cpu = stats.get("cpu_percent")
+            gpu = stats.get("gpu_percent")
+            session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
+            try:
+                await ws.send_str(
+                    json.dumps({"type": "system_stats", "timestamp": t, "cpu_percent": cpu, "gpu_percent": gpu})
+                )
+            except Exception as e:
+                logger.debug("Send system_stats failed: %s", e)
+
+    # Wait for client to send start_session (both mics); then start ASR stream and turn executor
+    await asyncio.wait(
+        [asyncio.create_task(stopped.wait()), asyncio.create_task(pipeline_live.wait())],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if not stopped.is_set():
+        session.system_stats = []
+        await asr.start_stream()
         asr_task = asyncio.create_task(asr_consumer())
         turn_task = asyncio.create_task(turn_executor())
+        system_stats_task = asyncio.create_task(_system_stats_loop())
         await stopped.wait()
     if stop_capture is not None:
         stop_capture.set()
     if server_capture_task is not None:
         server_capture_task.cancel()
+    if system_stats_task is not None:
+        system_stats_task.cancel()
+        try:
+            await system_stats_task
+        except asyncio.CancelledError:
+            pass
     await asr.stop_stream()
     recv_task.cancel()
     if asr_task is not None:
