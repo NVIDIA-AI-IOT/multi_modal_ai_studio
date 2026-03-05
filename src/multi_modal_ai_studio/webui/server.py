@@ -15,7 +15,12 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from dotenv import load_dotenv
+
 from aiohttp import web
+
+# Load .env so OPENAI_API_KEY (and others) are available for prefills and backends
+load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
 from multi_modal_ai_studio.config.schema import LLMConfig
@@ -143,6 +148,7 @@ class WebUIServer:
         self.ssl_context = ssl_context
         self.app = web.Application()
         self.app["session_dir"] = self.session_dir
+        self.app["_server"] = self  # so voice pipeline can read current effective session dir
         self.setup_routes()
 
     def _get_effective_session_dir(self) -> Path:
@@ -168,6 +174,7 @@ class WebUIServer:
         self.app.router.add_get('/api/camera/stream', self.handle_camera_stream)
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
+        self.app.router.add_get('/api/config/prefills', self.handle_config_prefills)
         self.app.router.add_get('/ws/voice', handle_voice_ws)
         self.app.router.add_get('/ws/mic-preview', handle_mic_preview_ws)
         self.app.router.add_get('/ws/camera-webrtc', handle_camera_webrtc_ws)
@@ -193,6 +200,14 @@ class WebUIServer:
     async def handle_favicon(self, request):
         """Respond to /favicon.ico so the browser does not 404 (no icon file)."""
         return web.Response(status=204)
+
+    async def handle_config_prefills(self, request: web.Request) -> web.Response:
+        """GET /api/config/prefills: values from env (e.g. OPENAI_API_KEY) to prefill Configuration UI."""
+        payload: Dict[str, Any] = {}
+        api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        if api_key:
+            payload["openai_api_key"] = api_key
+        return web.json_response(payload)
 
     async def handle_static_file(self, request):
         """Serve static files (CSS, JS)."""

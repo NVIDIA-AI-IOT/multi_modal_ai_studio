@@ -651,6 +651,15 @@ code, pre {
     border-radius: 9999px;
     z-index: 1;
 }
+.config-tab.config-tab--disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.config-tab.config-tab--disabled .config-tab-icon,
+.config-tab.config-tab--disabled .lucide-inline {
+    color: var(--text-muted) !important;
+}
 
 /* ===== Config Panel ===== */
 .config-panel {
@@ -1098,6 +1107,7 @@ code, pre {
 
 .form-group input[type="text"],
 .form-group input[type="number"],
+.form-group input[type="password"],
 .form-group select,
 .form-group textarea {
     width: 100%;
@@ -1113,6 +1123,7 @@ code, pre {
 
 .form-group input[type="text"]:focus,
 .form-group input[type="number"]:focus,
+.form-group input[type="password"]:focus,
 .form-group select:focus,
 .form-group textarea:focus {
     outline: none;
@@ -1161,6 +1172,26 @@ code, pre {
     height: 18px;
     cursor: pointer;
     accent-color: var(--nvidia-green);
+}
+
+.radio-label {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-sm);
+    cursor: pointer;
+    font-weight: 500 !important;
+    margin-bottom: 6px;
+}
+.radio-label input[type="radio"] {
+    cursor: pointer;
+    accent-color: var(--nvidia-green);
+}
+
+.preset-model-hint {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
 }
 
 .checkbox-label--with-icon {
@@ -1519,6 +1550,13 @@ code, pre {
 .pipeline-seg-asr .pipeline-seg-poly { stroke: var(--timeline-asr, #1976D2); }
 .pipeline-seg-llm .pipeline-seg-poly { stroke: var(--timeline-llm, #FF9800); }
 .pipeline-seg-tts .pipeline-seg-poly { stroke: var(--timeline-tts, #EC407A); }
+/* Full voice: one segment spanning 3 slots, 45°/135° slants, gradient stroke ASR-blue → TTS-magenta */
+.pipeline-seg-realtime {
+    flex: 3;
+}
+.pipeline-seg-realtime .pipeline-seg-poly {
+    stroke: url(#pipeline-realtime-stroke);
+}
 .pipeline-seg-label {
     position: relative;
     z-index: 1;
@@ -2402,6 +2440,31 @@ code, pre {
 
 .icon-btn:active {
     transform: scale(0.95);
+}
+
+/* System prompt preset buttons [1] [2] [3] */
+.system-prompt-preset-btn {
+    min-width: 32px;
+    height: 28px;
+    padding: 0 6px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+.system-prompt-preset-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+.system-prompt-preset-sep {
+    color: var(--text-tertiary);
+    font-size: 0.85rem;
+    user-select: none;
 }
 
 /* API Base URL presets (Live RIVA WebUI-style) */

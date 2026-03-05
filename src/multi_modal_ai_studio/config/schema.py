@@ -47,6 +47,10 @@ class ASRConfig:
     speech_pad_ms: int = 500  # 500ms default to reduce leading-word loss (was 300)
     speech_timeout_ms: int = 700
     requires_restart: bool = False
+    # OpenAI Realtime API (when scheme == "openai-realtime")
+    realtime_url: Optional[str] = None
+    realtime_transport: Literal["websocket", "webrtc", "sip"] = "websocket"
+    realtime_session_type: Literal["full", "transcription"] = "full"
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.

@@ -237,3 +237,104 @@ After **`_feed_pcm_preview_only`** / **`_feed_pcm_to_pipeline`**, the pipeline i
 | **voice_pipeline.py** (shared) | `asr_consumer`, `turn_executor` | Same |
 
 Browser and Server USB differ only by **source of PCM** (WebSocket vs capture_queue). Per-chunk handling is unified in `_feed_pcm_preview_only` and `_feed_pcm_to_pipeline` (**refactored**). A separate **/ws/mic-preview** WebSocket (server mic level only, no ASR/LLM/TTS) uses its own inline amplitude in `handle_mic_preview_ws` (~982–1006) and does not use the shared helpers.
+
+---
+
+## 7. Realtime API speech-to-speech PCM
+
+When ASR is **OpenAI Realtime** (`asr.scheme == "openai-realtime"`, `realtime_session_type == "full"`, `realtime_transport == "websocket"`), the server runs **`_run_realtime_loop`** instead of the classic Riva ASR → LLM → TTS pipeline. There is no Riva ASR, LLM, or Riva TTS; a single **OpenAI Realtime WebSocket** handles speech-to-speech: our server sends input PCM and receives back events (transcription, response audio). All traffic with the browser still goes over **/ws/voice** (config, start_session, binary PCM from browser when browser mic, user_amplitude and event/tts_audio from server).
+
+**Sample rates:** Browser and server capture both produce **16 kHz** PCM (same as classic). The Realtime API expects **24 kHz** PCM (`backends/realtime/client.py`: `REALTIME_SAMPLE_RATE = 24000`). The server resamples 16 → 24 kHz before sending to the Realtime client; TTS audio from Realtime is 24 kHz and is sent to the browser as base64 in `tts_audio` (client decodes and plays at 24 kHz).
+
+### 7.1 When Realtime is chosen
+
+| Step | Location | What happens |
+|------|----------|--------------|
+| 1 | `voice_pipeline.py` ~601–606 | After session and device setup, if `asr_config.scheme == "openai-realtime"` and `realtime_session_type == "full"` and `realtime_transport == "websocket"`, and URL/model (and API key for non-localhost) are set, the server calls **`_run_realtime_loop(...)`** and does not run the classic pipeline. |
+| 2 | `voice_pipeline.py` ~618–628 | `_run_realtime_loop` receives the same `ws`, `session`, `config`, `session_dir`, `use_server_mic`, `use_server_speaker`, `capture_queue`, `stop_capture`, `capture_thread` as the classic path would. Device capture (if server mic) is already started by the common code above. |
+
+### 7.2 Input PCM: browser mic (Realtime)
+
+| Step | Location | What happens |
+|------|----------|--------------|
+| 1 | `app.js` | Same as classic Browser Mic: client sends **config** then **start_session**; after that it sends **binary PCM** (Int16, 16 kHz) over /ws/voice. No change in client behavior for Realtime. |
+| 2 | `voice_pipeline.py` ~411–430 `receive_loop()` | On **BINARY** message (and `not use_server_mic`): **`await session_ready.wait()`** (do not send until Realtime session is ready). **`pcm_24 = pcm_for_realtime(msg.data)`** (~413): resamples 16 kHz → 24 kHz via **`_resample_pcm_to_24k(msg.data, INPUT_SAMPLE_RATE_FOR_REALTIME)`** (~247–248; `INPUT_SAMPLE_RATE_FOR_REALTIME = 16000` ~162). Optional debug: **`_write_debug_pcm(pcm_24)`**. **`await client.send_audio(pcm_24)`** (~415): pushes base64-encoded PCM to the Realtime client’s input buffer; client sends to OpenAI. |
+| 3 | `voice_pipeline.py` ~416–429 | User amplitude (green waveform): **`amp = _pcm_rms_to_amplitude(msg.data)`** on the **original 16 kHz** chunk; throttled at **`amplitude_interval = 0.05`** (~219); **`session.timeline.add_audio_amplitude(amplitude=amp, source="user")`**; **`ws.send_str({"type": "user_amplitude", "timestamp": ..., "amplitude": ...})`** to browser. Smoothed with a 3-sample buffer. **Realtime does not use** `_feed_pcm_preview_only` or `_feed_pcm_to_pipeline`; it has its own inline amplitude logic. |
+
+**Summary:** Browser → 16 kHz binary on /ws/voice → server resamples to 24 kHz → Realtime client → OpenAI. User amplitude is computed on the 16 kHz chunk and sent to the browser at 50 Hz; same timeline and message shape as classic for the green waveform.
+
+### 7.3 Input PCM: server USB mic (Realtime)
+
+| Step | Location | What happens |
+|------|----------|--------------|
+| 1 | `voice_pipeline.py` ~438–482 `server_capture_consumer()` | Same **capture_queue** as classic: 16 kHz chunks from `devices/capture.py` (ALSA or PyAudio). **`chunk = await loop.run_in_executor(None, capture_queue.get)`** (~447). When **`pipeline_live.is_set()`** (~453): **`pcm_24 = pcm_for_realtime(chunk)`** (~455), **`_write_debug_pcm(pcm_24)`**, **`await client.send_audio(pcm_24)`** (~456); then user amplitude from **`_pcm_rms_to_amplitude(chunk)`** (16 kHz), throttle 0.05 s, timeline + **user_amplitude** to browser (~468–471). When not live (~474–482): preview-only **user_amplitude** (no timeline, no send_audio). **Realtime does not use** `_feed_pcm_preview_only` or `_feed_pcm_to_pipeline`; server_capture_consumer has its own branch. |
+| 2 | Session start | For server mic, **`pipeline_live`** is cleared initially (~214). When the browser sends **start_session**, receive_loop (~392–396) sets **`session.start()`**, **`send_event(session_start)`**, **`pipeline_live.set()`**. After that, server_capture_consumer sends PCM to the Realtime client and records user amplitude. |
+
+**Summary:** Capture thread → 16 kHz → server_capture_consumer → resample to 24 kHz → Realtime client; user amplitude from 16 kHz chunk, same 50 Hz and timeline/user_amplitude as browser mic Realtime path.
+
+### 7.4 Resampling 16 → 24 kHz
+
+| Step | Location | What happens |
+|------|----------|--------------|
+| 1 | `voice_pipeline.py` ~150–158 `_resample_pcm_to_24k()` | **`samples = np.frombuffer(pcm_bytes, dtype=np.int16)`**; **`n_new = int(round(n_old * REALTIME_SAMPLE_RATE / from_rate))`** (24k/16k → 1.5× samples); linear interpolation **`np.interp(x_new, x_old, samples.astype(np.float64)).astype(np.int16)`**; returns bytes. Used by **`pcm_for_realtime(pcm_bytes)`** (~247–248) with **`INPUT_SAMPLE_RATE_FOR_REALTIME = 16000`** (~162). |
+
+### 7.5 Realtime output: TTS audio and timeline
+
+| Step | Location | What happens |
+|------|----------|--------------|
+| 1 | `backends/realtime/client.py` | Realtime client **`events()`** yields **`RealtimeEvent`** with **`kind="audio"`**, **`ev.audio`** (bytes, 24 kHz PCM), **`ev.sample_rate`** (24000). No separate Riva TTS; OpenAI returns response audio on the same WebSocket. |
+| 2 | `voice_pipeline.py` ~288–368 `realtime_event_consumer()` | **`async for ev in client.events()`**. On **`ev.kind == "audio"` and `ev.audio`**: optional **`_write_debug_response_audio(ev.audio)`**; timeline events **tts_start** / **tts_first_audio** (first chunk); **`pending_tts_amp = _pcm_rms_to_amplitude(ev.audio)`** when **`ts - last_tts_amplitude_time >= tts_amplitude_interval`** (0.05 s). If server speaker: write **ev.audio** to server playback process. **`b64 = base64.b64encode(ev.audio)`**; then **`ts_send = time.time() - session.timeline.start_time`**; **`session.timeline.add_audio_amplitude(amplitude=pending_tts_amp, source="tts", timestamp=ts_send)`** (one sample per chunk at handoff time); **`await ws.send_str({"type": "tts_audio", "data": b64, "sample_rate": ev.sample_rate, "is_final": False})`**. Realtime does **not** send **amplitude_segments** in tts_audio; the browser derives live purple from decoded PCM (e.g. 25 ms windows in app.js). Replay uses server timeline **audio_amplitude** (source=tts). |
+
+**Summary:** Realtime API → 24 kHz PCM events → server base64-encodes, adds one TTS amplitude sample per chunk (at send time), sends **tts_audio** on /ws/voice; optional server speaker playback. Browser plays at 24 kHz and builds live purple from PCM; saved session has server-authored TTS amplitude in the timeline.
+
+### 7.6 Realtime vs classic: side-by-side
+
+| Stage | Classic (Riva) | Realtime (OpenAI) |
+|-------|----------------|-------------------|
+| **Entry** | `_run_voice_pipeline` → `receive_loop` + `asr_consumer` + `turn_executor` | `_run_realtime_loop` → `realtime_event_consumer` + `receive_loop` + optional `server_capture_consumer` |
+| **Input PCM source** | Same: browser binary or capture_queue | Same |
+| **Input rate** | 16 kHz (no resample) | 16 kHz → **resampled to 24 kHz** before sending to upstream |
+| **Upstream** | Riva ASR (gRPC) + LLM + Riva TTS | Single Realtime WebSocket (OpenAI); ASR + LLM + TTS inside API |
+| **User amplitude** | **`_feed_pcm_preview_only`** / **`_feed_pcm_to_pipeline`** (25 ms slices, timeline + user_amplitude) | Inline in receive_loop / server_capture_consumer (50 Hz, **`_pcm_rms_to_amplitude`** on 16 kHz chunk, timeline + user_amplitude) |
+| **TTS output** | turn_executor: TTS stream → base64 + **amplitude_segments** (25 ms) in tts_audio | realtime_event_consumer: ev.audio → base64, **no amplitude_segments**; one **add_audio_amplitude(..., ts_send)** per chunk (~50 ms) |
+| **Live purple (browser)** | **All from server:** `voice_pipeline.py` sends **amplitude_segments** in each tts_audio; browser pushes them to `liveTtsAmplitudeHistory` and does not compute from PCM. | **Fallback:** Server does not send amplitude_segments; browser uses **ttsChunkToAmplitudeSegments** (25 ms windows) on decoded PCM to build live purple. |
+| **Replay purple** | Timeline **audio_amplitude** (source=tts) from server | Same: timeline **audio_amplitude** (source=tts); density lower (one per ~50 ms) |
+
+### 7.7 Diagram: Realtime path (browser mic)
+
+```mermaid
+flowchart LR
+  subgraph MAIN[" "]
+    subgraph Server["Server"]
+      RECV[receive_loop]
+      RESAMPLE["_resample_pcm_to_24k"]
+      RT[OpenAI Realtime client]
+      EVT[realtime_event_consumer]
+      RECV -->|16 kHz| RESAMPLE -->|24 kHz| RT
+      RT -->|events: audio, transcript| EVT
+      EVT -->|tts_audio, event, user_amplitude| WS_OUT["out: ws/voice"]
+    end
+    subgraph Browser["Browser"]
+      B1[Config + start_session]
+      Mic[Browser mic]
+      GUM[getUserMedia 16kHz]
+      SP[ScriptProcessor]
+      WS_SEND["ws.send pcm"]
+      Timeline[Timeline and playback]
+      B1 --> Mic --> GUM --> SP --> WS_SEND
+    end
+    B1 -->|config, start_session| RECV
+    WS_SEND -->|binary 16kHz| RECV
+    RECV -->|user_amplitude| WS_OUT
+    EVT -.->|tts_audio 24kHz base64| Timeline
+  end
+```
+
+### 7.8 File reference (Realtime)
+
+| File | Role |
+|------|------|
+| **voice_pipeline.py** | **~601–628**: choose Realtime vs classic; **~165–548** `_run_realtime_loop`: pcm_for_realtime (~247), receive_loop (~384), server_capture_consumer (~438), realtime_event_consumer (~288); **~150–158** `_resample_pcm_to_24k`; **~162** `INPUT_SAMPLE_RATE_FOR_REALTIME`. |
+| **backends/realtime/client.py** | **OpenAIRealtimeClient**: connect, send_audio (24 kHz PCM), events(); **REALTIME_SAMPLE_RATE = 24000**. |
+| **app.js** | Same as classic: config, start_session, binary PCM at 16 kHz; handles event, user_amplitude, tts_audio (including 24 kHz from Realtime); live purple from **ttsChunkToAmplitudeSegments** when no amplitude_segments. |
+| **devices/capture.py** | Same as classic when server mic: 16 kHz chunks into capture_queue; consumed by server_capture_consumer in Realtime path. |

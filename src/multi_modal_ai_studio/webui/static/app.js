@@ -60,6 +60,8 @@ const state = {
     liveTimelineRafId: null,
     /** Live session: (timestamp_sec, amplitude 0–100) for AUDIO lane waveform; max ~15 sec at ~20 Hz */
     liveAudioAmplitudeHistory: [],
+    /** Running buffer of last N client-side RMS values for smoothing green waveform (avoids saw-tooth from chunk boundaries) */
+    _userAmplitudeSmoothBuf: [],
     /** Server USB: amplitude samples received before session_start; flushed into liveAudioAmplitudeHistory when session starts */
     pendingServerMicAmplitude: [],
     /** Live session: TTS (AI) segments for purple waveform on AUDIO lane: { startTime, endTime, amplitude } */
@@ -89,6 +91,9 @@ const state = {
 
     /** Server health: { llm: null | { ok, error? }, riva: null | { ok, error? } } from /api/health/llm and /api/health/riva */
     serverHealth: { llm: null, riva: null },
+
+    /** Cached OpenAI API key from env (GET /api/config/prefills); re-applied when starting a new chat */
+    envOpenaiApiKey: '',
 
     // UI state (for future persistence)
     ui: {
@@ -146,9 +151,44 @@ function saveUISettings() {
 }
 
 // ===== Session Loading =====
+/** Load config prefills from server (e.g. OPENAI_API_KEY from env/.env) and apply to defaultConfig/currentConfig. Caches key in state.envOpenaiApiKey for re-apply on new chat. */
+async function loadConfigPrefills() {
+    try {
+        const r = await fetch(getApiBase() + '/api/config/prefills');
+        if (!r.ok) return;
+        const data = await r.json();
+        const key = (data && data.openai_api_key) ? String(data.openai_api_key).trim() : '';
+        state.envOpenaiApiKey = key || '';
+        if (!key) return;
+        if (defaultConfig.asr) defaultConfig.asr.api_key = key;
+        if (defaultConfig.llm) defaultConfig.llm.api_key = key;
+        if (currentConfig.asr) currentConfig.asr.api_key = key;
+        if (currentConfig.llm) currentConfig.llm.api_key = key;
+        const asrKeyEl = document.getElementById('asr-realtime-api-key');
+        if (asrKeyEl) asrKeyEl.value = key;
+        const llmKeyEl = document.getElementById('llm-api-key');
+        if (llmKeyEl) llmKeyEl.value = key;
+    } catch (e) {
+        // ignore (e.g. offline or old server without /api/config/prefills)
+    }
+}
+
+/** Re-apply env prefills (e.g. OPENAI_API_KEY) to currentConfig and DOM. Call after resetting currentConfig (e.g. startNewSession). */
+function applyEnvPrefillsToCurrentConfig() {
+    const key = (state.envOpenaiApiKey || '').trim();
+    if (!key) return;
+    if (currentConfig.asr) currentConfig.asr.api_key = key;
+    if (currentConfig.llm) currentConfig.llm.api_key = key;
+    const asrKeyEl = document.getElementById('asr-realtime-api-key');
+    if (asrKeyEl) asrKeyEl.value = key;
+    const llmKeyEl = document.getElementById('llm-api-key');
+    if (llmKeyEl) llmKeyEl.value = key;
+}
+
 async function loadSessions() {
     console.log('loadSessions() called');
     try {
+        await loadConfigPrefills();
         // Apply saved session directory override so server uses the right dir (e.g. mock_sessions).
         // If PATCH is not supported (e.g. old server), continue and load sessions anyway.
         const override = (typeof uiSettings.sessionDirOverride === 'string' && uiSettings.sessionDirOverride) ? uiSettings.sessionDirOverride : '';
@@ -217,6 +257,7 @@ function renderSessionList() {
                 <div class="session-item-body" onclick="selectSession(${index})">
                     <div class="session-item-name">${safeName}</div>
                     <div class="session-item-meta">
+                        <span>${formatSessionDateOnly(session.created_at)}</span>
                         <span>${formatDate(session.created_at)}</span>
                         <span>${metrics.total_turns || 0} turns</span>
                     </div>
@@ -359,6 +400,7 @@ function updateConfigPanelState() {
 
 function renderConfig() {
     updateConfigPanelState();
+    updateConfigTabStates();
     const contentEl = document.getElementById('config-tab-content');
     const tab = state.activeConfigTab;
     // Device tab uses 'devices' key in config
@@ -367,7 +409,7 @@ function renderConfig() {
     // If in live session mode, show editable forms
     if (state.isLiveSession) {
         contentEl.innerHTML = renderEditableConfigForm(tab, currentConfig[configKey], false);
-        if (tab === 'llm') setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+        if (tab === 'llm' && !isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
         if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
@@ -405,7 +447,11 @@ const defaultConfig = {
         vad_stop_threshold: 0.3,
         speech_pad_ms: 500,
         speech_timeout_ms: 700,
-        interim_results: true
+        interim_results: true,
+        realtime_transport: 'websocket',
+        realtime_session_type: 'transcription',
+        realtime_url: 'wss://api.openai.com/v1/realtime',
+        api_key: ''
     },
     llm: {
         backend: 'openai',
@@ -426,7 +472,8 @@ const defaultConfig = {
         voice: '',
         language: 'en-US',
         sample_rate: 22050,
-        quality: 'high'
+        quality: 'high',
+        realtime_transport: 'websocket'
     },
     devices: {
         camera: 'browser',
@@ -481,6 +528,21 @@ function saveDefaultConfig() {
     } catch (e) {
         console.error('Failed to save default config:', e);
     }
+}
+
+/** Preset system prompts for voice AI. [1] [2] [3] in the UI apply these. */
+var SYSTEM_PROMPT_PRESETS = [
+    'You are a helpful voice assistant.',
+    'You are a helpful AI assistant.',
+    'You are a concise voice assistant. Keep replies brief and natural for conversation.'
+];
+
+function applySystemPromptPreset(index) {
+    var text = SYSTEM_PROMPT_PRESETS[index];
+    if (text == null) return;
+    updateConfig('llm', 'system_prompt', text);
+    var el = document.getElementById('llm-system-prompt');
+    if (el) el.value = text;
 }
 
 /** Pin an LLM field (e.g. system_prompt, extra_request_body) to the saved default so it is used in other sessions. */
@@ -700,19 +762,63 @@ function renderASRConfig(config, readonly = false) {
                 </div>
             </div>
 
-            <!-- OpenAI Realtime Settings -->
+            <!-- OpenAI Realtime Settings: Connection (WebRTC | WebSocket | SIP) + Mode (full | transcript only) -->
             <div class="backend-content" style="display: ${config.backend === 'openai-realtime' ? 'block' : 'none'}">
-                <div class="form-group">
-                    <label>WebSocket URL</label>
-                    <input type="text" ${disabled} value="${config.realtime_url || 'wss://api.openai.com/v1/realtime'}"
-                           onchange="updateConfig('asr', 'realtime_url', this.value)">
+                <div class="config-section-label" style="margin-bottom: 8px;"><i data-lucide="radio" class="lucide-inline"></i> Connection</div>
+                <div class="backend-tabs speech-api-tabs realtime-transport-tabs" style="margin-bottom: 12px;">
+                    <button type="button" class="backend-tab speech-api-tab ${(config.realtime_transport || 'websocket') === 'webrtc' ? 'active' : ''} ${!readonly ? '' : 'disabled'}"
+                            ${disabled} title="Not supported yet"
+                            onclick="if(!${readonly}) updateConfig('asr', 'realtime_transport', 'webrtc')">WebRTC</button>
+                    <button type="button" class="backend-tab speech-api-tab ${(config.realtime_transport || 'websocket') === 'websocket' ? 'active' : ''}"
+                            ${disabled}
+                            onclick="if(!${readonly}) updateConfig('asr', 'realtime_transport', 'websocket')">WebSocket</button>
+                    <button type="button" class="backend-tab speech-api-tab ${(config.realtime_transport || 'websocket') === 'sip' ? 'active' : ''} ${!readonly ? '' : 'disabled'}"
+                            ${disabled} title="Not supported yet"
+                            onclick="if(!${readonly}) updateConfig('asr', 'realtime_transport', 'sip')">SIP</button>
+                </div>
+                ${((config.realtime_transport || 'websocket') === 'webrtc' || (config.realtime_transport || 'websocket') === 'sip') ? '<p class="input-hint" style="margin: 0 0 12px 0;"><i data-lucide="info" class="lucide-inline"></i> Not supported yet. Use WebSocket.</p>' : ''}
+
+                <div class="config-section-label" style="margin-bottom: 8px;"><i data-lucide="mic-2" class="lucide-inline"></i> Mode</div>
+                <div class="form-group" style="margin-bottom: 12px;">
+                    <label class="radio-label">
+                        <input type="radio" ${disabled} name="asr-realtime-mode" value="full" ${(config.realtime_session_type || 'transcription') === 'full' ? 'checked' : ''}
+                               onchange="if(!${readonly}) updateConfig('asr', 'realtime_session_type', 'full'); applyRealtimeLock();">
+                        Full voice (speech-to-speech)
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" ${disabled} name="asr-realtime-mode" value="transcription" ${(config.realtime_session_type || 'transcription') === 'transcription' ? 'checked' : ''}
+                               onchange="if(!${readonly}) updateConfig('asr', 'realtime_session_type', 'transcription'); applyRealtimeLock();">
+                        Transcript only
+                    </label>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' ? 'block' : 'none'};">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                        <label style="margin: 0;">WebSocket URL</label>
+                        ${!readonly ? `<div style="position: relative;">
+                            <button type="button" class="icon-btn" onclick="toggleRealtimePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i></button>
+                            <div class="api-presets-menu" id="realtimePresetsMenu" style="display: none;">
+                                <div class="api-preset-item" onclick="selectRealtimePreset('wss://api.openai.com/v1/realtime', 'gpt-realtime')"><strong>OpenAI</strong><span>wss://api.openai.com/v1/realtime</span><span class="preset-model-hint">gpt-realtime</span></div>
+                                <div class="api-preset-item" onclick="selectRealtimePreset('wss://api.openai.com/v1/realtime', 'gpt-4o-realtime-preview')"><strong>OpenAI (preview)</strong><span>wss://api.openai.com/v1/realtime</span><span class="preset-model-hint">gpt-4o-realtime-preview</span></div>
+                            </div>
+                        </div>` : ''}
+                    </div>
+                    <input type="text" ${disabled} id="asr-realtime-url" value="${config.realtime_url || 'wss://api.openai.com/v1/realtime'}"
+                           onchange="updateConfig('asr', 'realtime_url', this.value); syncRealtimeApiKeyVisibility();">
+                </div>
+
+                <div class="form-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' ? 'block' : 'none'};">
                     <label>Model</label>
-                    <input type="text" ${disabled} value="${config.model || 'gpt-4o-realtime-preview'}"
+                    <input type="text" ${disabled} id="asr-realtime-model" value="${config.model || 'gpt-realtime'}"
                            onchange="updateConfig('asr', 'model', this.value)">
-                    ${!readonly ? '<span class="input-hint">e.g., gpt-4o-realtime-preview</span>' : ''}
+                    ${!readonly ? '<span class="input-hint">e.g. gpt-realtime, gpt-4o-realtime-preview</span>' : ''}
+                </div>
+
+                <div class="form-group" id="asr-realtime-api-key-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' && (config.realtime_url || '').indexOf('openai.com') !== -1 ? 'block' : 'none'};">
+                    <label>API Key</label>
+                    <input type="password" ${disabled} id="asr-realtime-api-key" value="${escapeHtml((config.api_key || (typeof currentConfig !== 'undefined' && currentConfig.llm && currentConfig.llm.api_key) || ''))}" placeholder="Same as LLM; required for OpenAI"
+                           onchange="updateConfig('asr', 'api_key', this.value); updateConfig('llm', 'api_key', this.value);">
+                    <div class="input-hint">Shared with Configuration &gt; LLM. Required for OpenAI Realtime.</div>
                 </div>
             </div>
 
@@ -757,18 +863,21 @@ function renderASRConfig(config, readonly = false) {
 }
 
 function renderLLMConfig(config, readonly = false) {
+    const realtimeFullVoice = !readonly && isRealtimeFullVoiceConfig(config);
     const disabled = readonly ? 'disabled' : '';
+    const disableApiAndModel = readonly || realtimeFullVoice;
     const roClass = readonly ? 'readonly' : '';
     const apiBase = config.api_base || (config.ollama_url ? config.ollama_url.replace(/\/v1$/, '') + '/v1' : 'http://localhost:11434/v1');
-    const showApiKey = !readonly && (apiBase.includes('openai.com') || apiBase.includes('nvidia.com'));
+    const showApiKey = !readonly && (apiBase.includes('openai.com') || apiBase.includes('integrate.api.nvidia.com'));
 
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${realtimeFullVoice ? '<p class="config-note"><i data-lucide="message-circle" class="lucide-inline"></i> Realtime full-voice: only <strong>System Prompt</strong> is used (sent as Realtime instructions). API Base and Model are fixed.</p>' : ''}
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">API Base URL</label>
-                    ${!readonly ? `<div style="position: relative;">
+                    ${!disableApiAndModel ? `<div style="position: relative;">
                         <button type="button" class="icon-btn" onclick="togglePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i></button>
                         <div class="api-presets-menu" id="presetsMenu" style="display: none;">
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:11434/v1', 'Ollama')"><strong>Ollama</strong><span>http://localhost:11434/v1</span></div>
@@ -781,26 +890,26 @@ function renderLLMConfig(config, readonly = false) {
                         </div>
                     </div>` : ''}
                 </div>
-                <input type="text" ${disabled} id="llm-api-base" value="${apiBase}" placeholder="http://localhost:11434/v1"
+                <input type="text" ${disableApiAndModel ? 'disabled' : ''} id="llm-api-base" value="${apiBase}" placeholder="http://localhost:11434/v1"
                        onchange="updateConfig('llm', 'api_base', this.value); if(!${readonly}) fetchLLMModels(this.value);">
-                <div class="input-hint">OpenAI-compatible API endpoint (Ollama, vLLM, SGLang, OpenAI, etc.)</div>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice (not used).' : 'OpenAI-compatible API endpoint (Ollama, vLLM, SGLang, OpenAI, etc.)'}</div>
             </div>
 
-            <div class="form-group" id="llm-api-key-group" style="display: ${showApiKey ? 'block' : 'none'}">
-                <label>API Key</label>
-                <input type="password" ${disabled} id="llm-api-key" value="${config.api_key || ''}" placeholder="Optional for local; required for OpenAI/NVIDIA"
+            <div class="form-group llm-api-key-group" id="llm-api-key-group" style="display: ${showApiKey ? 'block' : 'none'}">
+                <label>API Key ${showApiKey ? '(required for OpenAI / NVIDIA API Catalog)' : ''}</label>
+                <input type="password" ${disabled} id="llm-api-key" value="${config.api_key || ''}" placeholder="${showApiKey ? 'Paste your API key' : 'Optional for local'}"
                        onchange="updateConfig('llm', 'api_key', this.value)">
             </div>
 
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">Model</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                    ${!disableApiAndModel ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
                 </div>
-                <select ${disabled} id="llm-model-select" onchange="updateConfig('llm', 'model', this.value)">
-                    <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : 'Loading...'}</option>
+                <select ${disableApiAndModel ? 'disabled' : ''} id="llm-model-select" onchange="updateConfig('llm', 'model', this.value)">
+                    <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
                 </select>
-                <div class="input-hint">Fetched from API Base URL; use reload icon if you added a model</div>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Fetched from API Base URL; use reload icon if you added a model'}</div>
             </div>
 
             <div class="form-group">
@@ -838,10 +947,14 @@ function renderLLMConfig(config, readonly = false) {
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">System Prompt</label>
-                    ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        ${!readonly ? SYSTEM_PROMPT_PRESETS.map((_, i) => '<button type="button" class="system-prompt-preset-btn" onclick="applySystemPromptPreset(' + i + ')" title="Preset ' + (i + 1) + '">[' + (i + 1) + ']</button>').join('') : ''}
+                        ${!readonly ? '<span class="system-prompt-preset-sep" aria-hidden="true">|</span>' : ''}
+                        ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', \'system_prompt\', el.value); pinLlmFieldToDefault(\'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
+                    </div>
                 </div>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
-                          onchange="updateConfig('llm', 'system_prompt', this.value)">${config.system_prompt}</textarea>
+                          onchange="updateConfig('llm', 'system_prompt', this.value)">${escapeHtml(config.system_prompt || '')}</textarea>
             </div>
 
             <div class="form-group">
@@ -979,12 +1092,25 @@ function renderTTSConfig(config, readonly = false) {
                 </div>
             </div>
 
-            <!-- OpenAI Realtime TTS (same session as Realtime ASR; optional overrides) -->
+            <!-- OpenAI Realtime TTS (same session as Realtime ASR): Connection tabs + optional overrides -->
             <div class="backend-content" style="display: ${config.backend === 'openai-realtime' ? 'block' : 'none'}">
                 <div class="form-group">
                     <p class="input-hint" style="margin: 0;">TTS for OpenAI Realtime uses the same session as Realtime ASR. Voice and model are typically configured in the Realtime session.</p>
                 </div>
-                <div class="form-group">
+                <div class="config-section-label" style="margin-bottom: 8px;"><i data-lucide="radio" class="lucide-inline"></i> Connection</div>
+                <div class="backend-tabs speech-api-tabs realtime-transport-tabs" style="margin-bottom: 12px;">
+                    <button type="button" class="backend-tab speech-api-tab ${(config.realtime_transport || 'websocket') === 'webrtc' ? 'active' : ''} ${!readonly ? '' : 'disabled'}"
+                            ${disabled} title="Not supported yet"
+                            onclick="if(!${readonly}) updateConfig('tts', 'realtime_transport', 'webrtc')">WebRTC</button>
+                    <button type="button" class="backend-tab speech-api-tab ${(config.realtime_transport || 'websocket') === 'websocket' ? 'active' : ''}"
+                            ${disabled}
+                            onclick="if(!${readonly}) updateConfig('tts', 'realtime_transport', 'websocket')">WebSocket</button>
+                    <button type="button" class="backend-tab speech-api-tab ${(config.realtime_transport || 'websocket') === 'sip' ? 'active' : ''} ${!readonly ? '' : 'disabled'}"
+                            ${disabled} title="Not supported yet"
+                            onclick="if(!${readonly}) updateConfig('tts', 'realtime_transport', 'sip')">SIP</button>
+                </div>
+                ${((config.realtime_transport || 'websocket') === 'webrtc' || (config.realtime_transport || 'websocket') === 'sip') ? '<p class="input-hint" style="margin: 0 0 12px 0;"><i data-lucide="info" class="lucide-inline"></i> Not supported yet. Use WebSocket.</p>' : ''}
+                <div class="form-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' ? 'block' : 'none'};">
                     <label>WebSocket / API base</label>
                     <input type="text" ${disabled} value="${config.realtime_url || config.openai_url || 'wss://api.openai.com/v1/realtime'}"
                            onchange="updateConfig('tts', 'realtime_url', this.value); updateConfig('tts', 'openai_url', this.value)">
@@ -1484,10 +1610,130 @@ function populateSpeakerDeviceDropdown() {
     });
 }
 
+/** True when config has ASR = OpenAI Realtime (WebSocket, Full voice) and TTS = OpenAI Realtime. Used for pipeline display. */
+function isRealtimeFullVoiceConfig(config) {
+    if (!config || !config.asr || !config.tts) return false;
+    const asr = config.asr;
+    const tts = config.tts;
+    const asrFull = (asr.backend === 'openai-realtime' || asr.scheme === 'openai-realtime') &&
+        (asr.realtime_transport || 'websocket') === 'websocket' &&
+        (asr.realtime_session_type || 'transcription') === 'full';
+    const ttsRealtime = tts.backend === 'openai-realtime' || tts.scheme === 'openai-realtime';
+    return asrFull && ttsRealtime;
+}
+
+/** True when ASR is Realtime WebSocket Full-voice and TTS is also Realtime: LLM tab disabled (single Realtime session). Unlock when ASR is transcript-only or TTS is not Realtime. Default mode is transcript-only. */
+function isRealtimeFullVoiceLock() {
+    const asr = currentConfig.asr;
+    const tts = currentConfig.tts;
+    const asrFull = (asr.backend === 'openai-realtime' || asr.scheme === 'openai-realtime') &&
+        (asr.realtime_transport || 'websocket') === 'websocket' &&
+        (asr.realtime_session_type || 'transcription') === 'full';
+    const ttsRealtime = tts.backend === 'openai-realtime' || tts.scheme === 'openai-realtime';
+    return asrFull && ttsRealtime;
+}
+
+/** When user selects ASR Realtime WebSocket Full-voice: set TTS to Realtime (WebSocket) and disable LLM tab. When they switch to transcript-only or change TTS away, unlock. */
+function applyRealtimeLock() {
+    if (isRealtimeFullVoiceLock()) {
+        currentConfig.tts.backend = 'openai-realtime';
+        currentConfig.tts.scheme = 'openai-realtime';
+        currentConfig.tts.realtime_transport = 'websocket';
+    }
+    updateConfigTabStates();
+}
+
+/** When Realtime full-voice is selected: LLM tab stays enabled (system prompt = Realtime instructions); tab title explains API Base/Model are fixed. */
+function updateConfigTabStates() {
+    const llmTab = document.querySelector('.config-tab[data-tab="llm"]');
+    if (!llmTab) return;
+    const realtimeFullVoice = isRealtimeFullVoiceLock();
+    llmTab.classList.remove('config-tab--disabled');
+    llmTab.setAttribute('aria-disabled', 'false');
+    llmTab.title = realtimeFullVoice ? 'System prompt is used as Realtime instructions; API Base and Model are fixed.' : '';
+}
+
+function toggleRealtimePresetsMenu(ev) {
+    ev.preventDefault();
+    const menu = document.getElementById('realtimePresetsMenu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
+function selectRealtimePreset(url, model) {
+    currentConfig.asr.realtime_url = url;
+    currentConfig.asr.model = model;
+    const urlEl = document.getElementById('asr-realtime-url');
+    const modelEl = document.getElementById('asr-realtime-model');
+    if (urlEl) urlEl.value = url;
+    if (modelEl) modelEl.value = model;
+    const menu = document.getElementById('realtimePresetsMenu');
+    if (menu) menu.style.display = 'none';
+    updateConfig('asr', 'realtime_url', url);
+    updateConfig('asr', 'model', model);
+    syncRealtimeApiKeyVisibility();
+}
+
+function syncRealtimeApiKeyVisibility() {
+    const group = document.getElementById('asr-realtime-api-key-group');
+    if (!group) return;
+    const url = (document.getElementById('asr-realtime-url') || {}).value || currentConfig.asr.realtime_url || '';
+    group.style.display = url.indexOf('openai.com') !== -1 ? 'block' : 'none';
+}
+
 // Update configuration value
 function updateConfig(section, key, value) {
     console.log(`Config updated: ${section}.${key} = ${value}`);
     currentConfig[section][key] = value;
+
+    // Sync backend -> scheme for pipeline
+    if (section === 'asr' && key === 'backend') currentConfig.asr.scheme = value;
+    if (section === 'tts' && key === 'backend') currentConfig.tts.scheme = value;
+    // Keep ASR Realtime API key in sync with LLM when using Realtime WebSocket
+    if (section === 'llm' && key === 'api_key' && (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime') && (currentConfig.asr.realtime_transport || 'websocket') === 'websocket') {
+        currentConfig.asr.api_key = value;
+    }
+
+    // Realtime lock: when ASR is openai-realtime + websocket + full-voice, force TTS to openai-realtime so lock applies
+    if (section === 'asr' && (key === 'backend' || key === 'realtime_transport' || key === 'realtime_session_type')) {
+        const asrFullVoice = (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime') &&
+            (currentConfig.asr.realtime_transport || 'websocket') === 'websocket' &&
+            (currentConfig.asr.realtime_session_type || 'transcription') === 'full';
+        if (asrFullVoice) {
+            currentConfig.tts.backend = 'openai-realtime';
+            currentConfig.tts.scheme = 'openai-realtime';
+            currentConfig.tts.realtime_transport = 'websocket';
+        }
+        // When switching to ASR > OpenAI Realtime API (WebSocket), set defaults: Transcript only, URL, model, API key shown (blank)
+        if (section === 'asr' && key === 'backend' && value === 'openai-realtime') {
+            if (!currentConfig.asr.realtime_transport || currentConfig.asr.realtime_transport !== 'websocket') {
+                currentConfig.asr.realtime_transport = 'websocket';
+            }
+            if (!(currentConfig.asr.realtime_session_type || '').trim()) {
+                currentConfig.asr.realtime_session_type = 'transcription';
+            }
+            if (!(currentConfig.asr.realtime_url || '').trim()) {
+                currentConfig.asr.realtime_url = 'wss://api.openai.com/v1/realtime';
+            }
+            var m = (currentConfig.asr.model || '').trim();
+            if (!m || m.indexOf('realtime') === -1) {
+                currentConfig.asr.model = 'gpt-realtime';
+            }
+            if (currentConfig.asr.api_key === undefined) {
+                currentConfig.asr.api_key = '';
+            }
+        }
+    }
+    // When TTS is changed to something other than OpenAI Realtime and ASR was full-voice, force ASR to transcript-only
+    if (section === 'tts' && key === 'backend' && value !== 'openai-realtime') {
+        const asrFullVoice = (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime') &&
+            (currentConfig.asr.realtime_transport || 'websocket') === 'websocket' &&
+            (currentConfig.asr.realtime_session_type || 'transcription') === 'full';
+        if (asrFullVoice) {
+            currentConfig.asr.realtime_session_type = 'transcription';
+        }
+    }
+    updateConfigTabStates();
 
     // Persist LLM system prompt and extra request body so they survive reload without "Save as default"
     if (section === 'llm' && (key === 'system_prompt' || key === 'extra_request_body') && state.isLiveSession) {
@@ -2992,7 +3238,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 var ttsDataT1 = ttsFromTimeline.length ? ttsFromTimeline[ttsFromTimeline.length - 1].timestamp : 0;
                 for (var t = visibleStart; t <= visibleEnd; t += tStep) {
                     if (t < ttsDataT0 || t > ttsDataT1) continue;
-                    var ampTl = getAmplitudeAtTime(ttsFromTimeline, t, 0.1);
+                    // maxGapSec=0.25: interpolate within one TTS response (chunk gaps ~50–100ms) but don't draw in silence between two responses (avoids bridge of tiny dots)
+                    var ampTl = getAmplitudeAtTime(ttsFromTimeline, t, 0.25);
                     var amp = Math.min(100, ampTl * aiGain);
                     if (amp <= 0) continue;
                     var ampForBar = Math.max(amp, 2);
@@ -3052,13 +3299,14 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         return s.slice(0, maxLen) + '\u2026';
     }
 
-    // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only
+    // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only; Realtime = system + TTS output transcript
     pointEvents.forEach(event => {
         let targetLane = event.lane;
         if (targetLane === 'audio') return;
         // Draw user_speech_end on speech lane so TTL boundary is visible (backend sends it as system)
-        if (targetLane === 'system' && event.event_type !== 'user_speech_end') return;
         if (targetLane === 'system' && event.event_type === 'user_speech_end') targetLane = 'speech';
+        // Realtime session_ready and error stay on system lane and are drawn below
+        if (targetLane === 'system' && event.event_type !== 'user_speech_end' && event.event_type !== 'realtime_session_ready' && event.event_type !== 'error') return;
 
         if (combineSpeechLanes && targetLane === 'tts') targetLane = 'speech';
 
@@ -3068,9 +3316,51 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const x = PADDING_LEFT + (event.timestamp - timelineOffset) * timeScale;
         const laneY = getLaneY(laneIndex);
         const laneH = getLaneHeight(laneIndex);
-        const centerY = laneY + laneH / 2;
+        // When ASR and TTS share one lane: top half = ASR, bottom half = TTS (avoids overlap)
+        let centerY = laneY + laneH / 2;
+        if (combineSpeechLanes && targetLane === 'speech') {
+            const et0 = event.event_type || event.eventType || '';
+            if (et0 === 'asr_partial' || et0 === 'asr_final' || et0 === 'user_speech_end') {
+                centerY = laneY + laneH * 0.25;
+            } else if (et0 === 'realtime_output_partial' || et0 === 'realtime_output_final' || et0 === 'tts_complete') {
+                centerY = laneY + laneH * 0.75;
+            }
+        }
 
         const et = event.event_type || event.eventType || '';
+        // System lane: Realtime session_ready (green), error (red)
+        if (targetLane === 'system') {
+            let dotColor = '#888';
+            let dotRadius = 0;
+            let label = '';
+            if (et === 'realtime_session_ready') {
+                dotColor = '#4CAF50';
+                dotRadius = 4;
+                label = 'Realtime ready';
+            } else if (et === 'error') {
+                dotColor = '#D32F2F';
+                dotRadius = 4;
+                label = (event.data && event.data.message) ? String(event.data.message) : 'Error';
+            }
+            if (dotRadius > 0) {
+                ctx.fillStyle = dotColor;
+                ctx.beginPath();
+                ctx.arc(x, centerY, dotRadius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (label) {
+                const shortLabel = truncateTimelineLabel(label, 40);
+                ctx.font = '10px sans-serif';
+                ctx.fillStyle = dotColor;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                const textX = x + dotRadius + 6;
+                if (textX < width - PADDING_RIGHT - 2) {
+                    ctx.fillText(shortLabel, textX, centerY);
+                }
+            }
+            return;
+        }
         // Speech lane: only draw dots for partial (light blue) and final (blue); no phantom blue dots for other events
         let dotColor = laneColors[event.lane] || laneColors[targetLane] || '#888';
         let dotRadius = 4;
@@ -3090,6 +3380,12 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 dotRadius = 2.5;
             } else if (et === 'asr_final') {
                 dotColor = laneColors.speech || '#1976D2';
+                dotRadius = 4;
+            } else if (et === 'realtime_output_partial') {
+                dotColor = laneColors.tts || '#9C27B0';
+                dotRadius = 2.5;
+            } else if (et === 'realtime_output_final') {
+                dotColor = laneColors.tts || '#9C27B0';
                 dotRadius = 4;
             } else if (targetLane === 'llm' || targetLane === 'tts') {
                 dotRadius = 0; // No dots on LLM/TTS lanes; TTS first audio is shown as thin pale magenta line
@@ -3126,6 +3422,21 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 const label = truncateTimelineLabel(text, 60);
                 ctx.font = '11px sans-serif';
                 ctx.fillStyle = laneColors.llm || '#FF9800';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                const textX = x + (dotRadius > 0 ? dotRadius : 4) + 6;
+                if (textX < width - PADDING_RIGHT - 2) {
+                    ctx.fillText(label, textX, centerY);
+                }
+            }
+        }
+        // Realtime AI output: draw transcript to the right of realtime_output_final (and tts_complete when it has text)
+        if ((et === 'realtime_output_final' || (et === 'tts_complete' && event.data && event.data.text)) && targetLane === (combineSpeechLanes ? 'speech' : 'tts')) {
+            const text = (event.data && event.data.text) ? String(event.data.text) : '';
+            if (text) {
+                const label = truncateTimelineLabel(text, 60);
+                ctx.font = '11px sans-serif';
+                ctx.fillStyle = laneColors.tts || '#9C27B0';
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
                 const textX = x + (dotRadius > 0 ? dotRadius : 4) + 6;
@@ -3620,6 +3931,27 @@ function buildVoiceConfig() {
     };
     if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
     if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
+    // Ensure backend sends scheme + realtime fields so server picks Realtime path when UI is set to Realtime
+    if ((config.asr.backend === 'openai-realtime' || config.asr.scheme === 'openai-realtime')) {
+        config.asr.scheme = config.asr.scheme || config.asr.backend || 'openai-realtime';
+        config.asr.realtime_transport = config.asr.realtime_transport || 'websocket';
+        config.asr.realtime_session_type = config.asr.realtime_session_type || 'transcription';
+    }
+    if (config.tts.backend === 'openai-realtime' || config.tts.scheme === 'openai-realtime') {
+        config.tts.scheme = config.tts.scheme || config.tts.backend || 'openai-realtime';
+        config.tts.realtime_transport = config.tts.realtime_transport || 'websocket';
+    }
+    // When ASR is Realtime full-voice, server requires TTS=Realtime; force it in payload so server never sees asr=realtime + tts=riva
+    if ((config.asr.backend === 'openai-realtime' || config.asr.scheme === 'openai-realtime') &&
+        (config.asr.realtime_session_type || 'transcription') === 'full' &&
+        (config.asr.realtime_transport || 'websocket') === 'websocket') {
+        config.tts.scheme = 'openai-realtime';
+        config.tts.backend = 'openai-realtime';
+        config.tts.realtime_transport = 'websocket';
+        if (!(config.tts.realtime_url || '').trim()) {
+            config.tts.realtime_url = (config.asr.realtime_url || 'wss://api.openai.com/v1/realtime').trim();
+        }
+    }
     var spk = (config.devices && config.devices.speaker) ? String(config.devices.speaker) : '';
     if (spk.startsWith('alsa:')) {
         config.devices.audio_output_source = 'alsa';
@@ -4199,6 +4531,7 @@ function startNewSession() {
     // Restore saved default config when present so system prompt and other edits persist across reloads
     const saved = getDefaultConfig();
     currentConfig = saved ? JSON.parse(JSON.stringify(saved)) : JSON.parse(JSON.stringify(defaultConfig));
+    applyEnvPrefillsToCurrentConfig();
 
     // Clear chat history
     document.getElementById('chat-history').innerHTML = `
@@ -4334,7 +4667,9 @@ function handleVoiceWsMessage(ev) {
             if (evt.event_type === 'session_start') {
                 if (state.liveSessionStartTime <= 0) {
                     state.liveSessionStartTime = Date.now() / 1000;
+                    startLiveSystemStatsPoll();
                     state.liveAudioAmplitudeHistory = [];
+                    state._userAmplitudeSmoothBuf = [];
                 }
                 // Flush Server USB amplitude received before session_start so AUDIO lane has data from the first sample.
                 // When Server USB mic is used, client sets liveSessionStartTime before sending start_session so
@@ -4351,6 +4686,8 @@ function handleVoiceWsMessage(ev) {
                 else if (evt.event_type && evt.event_type.startsWith('llm_')) evt.lane = 'llm';
                 else if (evt.event_type && evt.event_type.startsWith('tts_')) evt.lane = 'tts';
                 else if (evt.event_type === 'session_start') evt.lane = 'system';
+                else if (evt.event_type === 'realtime_session_ready' || evt.event_type === 'error') evt.lane = 'system';
+                else if (evt.event_type === 'realtime_output_partial' || evt.event_type === 'realtime_output_final') evt.lane = 'tts';
             } else if (typeof evt.lane === 'string') {
                 evt.lane = evt.lane.toLowerCase();
             }
@@ -4396,6 +4733,14 @@ function handleVoiceWsMessage(ev) {
                     renderLiveChat();
                     requestAnimationFrame(function () { updateLiveSessionUI(); });
                 }
+            } else if (evt.event_type === 'tts_complete' && evt.data && evt.data.text != null) {
+                // Realtime: tts_complete carries the AI response transcript
+                var last = state.liveChatTurns[state.liveChatTurns.length - 1];
+                if (last && last.assistant === '') {
+                    last.assistant = String(evt.data.text).trim();
+                    renderLiveChat();
+                    requestAnimationFrame(function () { updateLiveSessionUI(); });
+                }
             }
         } else if (msg.type === 'tts_start') {
             state.firstTtsPlayTimeThisResponse = null;
@@ -4405,31 +4750,34 @@ function handleVoiceWsMessage(ev) {
                 if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
             }
         } else if (msg.type === 'tts_audio' && msg.data) {
-            // Server may send 25ms amplitude_segments (matches timeline bar = 25ms) for denser AI waveform.
+            // Server may send 25ms amplitude_segments. For browser speaker we assign times when we schedule playback
+            // (client session time) so purple aligns with audio. For server speaker we push server times (no client play time).
             var skipSegmentPush = false;
+            var serverAmplitudeSegments = null;
             if (Array.isArray(msg.amplitude_segments) && msg.amplitude_segments.length && Array.isArray(state.liveTtsAmplitudeHistory)) {
-                msg.amplitude_segments.forEach(function (seg) {
-                    state.liveTtsAmplitudeHistory.push({
-                        startTime: seg.startTime,
-                        endTime: seg.endTime,
-                        amplitude: seg.amplitude != null ? seg.amplitude : 0
-                    });
-                });
-                var segs = msg.amplitude_segments;
-                var firstSeg = segs[0];
-                if (firstSeg && typeof firstSeg.startTime === 'number') {
-                    if (state.firstTtsPlayTimeThisResponse == null || firstSeg.startTime < state.firstTtsPlayTimeThisResponse)
-                        state.firstTtsPlayTimeThisResponse = firstSeg.startTime;
-                    var firstAmp = firstSeg.amplitude != null ? firstSeg.amplitude : 0;
-                    if (firstAmp > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || firstSeg.startTime < state.earliestTtsPlayTimeAboveThreshold))
-                        state.earliestTtsPlayTimeAboveThreshold = firstSeg.startTime;
-                }
                 skipSegmentPush = true;
+                serverAmplitudeSegments = msg.amplitude_segments;
+                if (isServerSpeakerSelected()) {
+                    msg.amplitude_segments.forEach(function (seg) {
+                        state.liveTtsAmplitudeHistory.push({
+                            startTime: seg.startTime,
+                            endTime: seg.endTime,
+                            amplitude: seg.amplitude != null ? seg.amplitude : 0
+                        });
+                    });
+                    var firstSeg = msg.amplitude_segments[0];
+                    if (firstSeg && typeof firstSeg.startTime === 'number') {
+                        if (state.firstTtsPlayTimeThisResponse == null || firstSeg.startTime < state.firstTtsPlayTimeThisResponse)
+                            state.firstTtsPlayTimeThisResponse = firstSeg.startTime;
+                        if (firstSeg.amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || firstSeg.startTime < state.earliestTtsPlayTimeAboveThreshold))
+                            state.earliestTtsPlayTimeAboveThreshold = firstSeg.startTime;
+                    }
+                }
             }
             if (isServerSpeakerSelected()) {
                 recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             } else {
-                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush);
+                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments);
             }
         } else if (msg.type === 'session_saved' && msg.session_id) {
             state.lastSavedSessionId = msg.session_id;
@@ -4465,14 +4813,31 @@ function handleVoiceWsClose(ev) {
 function startSessionRecording() {
     if (state.sessionState !== 'setup') return;
 
-    // Server USB: we may already have the voice WS open for preview (same connection, same 50 Hz stream). Just send start_session.
-    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN && isServerMicSelected()) {
+    // Realtime ASR with non-Realtime TTS is not supported; fail fast with a clear message
+    var asrRealtime = (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime');
+    var ttsRealtime = (currentConfig.tts.backend === 'openai-realtime' || currentConfig.tts.scheme === 'openai-realtime');
+    if (asrRealtime && !ttsRealtime) {
+        var chatEl = document.getElementById('chat-history');
+        if (chatEl) {
+            chatEl.innerHTML = '<div class="empty-state"><p class="error">OpenAI Realtime ASR with Riva TTS is not supported. Use <strong>Full voice</strong> (ASR + TTS Realtime) or set ASR to NVIDIA RIVA.</p></div>';
+            if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+        } else {
+            alert('OpenAI Realtime ASR with Riva TTS is not supported. Use Full voice (ASR + TTS Realtime) or set ASR to NVIDIA RIVA.');
+        }
+        return;
+    }
+
+    // Server USB: we may already have the voice WS open for preview. Reuse it only if current config matches
+    // what the server started with (first message = config). Realtime full-voice requires the first message
+    // to be Realtime config, so if user switched to Realtime after opening preview, close and reopen.
+    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN && isServerMicSelected() && !isRealtimeFullVoiceLock()) {
         console.log('[Voice] Already connected (Server USB preview); sending start_session');
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
         state.liveAudioAmplitudeHistory = [];
+        state._userAmplitudeSmoothBuf = [];
         state.pendingServerMicAmplitude = [];
         state.liveTtsAmplitudeHistory = [];
         state.liveTtlBands = [];
@@ -4487,6 +4852,14 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
+        if (!state.ttsAudioContext) {
+            state.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            state.ttsNextStartTime = 0;
+        }
+        if (state.ttsAudioContext.state === 'suspended') {
+            state.ttsAudioContext.resume().catch(function (e) { console.warn('[Voice] TTS AudioContext resume on start:', e); });
+        }
+        startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
@@ -4507,11 +4880,16 @@ function startSessionRecording() {
     }
     var delayMs = 0;
     function connectVoiceAndStart() {
+        if (state.voiceWs) {
+            try { state.voiceWs.close(); } catch (e) {}
+            state.voiceWs = null;
+        }
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
         state.liveAudioAmplitudeHistory = [];
+        state._userAmplitudeSmoothBuf = [];
         state.pendingServerMicAmplitude = [];
         state.liveTtsAmplitudeHistory = [];
         state.liveTtlBands = [];
@@ -4528,6 +4906,15 @@ function startSessionRecording() {
         state.liveSessionStartTime = Date.now() / 1000;
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
+
+        // Create TTS AudioContext now (under user gesture) so playback is not blocked by autoplay policy
+        if (!state.ttsAudioContext) {
+            state.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+            state.ttsNextStartTime = 0;
+        }
+        if (state.ttsAudioContext.state === 'suspended') {
+            state.ttsAudioContext.resume().catch(function (e) { console.warn('[Voice] TTS AudioContext resume on start:', e); });
+        }
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = protocol + '//' + window.location.host + '/ws/voice';
@@ -4696,16 +5083,13 @@ function connectPcmToWs(stream) {
         ws.send(pcmData.buffer);
         pcmChunkCount++;
         if (pcmChunkCount % 50 === 0) console.log('[Voice] Sent', pcmChunkCount, 'PCM chunks');
-        // Feed live AUDIO lane waveform: RMS amplitude 0–100, timestamp relative to session start
-        if (state.liveSessionStartTime > 0 && state.liveAudioAmplitudeHistory) {
+        // AUDIO lane waveform: use only server user_amplitude (single source). Client used to push here too → double source caused saw/block shape with Realtime. RIVA looks correct because it only uses server.
+        if (state.liveSessionStartTime > 0) {
             let sumSq = 0;
             for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
             const rms = Math.min(100, Math.sqrt(sumSq / input.length) * 400);
             const ts = (Date.now() / 1000) - state.liveSessionStartTime;
-            state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: rms });
-            // No trimming: send full session on stop for consistent dense waveform (Option 1, AMPLITUDE_DATA_SOURCES.md)
-
-            // Browser-side end-of-speech: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
+            // Browser-side end-of-speech for TTL band: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
             const userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
             const SILENCE_CONFIRM_SEC = 0.15;
             if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
@@ -4738,6 +5122,28 @@ function stopVoiceMicStream() {
         state.voiceMicStream.getTracks().forEach(function (t) { t.stop(); });
         state.voiceMicStream = null;
     }
+}
+
+/** Compute TTS amplitude segments at 25ms windows (match user waveform density) so live purple is not blocky.
+ * ch: Float32Array or array of float samples in [-1,1]; sampleRate in Hz; chunkStartTime/chunkDuration in seconds.
+ * Returns [{ startTime, endTime, amplitude }, ...] with amplitude 0–100. */
+function ttsChunkToAmplitudeSegments(ch, sampleRate, chunkStartTime, chunkDuration) {
+    var segments = [];
+    var numSamples = ch.length;
+    if (numSamples < 2) return segments;
+    var windowSec = 0.025;
+    var samplesPerWindow = Math.max(1, Math.floor(sampleRate * windowSec));
+    for (var i = 0; i < numSamples; i += samplesPerWindow) {
+        var endIdx = Math.min(i + samplesPerWindow, numSamples);
+        var n = endIdx - i;
+        var sumSq = 0;
+        for (var j = i; j < endIdx; j++) sumSq += ch[j] * ch[j];
+        var rms = n ? Math.min(100, Math.sqrt(sumSq / n) * 100) : 0;
+        var t0 = chunkStartTime + (i / sampleRate);
+        var t1 = chunkStartTime + (endIdx / sampleRate);
+        segments.push({ startTime: t0, endTime: t1, amplitude: rms });
+    }
+    return segments;
 }
 
 /** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser.
@@ -4774,14 +5180,16 @@ function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
     }
     const endTime = startTime + duration;
     state.ttsNextStartTime = endTime;
-    var sumSq = 0;
-    for (var i = 0; i < numSamples; i++) sumSq += (samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF)) * (samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF));
-    var rms = Math.min(100, Math.sqrt(sumSq / numSamples) * 400);
-    state.liveTtsAmplitudeHistory.push({ startTime: startTime, endTime: endTime, amplitude: rms });
+    var ch = [];
+    for (var i = 0; i < numSamples; i++) ch.push(samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF));
+    var segs = ttsChunkToAmplitudeSegments(ch, sampleRate, startTime, duration);
+    for (var s = 0; s < segs.length; s++) state.liveTtsAmplitudeHistory.push(segs[s]);
     if (state.firstTtsPlayTimeThisResponse == null || startTime < state.firstTtsPlayTimeThisResponse)
         state.firstTtsPlayTimeThisResponse = startTime;
-    if (rms > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || startTime < state.earliestTtsPlayTimeAboveThreshold))
-        state.earliestTtsPlayTimeAboveThreshold = startTime;
+    for (var k = 0; k < segs.length; k++) {
+        if (segs[k].amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || segs[k].startTime < state.earliestTtsPlayTimeAboveThreshold))
+            state.earliestTtsPlayTimeAboveThreshold = segs[k].startTime;
+    }
     if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
         var bandStart = state.liveTtlBandStartTime;
         var firstChunk = state.firstTtsPlayTimeThisResponse;
@@ -4796,8 +5204,9 @@ function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
     }
 }
 
-/** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push segment; first/earliest/ttsNextStartTime already set by handler. */
-function playTtsChunk(base64Data, sampleRate, skipSegmentPush) {
+/** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push from PCM; first/earliest set below when serverAmplitudeSegments provided.
+ * serverAmplitudeSegments: optional array of { startTime?, endTime?, amplitude } from server; we use amplitude but assign startTime/endTime from when we schedule playback (client session time) so purple aligns with audio. */
+function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments) {
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -4808,43 +5217,75 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush) {
         state.ttsNextStartTime = 0;
     }
     const ctx = state.ttsAudioContext;
-    if (ctx.state === 'suspended') ctx.resume();
     const numSamples = samples.length;
     const buffer = ctx.createBuffer(1, numSamples, sampleRate);
     const ch = buffer.getChannelData(0);
     for (let i = 0; i < numSamples; i++) ch[i] = samples[i] / (samples[i] < 0 ? 0x8000 : 0x7FFF);
     const duration = numSamples / sampleRate;
-    let startTime = state.ttsNextStartTime;
-    if (typeof startTime !== 'number' || startTime < 0 || startTime < ctx.currentTime) startTime = ctx.currentTime;
-    state.ttsNextStartTime = startTime + duration;
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    source.start(startTime);
-    // Record TTS segment for purple AI waveform (or skip when server sent amplitude_segments)
-    if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
+    var windowSec = 0.025;
+    function schedulePlayback() {
+        let startTime = state.ttsNextStartTime;
+        if (typeof startTime !== 'number' || startTime < 0 || startTime < ctx.currentTime) startTime = ctx.currentTime;
+        state.ttsNextStartTime = startTime + duration;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(startTime);
         var nowSec = Date.now() / 1000;
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
         var actualStartSession = (nowSec - sessionStart) + delayUntilPlay;
-        var actualEndSession = actualStartSession + duration;
-        var sumSq = 0;
-        for (var i = 0; i < numSamples; i++) sumSq += ch[i] * ch[i];
-        var rms = Math.min(100, Math.sqrt(sumSq / numSamples) * 400);
-        state.liveTtsAmplitudeHistory.push({
-            startTime: actualStartSession,
-            endTime: actualEndSession,
-            amplitude: rms
-        });
-        // Lock onto earliest TTS start this response (first audio out), not whichever chunk triggers close
-        if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
-            state.firstTtsPlayTimeThisResponse = actualStartSession;
-        if (rms > 0) {
-            if (state.earliestTtsPlayTimeAboveThreshold == null || actualStartSession < state.earliestTtsPlayTimeAboveThreshold)
-                state.earliestTtsPlayTimeAboveThreshold = actualStartSession;
-        }
-        // Close TTL band: use earliest of (first chunk time, first segment with amplitude >= threshold) so we never pick 8s when first chunk is 6.5s
-        if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+        // Use server amplitude data but place segments at client play time so purple aligns with audio
+        if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && Array.isArray(serverAmplitudeSegments) && serverAmplitudeSegments.length) {
+            for (var i = 0; i < serverAmplitudeSegments.length; i++) {
+                var seg = serverAmplitudeSegments[i];
+                var amp = (seg && typeof seg.amplitude === 'number') ? seg.amplitude : 0;
+                var t0 = actualStartSession + i * windowSec;
+                var t1 = t0 + windowSec;
+                state.liveTtsAmplitudeHistory.push({ startTime: t0, endTime: t1, amplitude: amp });
+            }
+            if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
+                state.firstTtsPlayTimeThisResponse = actualStartSession;
+            for (var ki = 0; ki < serverAmplitudeSegments.length; ki++) {
+                var a = (serverAmplitudeSegments[ki] && typeof serverAmplitudeSegments[ki].amplitude === 'number') ? serverAmplitudeSegments[ki].amplitude : 0;
+                if (a > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || actualStartSession + ki * windowSec < state.earliestTtsPlayTimeAboveThreshold))
+                    state.earliestTtsPlayTimeAboveThreshold = actualStartSession + ki * windowSec;
+            }
+            if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+                var bandStart = state.liveTtlBandStartTime;
+                var firstChunk = state.firstTtsPlayTimeThisResponse;
+                var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+                var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+                state.liveTtlBandStartTime = null;
+                state.voiceTurnActive = false;
+                state.lastAsrPartialTime = null;
+                state.firstTtsPlayTimeThisResponse = null;
+                state.earliestTtsPlayTimeAboveThreshold = null;
+                state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+            }
+        } else if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
+            var actualEndSession = actualStartSession + duration;
+            var segs = ttsChunkToAmplitudeSegments(ch, sampleRate, actualStartSession, duration);
+            for (var si = 0; si < segs.length; si++) state.liveTtsAmplitudeHistory.push(segs[si]);
+            if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
+                state.firstTtsPlayTimeThisResponse = actualStartSession;
+            for (var ki = 0; ki < segs.length; ki++) {
+                if (segs[ki].amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || segs[ki].startTime < state.earliestTtsPlayTimeAboveThreshold))
+                    state.earliestTtsPlayTimeAboveThreshold = segs[ki].startTime;
+            }
+            if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
+                var bandStart = state.liveTtlBandStartTime;
+                var firstChunk = state.firstTtsPlayTimeThisResponse;
+                var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+                var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
+                state.liveTtlBandStartTime = null;
+                state.voiceTurnActive = false;
+                state.lastAsrPartialTime = null;
+                state.firstTtsPlayTimeThisResponse = null;
+                state.earliestTtsPlayTimeAboveThreshold = null;
+                state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+            }
+        } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
             var bandStart = state.liveTtlBandStartTime;
             var firstChunk = state.firstTtsPlayTimeThisResponse;
             var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
@@ -4854,21 +5295,13 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush) {
             state.lastAsrPartialTime = null;
             state.firstTtsPlayTimeThisResponse = null;
             state.earliestTtsPlayTimeAboveThreshold = null;
-            var ttlMs = Math.round((bandEnd - bandStart) * 1000);
-            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: ttlMs });
+            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
         }
-        // No trimming: keep all TTS segments for full-session dense waveform on stop (Option 1, AMPLITUDE_DATA_SOURCES.md)
-    } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
-        var bandStart = state.liveTtlBandStartTime;
-        var firstChunk = state.firstTtsPlayTimeThisResponse;
-        var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-        var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
-        state.liveTtlBandStartTime = null;
-        state.voiceTurnActive = false;
-        state.lastAsrPartialTime = null;
-        state.firstTtsPlayTimeThisResponse = null;
-        state.earliestTtsPlayTimeAboveThreshold = null;
-        state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+    }
+    if (ctx.state === 'suspended') {
+        ctx.resume().then(schedulePlayback).catch(function (e) { console.warn('TTS AudioContext resume failed:', e); });
+    } else {
+        schedulePlayback();
     }
 }
 
@@ -4960,6 +5393,7 @@ function setupEventHandlers() {
     // Config tabs (NVIDIA-style: aria-selected for accessibility)
     document.querySelectorAll('.config-tab').forEach(tabEl => {
         tabEl.addEventListener('click', () => {
+            if (tabEl.classList.contains('config-tab--disabled')) return;
             document.querySelectorAll('.config-tab').forEach(t => {
                 t.classList.remove('active');
                 t.setAttribute('aria-selected', 'false');
@@ -5339,6 +5773,13 @@ function formatDate(dateString) {
     return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+/** Date only for session list meta (e.g. "Feb 12, 2025"). */
+function formatSessionDateOnly(dateString) {
+    const date = parseSessionDate(dateString);
+    if (!date || isNaN(date.getTime())) return '';
+    return date.toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
 /** Full date and time for session meta line 2 (matches session list context). */
 function formatSessionDateTime(dateString) {
     const date = typeof dateString === 'number' ? new Date(dateString * 1000) : parseSessionDate(dateString);
@@ -5418,7 +5859,22 @@ function getPipelineTableHtml(config, options) {
         return '<span class="pipeline-seg pipeline-seg-' + type + '"><svg class="pipeline-seg-shape" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true"><polygon class="pipeline-seg-poly" points="0,0 180,0 200,20 180,40 0,40 20,20"/></svg><span class="pipeline-seg-label"' + titleAttr + dataFull + '>' + escapeHtml(labelText) + '</span></span>';
     }
     const arrowRow = hasCamera ? '<div class="pipeline-arrow-row" aria-hidden="true"><i data-lucide="chevron-down" class="lucide-inline pipeline-arrow-down"></i></div>' : '';
-    const flowSegments = '<div class="pipeline-flow">' + seg('asr', asrLabel, asrTooltip) + seg('llm', midLabel, midTooltip) + seg('tts', ttsLabelVal, ttsTooltip) + '</div>';
+    var flowSegments;
+    if (isRealtimeFullVoiceConfig(config)) {
+        var realtimeLabel = 'OpenAI Realtime';
+        var realtimeTitle = 'ASR + TTS Realtime (Full voice)';
+        flowSegments = '<div class="pipeline-flow">' +
+            '<span class="pipeline-seg pipeline-seg-realtime">' +
+            '<svg class="pipeline-seg-shape" viewBox="0 0 200 40" preserveAspectRatio="none" aria-hidden="true">' +
+            '<defs><linearGradient id="pipeline-realtime-stroke" x1="0%" y1="0%" x2="100%" y2="0%">' +
+            '<stop offset="0%" stop-color="var(--timeline-asr, #1976D2)"/>' +
+            '<stop offset="100%" stop-color="var(--timeline-tts, #EC407A)"/>' +
+            '</linearGradient></defs>' +
+            '<polygon class="pipeline-seg-poly" stroke="url(#pipeline-realtime-stroke)" points="0,0 180,0 200,20 180,40 0,40 20,20"/></svg>' +
+            '<span class="pipeline-seg-label" title="' + escapeHtml(realtimeTitle) + '" data-full-label="' + escapeHtml(realtimeLabel) + '">' + escapeHtml(realtimeLabel) + '</span></span></div>';
+    } else {
+        flowSegments = '<div class="pipeline-flow">' + seg('asr', asrLabel, asrTooltip) + seg('llm', midLabel, midTooltip) + seg('tts', ttsLabelVal, ttsTooltip) + '</div>';
+    }
     const flowRow = '<div class="pipeline-flow-row">' + flowSegments + '</div>';
     const cornerLeft = '<div class="pipeline-corner pipeline-corner-left" aria-hidden="true"><i data-lucide="corner-down-right" class="lucide-inline"></i></div>';
     const cornerRight = '<div class="pipeline-corner pipeline-corner-right" aria-hidden="true"><i data-lucide="corner-right-up" class="lucide-inline"></i></div>';
