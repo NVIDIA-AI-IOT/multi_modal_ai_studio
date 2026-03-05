@@ -8,6 +8,7 @@ Adapted from live-riva-webui with timeline event support.
 
 import json
 import logging
+import os
 import re
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -52,13 +53,24 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
             base[k] = v
 
 
-_B64_RE = re.compile(r'(data:[^;]+;base64,)([A-Za-z0-9+/=]{200,})')
+def _truncate_payload_for_log(obj: Any) -> Any:
+    """Return a copy of obj with data URLs (base64 image/video) replaced by '<+ N characters>'.
+    Normal text (system prompt, user message, etc.) is shown in full."""
+    if isinstance(obj, str):
+        if obj.startswith("data:image") or obj.startswith("data:video"):
+            return f"<+ {len(obj)} characters>"
+        return obj
+    if isinstance(obj, dict):
+        return {k: _truncate_payload_for_log(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_truncate_payload_for_log(v) for v in obj]
+    return obj
 
 
 def _curl_for_post(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> str:
     """Build an equivalent curl command for a POST request (for debugging)."""
-    body = json.dumps(payload, ensure_ascii=False)
-    body = _B64_RE.sub(lambda m: f'{m.group(1)}<{len(m.group(2))} chars>', body)
+    payload_log = _truncate_payload_for_log(payload)
+    body = json.dumps(payload_log, ensure_ascii=False)
     body_escaped = body.replace("'", "'\"'\"'")
     parts = [f"curl -X POST '{url}'"]
     for k, v in headers.items():
@@ -66,6 +78,36 @@ def _curl_for_post(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -
         parts.append(f"-H '{k}: {v_escaped}'")
     parts.append(f"-d '{body_escaped}'")
     return " \\\n  ".join(parts)
+
+
+def _colorize_json(pretty_json: str) -> str:
+    """Add ANSI colors to pretty-printed JSON. No-op if NO_COLOR is set."""
+    if os.environ.get("NO_COLOR"):
+        return pretty_json
+    reset = "\033[0m"
+    key_c = "\033[36m"      # cyan for keys
+    str_c = "\033[32m"      # green for string values
+    num_c = "\033[33m"      # yellow for numbers
+    other_c = "\033[35m"    # magenta for true/false/null
+    s = re.sub(r'(^\s*)"([^"]+)"(\s*:)', rf'\1{key_c}"\2"{reset}\3', pretty_json, flags=re.MULTILINE)
+    s = re.sub(r'(: )"((?:[^"\\]|\\.)*)"([,\s\n\]}])', rf'\1{str_c}"\2"{reset}\3', s)
+    s = re.sub(r'(: )([-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)([,}\s\n])', rf'\1{num_c}\2{reset}\3', s)
+    s = re.sub(r'(: )(true|false|null)([,}\s\n])', rf'\1{other_c}\2{reset}\3', s)
+    return s
+
+
+def _format_payload_preview(payload: Dict[str, Any]) -> str:
+    """Pretty-print truncated payload with optional color for debug log."""
+    payload_log = _truncate_payload_for_log(payload)
+    pretty = json.dumps(payload_log, indent=2, ensure_ascii=False)
+    return _colorize_json(pretty)
+
+
+def _build_request_debug_log(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> str:
+    """Curl equivalent plus formatted, colorized payload preview."""
+    curl = _curl_for_post(url, headers, payload)
+    preview = _format_payload_preview(payload)
+    return f"{curl}\n\nPayload (preview):\n{preview}"
 
 
 def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
@@ -544,7 +586,7 @@ class OpenAILLMBackend(LLMBackend):
                 self.logger.warning("Invalid extra_request_body JSON: %s", e)
 
         self.logger.debug(f"LLM request: {prompt[:50]}...")
-        self.logger.info("LLM request (curl equivalent):\n%s", _curl_for_post(url, headers, payload))
+        self.logger.info("LLM request:\n%s", _build_request_debug_log(url, headers, payload))
 
         full_response = ""
         reasoning_response = ""

@@ -729,37 +729,18 @@ async def _run_voice_pipeline(
         getattr(config.devices, "audio_input_device", None),
         use_server_mic,
     )
-    capture_queue: Optional[queue.Queue] = queue.Queue() if use_server_mic else None
-    stop_capture: Optional[threading.Event] = threading.Event() if use_server_mic else None
-    capture_thread: Optional[threading.Thread] = None
-    if use_server_mic and capture_queue is not None and stop_capture is not None:
-        capture_thread = start_server_mic_capture(
-            config.devices.audio_input_source,
-            config.devices.audio_input_device,
-            capture_queue,
-            stop_capture,
-        )
-        if not capture_thread:
-            logger.warning(
-                "Server mic capture could not start (source=%s device=%s); no voice input from server device",
-                getattr(config.devices, "audio_input_source", None),
-                getattr(config.devices, "audio_input_device", None),
-            )
-            use_server_mic = False
-        else:
-            logger.info("Server mic capture thread started; waiting for first PCM chunk and user_amplitude")
-
+    # Reuse capture already started above (single capture per pipeline; second start would get "Device or resource busy")
     # VLM: Multi-frame capture for vision models
     # Frames are captured continuously in browser ring buffer (browser camera)
     # or in server-side FrameBroker (USB camera), then selected on ASR final
     vision_configured = getattr(llm_config, "enable_vision", False)  # User checked "Enable Vision (VLM)"
     vision_enabled = vision_configured
-    
+
     # Disable vision if camera is set to "none"
     if vision_enabled and config.devices.video_source == "none":
         vision_enabled = False
         logger.info("[VLM] Vision disabled: camera set to 'none'")
-    
+
     vision_frames_count = getattr(llm_config, "vision_frames", 4)
     vision_quality = getattr(llm_config, "vision_quality", 0.7)
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
@@ -774,12 +755,18 @@ async def _run_voice_pipeline(
         )
         vision_buffer_fps = COSMOS_BROWSER_FPS
     
-    # Determine if using server-side camera (USB or local video file)
-    use_server_camera = (
-        (config.devices.video_source == "usb" and bool(config.devices.video_device))
-        or config.devices.video_source == "local"
-    )
-    
+    # Determine if using server-side camera (USB or local video). Use session.config at call time
+    # so that start_session-merged config (e.g. browser camera when using server mic) is respected.
+    def _use_server_camera() -> bool:
+        dc = session.config.devices
+        vs = getattr(dc, "video_source", "browser")
+        if vs == "usb" and bool(getattr(dc, "video_device", None)):
+            return True
+        if vs == "local":
+            return True
+        return False
+
+    use_server_camera = _use_server_camera()
     # Multi-frame response handling (for browser camera)
     browser_frames_event = asyncio.Event()
     browser_frames_data: dict = {"frames": [], "t_start": 0.0, "t_end": 0.0}
@@ -833,7 +820,7 @@ async def _run_voice_pipeline(
         """
         if not vision_enabled:
             return
-        if use_server_camera:
+        if _use_server_camera():
             # Server camera uses FrameBroker, no browser action needed
             logger.debug("[VLM] Server camera uses FrameBroker, no browser capture needed")
             return
@@ -860,7 +847,7 @@ async def _run_voice_pipeline(
             return []
         
         # Server camera: read from FrameBroker
-        if use_server_camera and _frame_broker is not None:
+        if _use_server_camera() and _frame_broker is not None:
             try:
                 loop = asyncio.get_event_loop()
                 frames = await loop.run_in_executor(
@@ -903,7 +890,7 @@ async def _run_voice_pipeline(
         """Tell browser to stop capturing frames."""
         if not vision_enabled:
             return
-        if use_server_camera:
+        if _use_server_camera():
             # Server camera uses FrameBroker, no browser action needed
             logger.debug("[VLM] Server camera uses FrameBroker, no browser stop needed")
             return
@@ -1305,7 +1292,7 @@ async def _run_voice_pipeline(
                     else:
                         n_frames_request = vision_frames_count  # default 4
                     
-                    source = "FrameBroker" if use_server_camera else "browser"
+                    source = "FrameBroker" if _use_server_camera() else "browser"
                     logger.info(
                         "[VLM] Requesting %d frames from %s (speech: %.2fs–%.2fs, dur=%.2fs, cosmos=%s)",
                         n_frames_request, source, t_start, t_end, speech_duration_secs, is_cosmos,

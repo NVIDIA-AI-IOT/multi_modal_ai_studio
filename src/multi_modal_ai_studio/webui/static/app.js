@@ -5013,6 +5013,11 @@ function stopLiveSystemStatsPoll() {
     }
 }
 
+/** No-op: server pushes system_stats over WebSocket. Stub so bisect test can run at older commits. */
+function startLiveSystemStatsPoll() {
+    stopLiveSystemStatsPoll();
+}
+
 function getApiBase() {
     return window.location.origin;
 }
@@ -5166,10 +5171,6 @@ function handleVoiceWsMessage(ev) {
                             renderLiveChat();
                             requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
-                    }
-                    renderLiveChat();
-                    requestAnimationFrame(function () { updateLiveSessionUI(); });
-                }
             } else if (evt.event_type === 'tts_complete' && evt.data && evt.data.text != null) {
                 // Realtime: tts_complete carries the AI response transcript
                 var last = state.liveChatTurns[state.liveChatTurns.length - 1];
