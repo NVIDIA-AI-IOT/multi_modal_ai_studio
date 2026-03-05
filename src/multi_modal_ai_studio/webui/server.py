@@ -132,7 +132,7 @@ class WebUIServer:
         port: int = 8080,
         session_dir: Path = None,
         ssl_context: Optional[object] = None,
-        initial_config: Optional[dict] = None,
+        initial_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize web server.
 
@@ -176,10 +176,12 @@ class WebUIServer:
         self.app.router.add_get('/api/devices/audio-inputs', self.handle_list_audio_inputs)
         self.app.router.add_get('/api/devices/audio-outputs', self.handle_list_audio_outputs)
         self.app.router.add_get('/api/camera/stream', self.handle_camera_stream)
+        self.app.router.add_get('/api/config/initial', self.handle_initial_config)
+        self.app.router.add_get('/api/videos/list', self.handle_list_videos)
+        self.app.router.add_get('/api/videos/file', self.handle_serve_video)
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
         self.app.router.add_get('/api/config/prefills', self.handle_config_prefills)
-        self.app.router.add_get('/api/config/initial', self.handle_initial_config)
         self.app.router.add_get('/ws/voice', handle_voice_ws)
         self.app.router.add_get('/ws/mic-preview', handle_mic_preview_ws)
         self.app.router.add_get('/ws/camera-webrtc', handle_camera_webrtc_ws)
@@ -393,67 +395,26 @@ class WebUIServer:
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json()
-                            # VLMs have a "projector" component (vision encoder)
                             if data.get("projector"):
                                 result = {"is_vlm": True, "detection_method": "ollama_projector", "confidence": "high"}
                                 logger.info("[VLM Detect] Ollama projector found → VLM")
                                 return result
-                            # Check model family for "vl" suffix
                             families = data.get("details", {}).get("families", [])
                             if any("vl" in f.lower() for f in families):
                                 result = {"is_vlm": True, "detection_method": "ollama_family", "confidence": "high"}
                                 logger.info("[VLM Detect] Ollama family contains 'vl' → VLM")
                                 return result
-                            # Model exists but no vision components
+                            model_info = data.get("model_info", {})
+                            has_vision = any("vision" in k for k in model_info)
+                            if has_vision:
+                                result = {"is_vlm": True, "detection_method": "ollama_model_info", "confidence": "high"}
+                                logger.info("[VLM Detect] Ollama model_info has vision keys → VLM")
+                                return result
                             result = {"is_vlm": False, "detection_method": "ollama_api", "confidence": "high"}
-                            logger.info("[VLM Detect] Ollama model has no projector → LLM")
+                            logger.info("[VLM Detect] Ollama model has no vision components → LLM")
                             return result
             except Exception as e:
                 logger.debug("[VLM Detect] Ollama API check failed: %s", e)
-        
-        # -------------------------------------------------------------------------
-        # Method 2: Name pattern detection (fast, works for all backends)
-        # -------------------------------------------------------------------------
-        vlm_patterns = [
-            r"[-_]vl[-_:]",      # qwen3-vl:8b, Qwen2.5-VL-7B
-            r"vl\d",            # vl7b, vl8b
-            r"vision",          # gpt-4-vision, llama-vision
-            r"llava",           # llava-llama3, llava-v1.6
-            r"cosmos.*reason",  # Cosmos-Reason2-8B
-            r"moondream",       # moondream
-            r"cogvlm",          # CogVLM
-            r"internvl",        # InternVL
-            r"qwen.*vl",        # Qwen-VL, Qwen2-VL
-            r"phi.*vision",     # Phi-3-vision
-            r"gemini.*pro",     # Gemini Pro Vision (via API)
-            r"gpt-4o",          # GPT-4o (vision capable)
-            r"gpt-4-turbo",     # GPT-4 Turbo (vision capable)
-            r"claude-3",        # Claude 3 (vision capable)
-        ]
-        
-        model_lower = model.lower()
-        for pattern in vlm_patterns:
-            if re.search(pattern, model_lower):
-                result = {"is_vlm": True, "detection_method": "name_pattern", "confidence": "medium"}
-                logger.info("[VLM Detect] Name pattern '%s' matched → VLM", pattern)
-                return result
-        
-        # Known LLM-only patterns (definitely not VLM)
-        llm_only_patterns = [
-            r"^llama-?\d",      # llama2, llama3 (without vision suffix)
-            r"^mistral",        # mistral-7b
-            r"^gemma[^-]",      # gemma, gemma2 (not gemma-vision)
-            r"^phi-?\d",        # phi-2, phi-3 (not phi-3-vision)
-            r"^qwen\d?:",       # qwen:7b, qwen2:7b (not qwen-vl)
-            r"gpt-3\.5",        # GPT-3.5 (no vision)
-            r"gpt-4(?!o|-turbo|-vision)",  # GPT-4 base (no vision)
-        ]
-        
-        for pattern in llm_only_patterns:
-            if re.search(pattern, model_lower):
-                result = {"is_vlm": False, "detection_method": "name_pattern_llm", "confidence": "medium"}
-                logger.info("[VLM Detect] LLM pattern '%s' matched → LLM", pattern)
-                return result
         
         # -------------------------------------------------------------------------
         # Method 3: Image probe (universal, works for any backend)
@@ -705,6 +666,74 @@ class WebUIServer:
         except Exception as e:
             logger.debug("List audio outputs error: %s", e)
             return web.json_response({"devices": []})
+
+    def _get_videos_dir(self) -> Path:
+        """Return the videos/ folder (repo root or next to session_dir)."""
+        candidates = [
+            Path(__file__).resolve().parents[3] / "videos",  # repo root
+            self.session_dir.parent / "videos",
+        ]
+        for d in candidates:
+            if d.is_dir():
+                return d
+        return candidates[0]
+
+    async def handle_list_videos(self, request: web.Request) -> web.Response:
+        """GET /api/videos/list — list MP4 files in the videos/ folder."""
+        videos_dir = self._get_videos_dir()
+        if not videos_dir.is_dir():
+            return web.json_response({"videos": [], "videos_dir": str(videos_dir)})
+        result = []
+        for f in sorted(videos_dir.iterdir()):
+            if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".avi") and f.is_file():
+                result.append({
+                    "name": f.name,
+                    "size_kb": round(f.stat().st_size / 1024, 1),
+                })
+        return web.json_response({"videos": result, "videos_dir": str(videos_dir)})
+
+    async def handle_serve_video(self, request: web.Request) -> web.Response:
+        """GET /api/videos/file?name=x.mp4 — serve an MP4 with range request support."""
+        name = (request.query.get("name") or "").strip()
+        if not name or "/" in name or "\\" in name or ".." in name:
+            return web.Response(text="Invalid filename", status=400)
+        videos_dir = self._get_videos_dir()
+        file_path = videos_dir / name
+        if not file_path.is_file():
+            return web.Response(text="Video not found", status=404)
+
+        file_size = file_path.stat().st_size
+        suffix = file_path.suffix.lower()
+        mime = {"mp4": "video/mp4", "webm": "video/webm", "mkv": "video/x-matroska", "avi": "video/x-msvideo"}.get(
+            suffix.lstrip("."), "video/mp4"
+        )
+
+        range_header = request.headers.get("Range")
+        if range_header:
+            try:
+                range_spec = range_header.replace("bytes=", "")
+                start_str, end_str = range_spec.split("-", 1)
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else file_size - 1
+                end = min(end, file_size - 1)
+                length = end - start + 1
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    data = f.read(length)
+                return web.Response(
+                    body=data,
+                    status=206,
+                    headers={
+                        "Content-Type": mime,
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(length),
+                        "Accept-Ranges": "bytes",
+                    },
+                )
+            except (ValueError, IndexError):
+                pass
+
+        return web.FileResponse(file_path, headers={"Content-Type": mime, "Accept-Ranges": "bytes"})
 
     async def handle_camera_stream(self, request: web.Request) -> web.Response:
         """MJPEG stream from a server USB camera. device= query: /dev/video0 or empty for first camera.

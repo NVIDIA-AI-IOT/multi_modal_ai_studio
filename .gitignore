@@ -52,7 +52,7 @@ sessions/*
 mock_sessions/
 *.session.json
 user_presets/
-
+src/debug_videos/
 # Secrets
 .env
 *.key

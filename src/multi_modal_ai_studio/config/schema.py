@@ -239,9 +239,10 @@ class DeviceConfig:
         audio_output_device: Device path/id for USB/ALSA audio
         audio_output_device_name: Human-readable name for speaker
     """
-    video_source: Literal["browser", "usb", "none"] = "browser"
+    video_source: Literal["browser", "usb", "local", "none"] = "browser"
     video_device: Optional[str] = None
     video_device_name: Optional[str] = None
+    video_file: Optional[str] = None
     audio_input_source: Literal["browser", "usb", "alsa", "none"] = "browser"
     audio_input_device: Optional[str] = None
     audio_input_device_name: Optional[str] = None
@@ -378,6 +379,8 @@ class SessionConfig:
             # Camera (for round-trip)
             if d.get("video_source") == "usb" and d.get("video_device"):
                 d["camera"] = d["video_device"]
+            elif d.get("video_source") == "local":
+                d["camera"] = "local"
             elif d.get("video_source") in ("browser", "none"):
                 d["camera"] = d.get("video_source", "browser")
             # Microphone (for round-trip)
@@ -427,7 +430,9 @@ class SessionConfig:
         devices_data = dict(data.get('devices', {}))
         if 'camera' in devices_data and 'video_source' not in devices_data:
             cam = devices_data.pop('camera', 'browser')
-            if cam and cam.startswith('/dev/'):
+            if cam == 'local':
+                devices_data['video_source'] = 'local'
+            elif cam and cam.startswith('/dev/'):
                 devices_data['video_source'] = 'usb'
                 devices_data['video_device'] = cam
             else:

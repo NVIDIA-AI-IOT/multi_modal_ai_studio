@@ -487,7 +487,8 @@ const defaultConfig = {
     devices: {
         camera: 'browser',
         microphone: 'browser',
-        speaker: 'browser'
+        speaker: 'browser',
+        video_file: null
     },
     app: {
         auto_start_recording: false,
@@ -1485,8 +1486,12 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
                     <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
+                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>Local Video File</option>
                 </select>
-                <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser) and USB cameras attached to the server (Server USB).</div>
+                <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser), USB cameras on the server, or local video files.</div>
+                <div id="local-video-picker" class="local-video-picker" style="display:${camValue === 'local' ? 'flex' : 'none'};">
+                    <div class="local-video-picker-loading">Loading videos...</div>
+                </div>
             </div>
             <div class="form-group">
                 <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
@@ -1525,6 +1530,11 @@ function onDeviceListChange(type, value) {
             currentConfig.devices.camera = 'none';
             currentConfig.devices.video_source = 'none';
             state.selectedBrowserCameraId = null;
+        } else if (value === 'local') {
+            currentConfig.devices.camera = 'local';
+            currentConfig.devices.video_source = 'local';
+            state.selectedBrowserCameraId = null;
+            loadLocalVideoPicker();
         } else if (value === '') {
             currentConfig.devices.camera = 'browser';
             currentConfig.devices.video_source = 'browser';
@@ -1539,6 +1549,9 @@ function onDeviceListChange(type, value) {
             currentConfig.devices.video_source = 'browser';
             state.selectedBrowserCameraId = value;
         }
+        // Show/hide local video picker
+        var picker = document.getElementById('local-video-picker');
+        if (picker) picker.style.display = (value === 'local') ? 'flex' : 'none';
         // Update VLM warning if vision is enabled but camera is none
         toggleVlmSettings();
     } else if (type === 'microphone') {
@@ -1581,6 +1594,55 @@ function onDeviceListChange(type, value) {
         // When only mic/speaker changes, keep server camera WebRTC open to avoid release/reopen race
         var keepServerCamera = (type === 'microphone' || type === 'speaker');
         startPreviewStream(keepServerCamera ? { keepServerCamera: true } : undefined);
+    }
+}
+
+function loadLocalVideoPicker() {
+    var picker = document.getElementById('local-video-picker');
+    if (!picker) return;
+    picker.innerHTML = '<div class="local-video-picker-loading">Loading videos...</div>';
+    fetch(getApiBase() + '/api/videos/list')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var videos = data.videos || [];
+            if (videos.length === 0) {
+                picker.innerHTML = '<div class="local-video-picker-empty">No video files found. Place .mp4 files in the <code>videos/</code> folder.</div>';
+                return;
+            }
+            var selectedFile = (currentConfig.devices && currentConfig.devices.video_file) || '';
+            var html = '';
+            for (var i = 0; i < videos.length; i++) {
+                var v = videos[i];
+                var isSelected = v.name === selectedFile;
+                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + '" '
+                    + 'onclick="selectLocalVideo(\'' + v.name.replace(/'/g, "\\'") + '\')" '
+                    + 'title="' + v.name + ' (' + v.size_kb + ' KB)">'
+                    + '<video src="' + getApiBase() + '/api/videos/file?name=' + encodeURIComponent(v.name) + '" '
+                    + 'muted autoplay loop playsinline preload="metadata"></video>'
+                    + '<div class="local-video-thumb-name">' + v.name + '</div>'
+                    + '</div>';
+            }
+            picker.innerHTML = html;
+        })
+        .catch(function (err) {
+            picker.innerHTML = '<div class="local-video-picker-empty">Failed to load videos: ' + err.message + '</div>';
+        });
+}
+
+function selectLocalVideo(filename) {
+    currentConfig.devices.video_file = filename;
+    currentConfig.devices.video_source = 'local';
+    currentConfig.devices.camera = 'local';
+    // Highlight selected thumbnail
+    var picker = document.getElementById('local-video-picker');
+    if (picker) {
+        var thumbs = picker.querySelectorAll('.local-video-thumb');
+        for (var i = 0; i < thumbs.length; i++) {
+            thumbs[i].classList.toggle('selected', thumbs[i].querySelector('.local-video-thumb-name').textContent === filename);
+        }
+    }
+    if (state.isLiveSession && state.sessionState === 'setup') {
+        startPreviewStream();
     }
 }
 
@@ -1790,6 +1852,7 @@ function populateCameraDeviceDropdown() {
         select.innerHTML = '';
         select.appendChild(newOption('none', '\uD83D\uDEABNone (No vision-modality)'));
         select.appendChild(newOption('', 'Default (Browser)'));
+        select.appendChild(newOption('local', 'Local Video File'));
         browserCams.forEach(function (d) {
             var label = (d.label || 'Camera ' + (select.options.length)) + ' (Browser)';
             select.appendChild(newOption(d.deviceId || '', label));
@@ -1807,6 +1870,11 @@ function populateCameraDeviceDropdown() {
             : currentConfig.devices.camera;
         var val = (cam === 'none' || cam === null || cam === undefined) ? 'none' : (cam === 'browser' || cam === '') ? '' : cam;
         try { select.value = val; } catch (e) { select.value = ''; }
+        // Load video picker if local video is selected
+        if (val === 'local') {
+            var picker = document.getElementById('local-video-picker');
+            if (picker) { picker.style.display = 'flex'; loadLocalVideoPicker(); }
+        }
         updateDeviceIndicators();
     });
 }
@@ -4341,9 +4409,11 @@ function stopPreviewStream() {
     }
     const videoFeed = document.getElementById('video-feed');
     const mjpegFeed = document.getElementById('video-feed-mjpeg');
+    var dv = currentConfig.devices || {};
+    var isLocalVid = (dv.camera === 'local' || dv.video_source === 'local');
     if (videoFeed) {
         videoFeed.srcObject = null;
-        videoFeed.src = '';
+        if (!isLocalVid) videoFeed.src = '';
     }
     if (mjpegFeed) {
         mjpegFeed.src = '';
@@ -4390,14 +4460,16 @@ function startPreviewStream(options) {
         return;
     }
     const d = currentConfig.devices || {};
-    const isJetsonCamera = (d.camera && typeof d.camera === 'string' && d.camera.indexOf('/dev/') === 0);
+    const isLocalVideo = (d.camera === 'local' || d.video_source === 'local');
+    const isJetsonCamera = (!isLocalVideo && d.camera && typeof d.camera === 'string' && d.camera.indexOf('/dev/') === 0);
+    const wantLocalVideo = isLocalVideo && d.video_file;
     const wantJetsonVideo = (d.camera !== 'none' && d.camera != null && d.camera !== undefined && isJetsonCamera);
-    const wantBrowserVideo = (d.camera !== 'none' && d.camera != null && d.camera !== undefined && !isJetsonCamera);
+    const wantBrowserVideo = (d.camera !== 'none' && d.camera != null && d.camera !== undefined && !isJetsonCamera && !isLocalVideo);
     const wantAudio = d.microphone !== 'none' && d.microphone != null;
     const wantAudioForPreview = wantAudio && !isServerMicSelected();
     const serverCamDevice = (wantJetsonVideo && d.camera) ? d.camera : null;
     const keepServerCamera = options && options.keepServerCamera && wantJetsonVideo && state.cameraWebrtcPc && state.previewServerCameraDevice === serverCamDevice;
-    if (!wantJetsonVideo && !wantBrowserVideo && !wantAudio) {
+    if (!wantJetsonVideo && !wantBrowserVideo && !wantLocalVideo && !wantAudio) {
         stopPreviewStream();
         const videoFeed = document.getElementById('video-feed');
         const mjpegFeed = document.getElementById('video-feed-mjpeg');
@@ -4498,6 +4570,20 @@ function startPreviewStream(options) {
             console.warn('[Camera WebRTC] offer failed:', err);
             fallbackToMjpeg();
         });
+        if (imagePlaceholder) imagePlaceholder.style.display = 'none';
+    } else if (wantLocalVideo) {
+        var videoUrl = getApiBase() + '/api/videos/file?name=' + encodeURIComponent(d.video_file);
+        if (videoFeed) {
+            videoFeed.srcObject = null;
+            videoFeed.src = videoUrl;
+            videoFeed.loop = true;
+            videoFeed.muted = true;
+            videoFeed.autoplay = true;
+            videoFeed.playsInline = true;
+            videoFeed.style.display = 'block';
+            videoFeed.play().catch(function () {});
+        }
+        if (mjpegFeed) { mjpegFeed.src = ''; mjpegFeed.style.display = 'none'; }
         if (imagePlaceholder) imagePlaceholder.style.display = 'none';
     } else if (!wantBrowserVideo && !keepServerCamera) {
         if (videoFeed) {
@@ -4690,12 +4776,18 @@ function updateLiveSessionUI() {
             if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: #ef4444;"><i data-lucide="circle" class="lucide-inline" style="fill: currentColor;"></i> RECORDING</span>';
             if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
-            // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
-            // Only show one to avoid overlap (empty video covering the MJPEG img)
             var mjpegFeedLive = document.getElementById('video-feed-mjpeg');
             var hasWebRTC = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
             var hasMjpeg = mjpegFeedLive && mjpegFeedLive.src && mjpegFeedLive.src !== '';
-            if (hasWebRTC) {
+            var liveDv = currentConfig.devices || {};
+            var hasLocalVideo = (liveDv.camera === 'local' || liveDv.video_source === 'local') && videoFeed && videoFeed.src && videoFeed.src.indexOf('/api/videos/file') !== -1;
+            if (hasLocalVideo) {
+                videoFeed.style.display = 'block';
+                videoFeed.loop = true;
+                videoFeed.muted = true;
+                if (videoFeed.paused) videoFeed.play().catch(function () {});
+                if (mjpegFeedLive) mjpegFeedLive.style.display = 'none';
+            } else if (hasWebRTC) {
                 videoFeed.style.display = 'block';
                 if (mjpegFeedLive) mjpegFeedLive.style.display = 'none';
             } else if (hasMjpeg) {

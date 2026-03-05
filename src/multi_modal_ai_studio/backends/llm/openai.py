@@ -52,9 +52,13 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
             base[k] = v
 
 
+_B64_RE = re.compile(r'(data:[^;]+;base64,)([A-Za-z0-9+/=]{200,})')
+
+
 def _curl_for_post(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> str:
     """Build an equivalent curl command for a POST request (for debugging)."""
     body = json.dumps(payload, ensure_ascii=False)
+    body = _B64_RE.sub(lambda m: f'{m.group(1)}<{len(m.group(2))} chars>', body)
     body_escaped = body.replace("'", "'\"'\"'")
     parts = [f"curl -X POST '{url}'"]
     for k, v in headers.items():
@@ -105,11 +109,15 @@ def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
 def _should_use_video(config) -> bool:
     """Return True when frames should be encoded as MP4 video.
 
-    Controlled entirely by the ``vision_video_encode`` config flag.
-    Set it to ``true`` in your preset/config for any model that
-    supports video input (e.g. Cosmos-Reason2).
+    Controlled by ``vision_video_encode`` config flag, but automatically
+    disabled for backends that don't support video_url (e.g. Ollama).
     """
-    return bool(getattr(config, "vision_video_encode", False))
+    if not bool(getattr(config, "vision_video_encode", False)):
+        return False
+    api_base = getattr(config, "api_base", "") or ""
+    if "11434" in api_base or "ollama" in api_base.lower():
+        return False
+    return True
 
 
 def _strip_data_url_prefix(data_url: str) -> str:
@@ -477,12 +485,6 @@ class OpenAILLMBackend(LLMBackend):
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
-        elif reasoning_enabled:
-            sys_prompt = (sys_prompt or "") + (
-                "\n\nUse the following format:\n\n<think>\n"
-                "Brief reasoning (2-3 sentences max).\n</think>\n\n"
-                "Write your final answer immediately after the </think> tag."
-            )
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
@@ -498,7 +500,6 @@ class OpenAILLMBackend(LLMBackend):
             )
             messages.append({"role": "user", "content": user_content})
         else:
-            # Text-only message
             messages.append({"role": "user", "content": prompt})
 
         # Prepare API request
