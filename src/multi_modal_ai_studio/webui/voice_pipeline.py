@@ -238,10 +238,6 @@ async def _run_voice_pipeline(
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
     
-    # Video-encoding models (vision_video_encode=true in config/preset)
-    # benefit from more frames.  Raise browser capture FPS to match USB
-    # camera (~10fps).  Non-video VLMs keep the user-configured FPS
-    # (default 3) since they only use a small number of individual images.
     _use_video_encode = bool(getattr(llm_config, "vision_video_encode", False))
     COSMOS_BROWSER_FPS = 5.0
     if _use_video_encode and vision_buffer_fps < COSMOS_BROWSER_FPS:
@@ -251,10 +247,10 @@ async def _run_voice_pipeline(
         )
         vision_buffer_fps = COSMOS_BROWSER_FPS
     
-    # Determine if using server-side camera (USB)
+    # Determine if using server-side camera (USB or local video file)
     use_server_camera = (
-        config.devices.video_source == "usb" 
-        and bool(config.devices.video_device)
+        (config.devices.video_source == "usb" and bool(config.devices.video_device))
+        or config.devices.video_source == "local"
     )
     
     # Multi-frame response handling (for browser camera)
@@ -264,8 +260,9 @@ async def _run_voice_pipeline(
     # Track speech timing for frame selection
     speech_start_time: Optional[float] = None  # Set on first asr_partial
     
-    # Frame broker for server camera
+    # Frame broker for server camera (USB or local video)
     _frame_broker = None
+    _local_video_feeder = None
     if vision_enabled and use_server_camera:
         try:
             from multi_modal_ai_studio.backends.vision.frame_broker import get_frame_broker
@@ -273,11 +270,32 @@ async def _run_voice_pipeline(
             logger.info("[VLM] Using FrameBroker for server camera frames")
         except ImportError:
             logger.warning("[VLM] FrameBroker not available, server camera VLM disabled")
+
+        if config.devices.video_source == "local" and _frame_broker is not None:
+            video_filename = getattr(config.devices, "video_file", None)
+            if video_filename:
+                video_path = Path(__file__).resolve().parents[3] / "videos" / video_filename
+                if not video_path.is_file():
+                    video_path = Path("videos") / video_filename
+                try:
+                    from multi_modal_ai_studio.backends.vision.local_video_feeder import LocalVideoFeeder
+                    _local_video_feeder = LocalVideoFeeder(
+                        video_path=str(video_path),
+                        frame_broker=_frame_broker,
+                        fps=vision_buffer_fps,
+                        jpeg_quality=int(vision_quality * 100),
+                    )
+                    _local_video_feeder.start()
+                    logger.info("[VLM] LocalVideoFeeder started: %s @ %.1f fps", video_path, vision_buffer_fps)
+                except Exception as e:
+                    logger.warning("[VLM] Failed to start LocalVideoFeeder: %s", e)
+            else:
+                logger.warning("[VLM] video_source=local but no video_file configured")
     
     if vision_enabled:
         logger.info(
             "VLM vision enabled: n_frames=%d, quality=%.1f, max_width=%d, buffer_fps=%.1f, server_camera=%s",
-            vision_frames_count, vision_quality, vision_max_width, vision_buffer_fps, use_server_camera
+            vision_frames_count, vision_quality, vision_max_width, vision_buffer_fps, use_server_camera,
         )
     
     async def start_vlm_capture() -> None:
@@ -1181,8 +1199,10 @@ async def _run_voice_pipeline(
             except asyncio.CancelledError:
                 pass
 
-    # VLM: Stop browser frame capture
+    # VLM: Stop browser frame capture and local video feeder
     await stop_vlm_capture()
+    if _local_video_feeder is not None:
+        _local_video_feeder.stop()
 
     if session.timeline.start_time is None:
         return None  # preview-only (Server USB) and client closed before start_session
@@ -1203,13 +1223,20 @@ async def _run_voice_pipeline(
 
 Title:"""
             title_text = ""
-            async for token in llm.generate_stream(
-                prompt=prompt,
-                history=None,
-                system_prompt="You reply with only a short phrase. No explanation.",
-            ):
-                if token.token:
-                    title_text += token.token
+            saved_reasoning = getattr(llm.config, "enable_reasoning", False)
+            llm.config.enable_reasoning = False
+            try:
+                async for token in llm.generate_stream(
+                    prompt=prompt,
+                    history=None,
+                    system_prompt="You reply with only a short phrase. No explanation.",
+                ):
+                    if token.token:
+                        title_text += token.token
+            finally:
+                llm.config.enable_reasoning = saved_reasoning
+            import re as _re
+            title_text = _re.sub(r'<think>.*?</think>', '', title_text, flags=_re.DOTALL).strip()
             title_text = title_text.strip().split("\n")[0].strip()[:50]
             if title_text:
                 session.name = title_text

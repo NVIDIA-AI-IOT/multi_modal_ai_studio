@@ -94,6 +94,19 @@ multi_modal_ai_studio --preset low-latency
 
 Open **http://localhost:8092** in your browser.
 
+### Kill a Running Server
+
+If the server is running in the background or the port is stuck with `address already in use`:
+
+```bash
+# Find and kill the process on port 8092
+fuser -k 8092/tcp
+
+# Or find the PID manually
+lsof -i :8092
+kill <PID>
+```
+
 **Sessions and sample data**
 By default the app loads and saves sessions in `sessions/`. To view or use the sample/mock session JSONs (e.g. in `mock_sessions/`), run with `--session-dir mock_sessions`. Open the app, then click a session in the sidebar to view its config and timeline.
 

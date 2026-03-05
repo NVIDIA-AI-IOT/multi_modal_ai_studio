@@ -96,6 +96,7 @@ docker run -d --runtime nvidia \
     --gpu-memory-utilization 0.25 \
     --reasoning-parser qwen3 \
     --media-io-kwargs '{"video": {"num_frames": -1}}' \
+    --enable-prefix-caching \
     --port 8000
 ```
 
@@ -120,6 +121,7 @@ docker run -d --runtime nvidia \
     --gpu-memory-utilization 0.7 \
     --reasoning-parser qwen3 \
     --media-io-kwargs '{"video": {"num_frames": -1}}' \
+    --enable-prefix-caching \
     --port 8000
 ```
 
@@ -145,6 +147,8 @@ docker run -d --gpus all \
 > **`--reasoning-parser qwen3`**: Enables parsing of `<think>...</think>` chain-of-thought tokens from Cosmos-Reason2, separating reasoning from the final answer.
 >
 > **`--media-io-kwargs '{"video": {"num_frames": -1}}'`**: Processes all video frames instead of sampling a subset.
+>
+> **`--enable-prefix-caching`**: Reuses the KV cache for identical request prefixes. When the same local video is sent across multiple queries, the vision tokens are cached and subsequent requests skip the expensive vision encoding — reducing first-token latency from ~7-10s to ~2-4s on repeated video.
 
 ### Verify vLLM is Running:
 

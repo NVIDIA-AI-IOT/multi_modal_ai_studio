@@ -52,7 +52,7 @@ sessions/*
 # mock_sessions/ is not ignored so you can commit sample session JSONs (e.g. for alpha)
 *.session.json
 user_presets/
-
+src/debug_videos/
 # Secrets
 .env
 *.key
