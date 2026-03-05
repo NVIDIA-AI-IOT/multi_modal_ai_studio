@@ -143,6 +143,7 @@ class WebUIServer:
         self.ssl_context = ssl_context
         self.app = web.Application()
         self.app["session_dir"] = self.session_dir
+        self.app["_server"] = self  # so voice pipeline can read current effective session dir
         self.setup_routes()
 
     def _get_effective_session_dir(self) -> Path:

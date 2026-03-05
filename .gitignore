@@ -48,7 +48,7 @@ docs/*.md
 sessions/*
 !sessions/example_session.json
 !sessions/example_session_2.json
-mock_sessions/*
+mock_sessions/
 *.session.json
 user_presets/
 
@@ -67,3 +67,6 @@ htmlcov/
 # Development
 *.tmp
 *.bak
+# Realtime debug PCM (REALTIME_DEBUG_RECORD_PCM=1, REALTIME_DEBUG_RECORD_RESPONSE=1); same base as session JSON
+*_realtime_sent_24k.pcm
+*_realtime_response_24k.pcm

@@ -1,6 +1,8 @@
 """
-Voice WebSocket pipeline: ASR (Riva) -> LLM (Ollama) -> TTS (Riva).
+Voice WebSocket pipeline: ASR (Riva or OpenAI Realtime) -> LLM (Ollama) -> TTS (Riva).
 
+When ASR is OpenAI Realtime API (WebSocket, full voice), uses a single Realtime WebSocket
+instead of Riva ASR + LLM + Riva TTS.
 Handles WebSocket messages: config (first JSON), then binary PCM audio.
 Sends back: timeline events (JSON) and TTS audio (base64).
 On stop/disconnect: saves session to session_dir.
@@ -11,6 +13,7 @@ import base64
 import json
 import logging
 import math
+import os
 import queue
 import struct
 import threading
@@ -18,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 from aiohttp import web
 
 from multi_modal_ai_studio.devices.capture import start_server_mic_capture
@@ -28,7 +32,7 @@ try:
         stop_server_speaker_playback,
     )
 except ImportError:
-    # playback.py may be missing on some checkouts; stub so app still starts.
+    # playback.py may be missing on some branches (e.g. upstream main); stub so app still starts.
     def start_server_speaker_playback(device: str, sample_rate: int, proc_holder: Optional[list] = None):
         return None
 
@@ -49,6 +53,12 @@ from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend
+from multi_modal_ai_studio.backends.realtime import (
+    DISABLE_TURN_DETECTION,
+    REALTIME_SAMPLE_RATE,
+    OpenAIRealtimeClient,
+    RealtimeEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +75,16 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             asr["scheme"] = asr.pop("backend", "riva")
         if "riva_server" in asr and "server" not in asr:
             asr["server"] = asr.pop("riva_server")
+        # Realtime: pass through realtime_url; derive from api_base when missing (e.g. preset)
+        if asr.get("scheme") == "openai-realtime":
+            if not (asr.get("realtime_url") or "").strip():
+                base = (asr.get("api_base") or "").strip()
+                if base:
+                    asr["realtime_url"] = base
+            if not asr.get("realtime_transport"):
+                asr["realtime_transport"] = "websocket"
+            if not asr.get("realtime_session_type"):
+                asr["realtime_session_type"] = "full"
         data["asr"] = asr
     if "tts" in data:
         tts = dict(data["tts"])
@@ -125,6 +145,432 @@ def _pcm_rms_slices(
     return result
 
 
+def _resample_pcm_to_24k(pcm_bytes: bytes, from_rate: int) -> bytes:
+    """Resample 16-bit mono PCM to 24 kHz for Realtime API."""
+    if from_rate == REALTIME_SAMPLE_RATE:
+        return pcm_bytes
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    n_old = len(samples)
+    n_new = int(round(n_old * REALTIME_SAMPLE_RATE / from_rate))
+    x_old = np.arange(n_old)
+    x_new = np.linspace(0, n_old - 1, n_new)
+    resampled = np.interp(x_new, x_old, samples.astype(np.float64)).astype(np.int16)
+    return resampled.tobytes()
+
+
+# Browser sends 16 kHz PCM (TARGET_SAMPLE_RATE in app.js).
+INPUT_SAMPLE_RATE_FOR_REALTIME = 16000
+
+
+async def _run_realtime_loop(
+    ws: web.WebSocketResponse,
+    session: Session,
+    config: SessionConfig,
+    session_dir: Path,
+    use_server_mic: bool,
+    use_server_speaker: bool,
+    capture_queue: Optional[queue.Queue],
+    stop_capture: Optional[threading.Event],
+    capture_thread: Optional[threading.Thread],
+) -> Optional[str]:
+    """
+    Run OpenAI Realtime WebSocket loop: PCM in -> Realtime client -> TTS audio + events out.
+    Same device handling as classic (browser or server mic, browser or server speaker).
+    """
+    asr_config = config.asr
+    llm_config = config.llm
+    tts_config = config.tts
+    url = (asr_config.realtime_url or asr_config.api_base or "").strip()
+    api_key = (asr_config.api_key or "").strip()
+    model = (asr_config.model or "gpt-realtime").strip()
+    instructions = (llm_config.system_prompt or "You are a helpful assistant.").strip()
+    voice = getattr(tts_config, "voice", "alloy") or "alloy"
+    # OpenAI Realtime voices are short names (alloy, echo, ...); Riva uses long names
+    if len(voice) > 20:
+        voice = "alloy"
+
+    # VAD / turn_detection from ASR config (server_vad or null)
+    turn_detection = DISABLE_TURN_DETECTION
+    if getattr(asr_config, "enable_vad", True):
+        turn_detection = {
+            "type": "server_vad",
+            "threshold": getattr(asr_config, "vad_start_threshold", 0.5),
+            "prefix_padding_ms": getattr(asr_config, "speech_pad_ms", 300),
+            "silence_duration_ms": getattr(asr_config, "speech_timeout_ms", 500),
+        }
+
+    # Enable input transcription so we get asr_partial/asr_final (ASR lane); client sends audio.input.transcription.
+    input_transcription = {"model": "gpt-4o-transcribe"}
+    client = OpenAIRealtimeClient(
+        url=url,
+        api_key=api_key,
+        model=model,
+        instructions=instructions,
+        voice=voice,
+        turn_detection=turn_detection,
+        input_audio_transcription=input_transcription,
+    )
+    pipeline_live = asyncio.Event()
+    pipeline_live.set() if not use_server_mic else pipeline_live.clear()
+    stopped = asyncio.Event()
+    session_ready = asyncio.Event()  # Set when Realtime session.updated received; must wait before send_audio
+    _user_amplitude_sent = False
+    preview_start_time = time.time()
+    amplitude_interval = 0.05
+    # Optional: record 24 kHz PCM sent to Realtime (export REALTIME_DEBUG_RECORD_PCM=1; optional REALTIME_DEBUG_PCM_DIR)
+    _debug_record_pcm = os.environ.get("REALTIME_DEBUG_RECORD_PCM", "").strip().lower() in ("1", "true", "yes")
+    _debug_pcm_file_holder: list = []  # [file_handle] shared by receive_loop and server_capture_consumer
+    if _debug_record_pcm:
+        _debug_pcm_dir = Path(os.environ.get("REALTIME_DEBUG_PCM_DIR", "").strip()) or session_dir
+        _debug_pcm_dir = _debug_pcm_dir.resolve()
+        logger.info("Realtime debug: PCM recording enabled; will write to %s when first audio is sent", _debug_pcm_dir)
+    # Optional: record 24 kHz PCM received from Realtime (response/AI audio) (export REALTIME_DEBUG_RECORD_RESPONSE=1)
+    _debug_record_response = os.environ.get("REALTIME_DEBUG_RECORD_RESPONSE", "").strip().lower() in ("1", "true", "yes")
+    _debug_response_file_holder: list = []
+    if _debug_record_response:
+        _debug_response_dir = Path(os.environ.get("REALTIME_DEBUG_PCM_DIR", "").strip()) or session_dir
+        _debug_response_dir = _debug_response_dir.resolve()
+        logger.info("Realtime debug: response audio recording enabled; will write to %s when first response is received", _debug_response_dir)
+
+    async def send_event(event_dict: Dict[str, Any]) -> None:
+        try:
+            await ws.send_str(json.dumps({"type": "event", "event": event_dict}))
+        except Exception as e:
+            logger.warning("Realtime send event failed: %s", e)
+
+    try:
+        await client.connect()
+    except Exception as e:
+        logger.exception("Realtime connect failed: %s", e)
+        return None
+
+    def pcm_for_realtime(pcm_bytes: bytes) -> bytes:
+        return _resample_pcm_to_24k(pcm_bytes, INPUT_SAMPLE_RATE_FOR_REALTIME)
+
+    def _write_debug_pcm(pcm_24: bytes) -> None:
+        if not _debug_record_pcm or not pcm_24:
+            return
+        try:
+            if not _debug_pcm_file_holder:
+                out_dir = Path(os.environ.get("REALTIME_DEBUG_PCM_DIR", "").strip()) or session_dir
+                out_dir = out_dir.resolve()
+                out_dir.mkdir(parents=True, exist_ok=True)
+                # Same base name as session JSON so PCM is easy to associate: {session_id}.json / {session_id}_realtime_sent_24k.pcm
+                path = out_dir / f"{session.session_id}_realtime_sent_24k.pcm"
+                _debug_pcm_file_holder.append(open(path, "wb"))
+                logger.info("Realtime debug: recording 24 kHz PCM to %s", path)
+            _debug_pcm_file_holder[0].write(pcm_24)
+        except Exception as e:
+            logger.debug("Realtime debug PCM write failed: %s", e)
+
+    def _write_debug_response_audio(pcm_24: bytes) -> None:
+        if not _debug_record_response or not pcm_24:
+            return
+        try:
+            if not _debug_response_file_holder:
+                out_dir = Path(os.environ.get("REALTIME_DEBUG_PCM_DIR", "").strip()) or session_dir
+                out_dir = out_dir.resolve()
+                out_dir.mkdir(parents=True, exist_ok=True)
+                path = out_dir / f"{session.session_id}_realtime_response_24k.pcm"
+                _debug_response_file_holder.append(open(path, "wb"))
+                logger.info("Realtime debug: recording response 24 kHz PCM to %s", path)
+            _debug_response_file_holder[0].write(pcm_24)
+        except Exception as e:
+            logger.debug("Realtime debug response PCM write failed: %s", e)
+
+    server_speaker_proc = None
+    tts_start_sent = False
+    tts_first_audio_sent = False
+    last_output_transcript = ""
+    # Cursor for TTS amplitude timestamps: anchored to tts_start so saved-session purple spans tts_start..tts_complete
+    tts_amplitude_cursor: Optional[float] = None
+
+    async def realtime_event_consumer() -> None:
+        nonlocal server_speaker_proc, tts_start_sent, tts_first_audio_sent, last_output_transcript, tts_amplitude_cursor
+        try:
+            async for ev in client.events():
+                if ev is None or stopped.is_set():
+                    break
+                if ev.kind == "error":
+                    logger.warning("Realtime error: %s", ev.message)
+                    ts = (time.time() - session.timeline.start_time) if session.timeline.start_time is not None else 0
+                    session.timeline.add_event("error", Lane.SYSTEM, data={"message": ev.message})
+                    await send_event({"event_type": "error", "lane": "system", "data": {"message": ev.message}, "timestamp": ts})
+                    continue
+                if ev.kind == "session_ready":
+                    session_ready.set()
+                    ts = (time.time() - session.timeline.start_time) if session.timeline.start_time is not None else 0
+                    session.timeline.add_event("realtime_session_ready", Lane.SYSTEM, data={})
+                    await send_event({"event_type": "realtime_session_ready", "lane": "system", "data": {}, "timestamp": ts})
+                    continue
+                if ev.kind == "transcript_delta":
+                    if ev.text and session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        session.timeline.add_event("asr_partial", Lane.SPEECH, data={"text": ev.text, "confidence": 1.0})
+                        await send_event({"event_type": "asr_partial", "lane": "speech", "data": {"text": ev.text, "confidence": 1.0}, "timestamp": ts})
+                        logger.info("[asr] asr_partial @ %.2fs: %r", ts, (ev.text[:60] + "..." if len(ev.text) > 60 else ev.text))
+                if ev.kind == "transcript_completed":
+                    if ev.text and session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        session.timeline.add_event("asr_final", Lane.SPEECH, data={"text": ev.text, "confidence": 1.0})
+                        await send_event({"event_type": "asr_final", "lane": "speech", "data": {"text": ev.text, "confidence": 1.0}, "timestamp": ts})
+                        logger.info("[asr] asr_final @ %.2fs: %r", ts, (ev.text[:80] + "..." if len(ev.text) > 80 else ev.text))
+                if ev.kind == "output_transcript_delta":
+                    if ev.text and session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        session.timeline.add_event("realtime_output_partial", Lane.TTS, data={"text": ev.text})
+                        await send_event({"event_type": "realtime_output_partial", "lane": "tts", "data": {"text": ev.text}, "timestamp": ts})
+                        logger.info("[tts] realtime_output_partial @ %.2fs: %r", ts, (ev.text[:100] + "..." if len(ev.text) > 100 else ev.text))
+                if ev.kind == "output_transcript_completed":
+                    if ev.text and session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        last_output_transcript = ev.text
+                        session.timeline.add_event("realtime_output_final", Lane.TTS, data={"text": ev.text})
+                        await send_event({"event_type": "realtime_output_final", "lane": "tts", "data": {"text": ev.text}, "timestamp": ts})
+                        logger.info("[tts] realtime_output_final @ %.2fs: %r", ts, ev.text)
+                if ev.kind == "audio" and ev.audio:
+                    _write_debug_response_audio(ev.audio)
+                    amplitude_segments: List[Dict[str, Any]] = []
+                    if session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        if not tts_start_sent:
+                            tts_start_sent = True
+                            session.timeline.add_event("tts_start", Lane.TTS)
+                            await send_event({"event_type": "tts_start", "lane": "tts", "data": {}, "timestamp": ts})
+                            await ws.send_str(json.dumps({"type": "tts_start"}))
+                            logger.info("[tts] tts_start @ %.2fs", ts)
+                            # Anchor TTS amplitude to tts_start so saved-session purple spans tts_start..tts_complete
+                            tts_amplitude_cursor = ts
+                        amp = _pcm_rms_to_amplitude(ev.audio)
+                        if amp > 0 and not tts_first_audio_sent:
+                            tts_first_audio_sent = True
+                            session.timeline.add_event("tts_first_audio", Lane.TTS)
+                            await send_event({"event_type": "tts_first_audio", "lane": "tts", "data": {}, "timestamp": ts})
+                            logger.info("[tts] tts_first_audio @ %.2fs", ts)
+                        # 25ms RMS slices; timeline uses cursor (tts_start-anchored) so replay purple aligns with TTS blocks
+                        _window_s = 0.025  # same as Classic _amplitude_window_s (25ms)
+                        amps = _pcm_rms_slices(
+                            ev.audio,
+                            sample_rate=ev.sample_rate,
+                            window_s=_window_s,
+                        )
+                        if tts_amplitude_cursor is not None:
+                            for i, a in enumerate(amps):
+                                t_start = tts_amplitude_cursor
+                                t_end = t_start + _window_s
+                                session.timeline.add_audio_amplitude(
+                                    amplitude=a, source="tts", timestamp=t_start
+                                )
+                                amplitude_segments.append({
+                                    "startTime": round(t_start, 3),
+                                    "endTime": round(t_end, 3),
+                                    "amplitude": round(a, 2),
+                                })
+                                tts_amplitude_cursor = t_end
+                    if use_server_speaker and config.devices.audio_output_device:
+                        if server_speaker_proc is None:
+                            server_speaker_proc = start_server_speaker_playback(
+                                config.devices.audio_output_device,
+                                ev.sample_rate,
+                            )
+                        if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
+                            try:
+                                server_speaker_proc.stdin.write(ev.audio)
+                                server_speaker_proc.stdin.flush()
+                            except (BrokenPipeError, OSError):
+                                server_speaker_proc = None
+                    b64 = base64.b64encode(ev.audio).decode("ascii")
+                    payload = {
+                        "type": "tts_audio",
+                        "data": b64,
+                        "sample_rate": ev.sample_rate,
+                        "is_final": False,
+                    }
+                    if amplitude_segments:
+                        payload["amplitude_segments"] = amplitude_segments
+                    await ws.send_str(json.dumps(payload))
+                if ev.kind == "response_done":
+                    if session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        session.timeline.add_event("tts_complete", Lane.TTS, data={"text": last_output_transcript})
+                        await send_event({"event_type": "tts_complete", "lane": "tts", "data": {"text": last_output_transcript}, "timestamp": ts})
+                        logger.info("[tts] tts_complete @ %.2fs: %r", ts, last_output_transcript)
+                    # Reset so next response sends tts_start/tts_first_audio again (TTS lane rectangles for 2nd+ turns)
+                    tts_start_sent = False
+                    tts_first_audio_sent = False
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if server_speaker_proc is not None:
+                stop_server_speaker_playback(server_speaker_proc)
+
+    async def receive_loop() -> None:
+        nonlocal _user_amplitude_sent
+        last_amplitude_time = 0.0
+        user_amp_buf: list = []  # last 3 raw amplitudes for smoothing green waveform (16 kHz PCM)
+        try:
+            async for msg in ws:
+                if msg.type == web.WSMsgType.TEXT:
+                    try:
+                        obj = json.loads(msg.data)
+                        if obj.get("type") == "start_session":
+                            if use_server_mic and not pipeline_live.is_set():
+                                session.start()
+                                await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
+                                pipeline_live.set()
+                                logger.info("Realtime: start_session received; capture now feeds Realtime")
+                        if obj.get("type") == "stop":
+                            for key, attr in [("system_stats", "system_stats"), ("tts_playback_segments", "tts_playback_segments"), ("audio_amplitude_history", "audio_amplitude_history"), ("ttl_bands", "ttl_bands")]:
+                                val = obj.get(key)
+                                if isinstance(val, list) and hasattr(session, attr):
+                                    setattr(session, attr, val)
+                            if getattr(session, "ttl_bands", None):
+                                session.apply_ttl_bands()
+                            session.app_version = __version__
+                            stopped.set()
+                            return
+                    except json.JSONDecodeError:
+                        pass
+                    continue
+                if msg.type == web.WSMsgType.BINARY and not use_server_mic:
+                    await session_ready.wait()
+                    pcm_24 = pcm_for_realtime(msg.data)
+                    _write_debug_pcm(pcm_24)
+                    await client.send_audio(pcm_24)
+                    if session.timeline.start_time is not None:
+                        now = time.time() - session.timeline.start_time
+                        if now - last_amplitude_time >= amplitude_interval:
+                            amp = _pcm_rms_to_amplitude(msg.data)
+                            session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+                            last_amplitude_time = now
+                            user_amp_buf.append(amp)
+                            if len(user_amp_buf) > 3:
+                                user_amp_buf.pop(0)
+                            smoothed = sum(user_amp_buf) / len(user_amp_buf)
+                            try:
+                                await ws.send_str(json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(smoothed, 2)}))
+                                _user_amplitude_sent = True
+                            except Exception:
+                                pass
+                if msg.type in (web.WSMsgType.CLOSE, web.WSMsgType.ERROR):
+                    stopped.set()
+                    return
+        except Exception as e:
+            logger.debug("Realtime receive_loop ended: %s", e)
+        finally:
+            stopped.set()
+
+    async def server_capture_consumer() -> None:
+        nonlocal _user_amplitude_sent
+        if capture_queue is None:
+            return
+        loop = asyncio.get_event_loop()
+        last_amplitude_time = 0.0
+        user_amp_buf: list = []
+        while not stopped.is_set():
+            try:
+                chunk = await loop.run_in_executor(None, capture_queue.get)
+            except Exception:
+                break
+            if chunk is None:
+                break
+            if pipeline_live.is_set():
+                await session_ready.wait()
+                pcm_24 = pcm_for_realtime(chunk)
+                _write_debug_pcm(pcm_24)
+                await client.send_audio(pcm_24)
+                if session.timeline.start_time is not None:
+                    now = time.time() - session.timeline.start_time
+                    if now - last_amplitude_time >= amplitude_interval:
+                        amp = _pcm_rms_to_amplitude(chunk)
+                        session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+                        last_amplitude_time = now
+                        user_amp_buf.append(amp)
+                        if len(user_amp_buf) > 3:
+                            user_amp_buf.pop(0)
+                        smoothed = sum(user_amp_buf) / len(user_amp_buf)
+                        try:
+                            await ws.send_str(json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(smoothed, 2)}))
+                            _user_amplitude_sent = True
+                        except Exception:
+                            pass
+            else:
+                now = time.time() - preview_start_time
+                if now - last_amplitude_time >= amplitude_interval:
+                    amp = _pcm_rms_to_amplitude(chunk)
+                    last_amplitude_time = time.time() - preview_start_time
+                    try:
+                        await ws.send_str(json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(amp, 2)}))
+                        _user_amplitude_sent = True
+                    except Exception:
+                        pass
+
+    if not use_server_mic:
+        session.start()
+        await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
+
+    event_task = asyncio.create_task(realtime_event_consumer())
+    recv_task = asyncio.create_task(receive_loop())
+    server_capture_task: Optional[asyncio.Task] = None
+    if use_server_mic and capture_queue is not None:
+        server_capture_task = asyncio.create_task(server_capture_consumer())
+
+    if use_server_mic:
+        await asyncio.wait(
+            [asyncio.create_task(stopped.wait()), asyncio.create_task(pipeline_live.wait())],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # If pipeline_live was set, receive_loop already called session.start() and send_event on start_session
+
+    await stopped.wait()
+
+    if stop_capture is not None:
+        stop_capture.set()
+    if server_capture_task is not None:
+        server_capture_task.cancel()
+    recv_task.cancel()
+    event_task.cancel()
+    try:
+        await client.disconnect()
+    except Exception as e:
+        logger.debug("Realtime disconnect: %s", e)
+    try:
+        await recv_task
+    except asyncio.CancelledError:
+        pass
+    if server_capture_task is not None:
+        try:
+            await server_capture_task
+        except asyncio.CancelledError:
+            pass
+    try:
+        await event_task
+    except asyncio.CancelledError:
+        pass
+
+    if _debug_pcm_file_holder:
+        try:
+            _debug_pcm_file_holder[0].close()
+        except Exception:
+            pass
+        _debug_pcm_file_holder.clear()
+    if _debug_response_file_holder:
+        try:
+            _debug_response_file_holder[0].close()
+        except Exception:
+            pass
+        _debug_response_file_holder.clear()
+
+    if session.timeline.start_time is None:
+        return None
+
+    session_dir.mkdir(parents=True, exist_ok=True)
+    path = session_dir / f"{session.session_id}.json"
+    session.save(path)
+    logger.info("Realtime session saved: %s", path)
+    return session.session_id
+
+
 async def _run_voice_pipeline(
     ws: web.WebSocketResponse,
     config: SessionConfig,
@@ -154,6 +600,64 @@ async def _run_voice_pipeline(
     llm_config = config.llm
     tts_config = config.tts
 
+    # Device capture for server mic (used by both Realtime and classic paths)
+    capture_queue: Optional[queue.Queue] = queue.Queue() if use_server_mic else None
+    stop_capture: Optional[threading.Event] = threading.Event() if use_server_mic else None
+    capture_thread: Optional[threading.Thread] = None
+    if use_server_mic and capture_queue is not None and stop_capture is not None:
+        capture_thread = start_server_mic_capture(
+            config.devices.audio_input_source,
+            config.devices.audio_input_device,
+            capture_queue,
+            stop_capture,
+        )
+        if not capture_thread:
+            logger.warning(
+                "Server mic capture could not start (source=%s device=%s); no voice input from server device",
+                getattr(config.devices, "audio_input_source", None),
+                getattr(config.devices, "audio_input_device", None),
+            )
+            use_server_mic = False
+        else:
+            logger.info("Server mic capture thread started; waiting for first PCM chunk and user_amplitude")
+
+    # Realtime full voice (WebSocket): one client, no Riva ASR/LLM/TTS
+    if (
+        asr_config.scheme == "openai-realtime"
+        and asr_config.realtime_session_type == "full"
+        and asr_config.realtime_transport == "websocket"
+    ):
+        url = (asr_config.realtime_url or asr_config.api_base or "").strip()
+        if not url:
+            await ws.send_str(json.dumps({"type": "error", "error": "OpenAI Realtime requires realtime_url or api_base"}))
+            return None
+        if not (asr_config.model or "").strip():
+            await ws.send_str(json.dumps({"type": "error", "error": "OpenAI Realtime requires model"}))
+            return None
+        if "localhost" not in url.split("//")[-1].split("/")[0].lower() and not (asr_config.api_key or "").strip():
+            await ws.send_str(json.dumps({"type": "error", "error": "OpenAI Realtime (non-localhost) requires API key"}))
+            return None
+        try:
+            return await _run_realtime_loop(
+                ws=ws,
+                session=session,
+                config=config,
+                session_dir=session_dir,
+                use_server_mic=use_server_mic,
+                use_server_speaker=use_server_speaker,
+                capture_queue=capture_queue,
+                stop_capture=stop_capture,
+                capture_thread=capture_thread,
+            )
+        except Exception as e:
+            logger.exception("Realtime loop error: %s", e)
+            try:
+                await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
+            except Exception:
+                pass
+            return None
+
+    # Classic: Riva ASR + LLM + Riva TTS
     if asr_config.scheme != "riva" or tts_config.scheme != "riva":
         await ws.send_str(json.dumps({"type": "error", "error": "This pipeline requires ASR and TTS scheme 'riva'"}))
         return None
@@ -181,7 +685,6 @@ async def _run_voice_pipeline(
     pipeline_live = asyncio.Event()  # set when client sends start_session; then we start ASR and feed pipeline
     pipeline_live.clear()
 
-    # When user selected a Server USB microphone, capture on server; preview streams amplitude until start_session.
     logger.info(
         "Voice pipeline devices: audio_input_source=%s audio_input_device=%s use_server_mic=%s",
         getattr(config.devices, "audio_input_source", None),
@@ -624,8 +1127,10 @@ async def _run_voice_pipeline(
                                 sample_rate=chunk.sample_rate,
                                 window_s=_amplitude_window_s,
                             )
-                            for a in amps:
-                                t_start = tts_amplitude_next_t
+                            # Use time when we hand off to browser (not when TTS produced) so replay aligns with "when client receives"
+                            ts_send = time.time() - session.timeline.start_time
+                            for i, a in enumerate(amps):
+                                t_start = ts_send - (len(amps) - i) * _amplitude_window_s
                                 t_end = t_start + _amplitude_window_s
                                 session.timeline.add_audio_amplitude(
                                     amplitude=a, source="tts", timestamp=t_start
@@ -635,7 +1140,7 @@ async def _run_voice_pipeline(
                                     "endTime": round(t_end, 3),
                                     "amplitude": round(a, 2),
                                 })
-                                tts_amplitude_next_t = t_end
+                            tts_amplitude_next_t = ts_send
                         b64 = base64.b64encode(chunk.audio).decode("ascii")
                         payload = {
                             "type": "tts_audio",
@@ -854,8 +1359,7 @@ async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
     await ws.prepare(request)
     logger.info("Voice WebSocket prepared, waiting for config")
 
-    session_dir = request.app.get("session_dir")
-    if not session_dir:
+    if not request.app.get("session_dir"):
         await ws.send_str(json.dumps({"type": "error", "error": "Server missing session_dir"}))
         await ws.close()
         return ws
@@ -884,6 +1388,13 @@ async def handle_voice_ws(request: web.Request) -> web.WebSocketResponse:
         await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
         await ws.close()
         return ws
+
+    # Use current effective session dir (e.g. mock_sessions); server keeps override in sync
+    server = request.app.get("_server")
+    if server is not None and hasattr(server, "_get_effective_session_dir"):
+        session_dir = server._get_effective_session_dir().resolve()
+    else:
+        session_dir = Path(request.app.get("session_dir")).resolve()
 
     session_id = None
     try:
