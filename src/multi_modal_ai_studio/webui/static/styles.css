@@ -292,6 +292,10 @@ code, pre {
     display: grid;
     grid-template-columns: 1fr 1fr;
     overflow: hidden;
+    transition: grid-template-columns var(--transition-base);
+}
+.content-area.content-area--config-collapsed {
+    grid-template-columns: 48px 1fr;
 }
 
 /* ===== Header ===== */
@@ -674,6 +678,69 @@ code, pre {
     background: var(--config-panel-bg-editable);
 }
 
+/* Locked once session has started (live or stopped): grayed, no interaction */
+.config-panel.config-panel--locked {
+    background: var(--config-panel-bg-readonly);
+}
+.config-panel.config-panel--locked .config-content {
+    opacity: 0.75;
+    pointer-events: none;
+}
+
+/* Collapsed: narrow strip with expand button only */
+.config-panel.config-panel--collapsed {
+    min-width: 0;
+    width: 48px;
+}
+.config-panel.config-panel--collapsed .config-header,
+.config-panel.config-panel--collapsed .config-content {
+    display: none !important;
+}
+.config-panel.config-panel--collapsed .config-expand-strip {
+    display: flex !important;
+}
+.config-expand-strip {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-md);
+    height: 100%;
+    min-height: 80px;
+}
+.config-expand-btn {
+    padding: var(--space-sm);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+.config-expand-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.config-expand-btn .lucide-inline {
+    width: 20px;
+    height: 20px;
+}
+.config-collapse-btn {
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.config-collapse-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.config-collapse-btn .lucide-inline {
+    width: 16px;
+    height: 16px;
+}
+
 /* Green highlight when in setup mode (ready to START session) */
 .config-panel--start-ready {
     margin: 2px;
@@ -693,6 +760,44 @@ code, pre {
 
 .config-header h3 {
     margin: 0;
+}
+
+.config-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+}
+
+.config-auto-hide-btn {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, #1e1e1e);
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.config-auto-hide-btn:hover:not(:disabled) {
+    background: var(--bg-tertiary, #2a2a2a);
+    color: var(--text-primary);
+}
+.config-auto-hide-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.config-auto-hide-btn.config-auto-hide-btn--on {
+    border-color: var(--nvidia-green, #76b900);
+    color: var(--nvidia-green, #76b900);
+}
+.config-auto-hide-btn .config-auto-hide-icon {
+    width: 14px;
+    height: 14px;
 }
 
 .config-save-default-btn {
@@ -1366,6 +1471,114 @@ code, pre {
     padding: var(--space-sm) var(--space-md);
     gap: var(--space-sm);
     overflow-y: auto;
+    min-width: 0;
+}
+
+/* When config pane is collapsed: session-meta full width, pipeline full width, then row [image+controls 60% | chat+debug 40%] */
+.chat-panel.chat-panel--config-collapsed {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    grid-template-columns: 60% 40%;
+    gap: var(--space-sm);
+}
+.chat-panel.chat-panel--config-collapsed .session-meta-container {
+    grid-column: 1 / -1;
+    grid-row: 1;
+}
+.chat-panel.chat-panel--config-collapsed .session-meta-container {
+    flex-wrap: wrap;
+}
+.chat-panel.chat-panel--config-collapsed .session-meta-left {
+    flex: 1;
+    min-width: 0;
+}
+.session-meta-right {
+    display: none;
+}
+.session-meta-container.session-meta--has-right .session-meta-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    margin-left: auto;
+    flex-shrink: 0;
+    text-align: right;
+}
+.session-meta-recorded,
+.session-meta-filename-right {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+}
+.session-meta-filename-right .session-filename-label,
+.session-meta-filename-right .session-filename-text {
+    font-size: inherit;
+}
+.session-meta-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1;
+    min-width: 0;
+}
+.chat-panel.chat-panel--config-collapsed .pipeline-config-container {
+    grid-column: 1 / -1;
+    grid-row: 2;
+}
+.chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap {
+    grid-row: 3;
+    grid-column: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+.chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+}
+.chat-panel.chat-panel--config-collapsed .chat-panel-right-col {
+    grid-row: 3;
+    grid-column: 2;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.chat-panel.chat-panel--config-collapsed .chat-panel-right-col .chat-history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.chat-panel.chat-panel--config-collapsed .chat-panel-right-col .voice-debug-panel {
+    flex-shrink: 0;
+    margin-top: var(--space-sm);
+}
+
+/* Default: chat-panel-main-wrap is a column (pipeline, image, controls, asr) */
+.chat-panel-main-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+/* Right column: chat history + voice debug (default stack; when collapsed, debug at bottom of right col) */
+.chat-panel-right-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+}
+.chat-panel-right-col .chat-history {
+    flex: 1;
+    min-height: 0;
+}
+.chat-panel:not(.chat-panel--config-collapsed) .chat-panel-right-col .voice-debug-panel {
+    flex-shrink: 0;
 }
 
 /* Pipeline config: transparent grid, device slots + connected pipeline bar */
@@ -1585,6 +1798,16 @@ code, pre {
     box-shadow: var(--shadow-sm);
 }
 
+/* Two-line compact layout: left = icon + title; right = Session recorded + filename when available */
+.session-meta-container.session-meta-container--two-line {
+    align-items: center;
+    padding: var(--space-xs) var(--space-md);
+}
+.session-meta-container.session-meta-container--two-line .session-title {
+    margin: 0;
+    line-height: 1.25;
+}
+
 .session-meta-icon {
     flex-shrink: 0;
     width: 28px;
@@ -1593,16 +1816,10 @@ code, pre {
     align-items: center;
     justify-content: center;
     color: var(--text-tertiary);
-    margin-top: 2px;
 }
 .session-meta-icon .lucide-inline {
     width: 20px;
     height: 20px;
-}
-
-.session-meta-content {
-    flex: 1;
-    min-width: 0;
 }
 
 .session-title {
@@ -1735,12 +1952,20 @@ code, pre {
     flex-shrink: 0;
     box-shadow: var(--shadow-md);
 }
+/* When video is active, JS sets aspect-ratio from video dimensions to avoid gray letterboxing */
+.session-image-container.session-image-container--video-aspect {
+    max-height: none;
+}
 
 .session-preview-image,
 .session-video-feed {
     width: 100%;
     height: 100%;
     object-fit: contain;
+}
+/* Video fills container when container has video-aspect (no letterboxing) */
+.session-image-container.session-image-container--video-aspect .session-video-feed {
+    object-fit: fill;
 }
 
 .image-placeholder,

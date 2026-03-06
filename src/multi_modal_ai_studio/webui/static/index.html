@@ -47,9 +47,15 @@
             <div class="content-area">
                 <!-- Config Panel -->
                 <section class="config-panel" id="config-panel">
+                    <div class="config-expand-strip" id="config-expand-strip" style="display: none;" aria-label="Expand Configuration">
+                        <button type="button" id="config-expand-btn" class="config-expand-btn" title="Show Configuration pane"><i data-lucide="panel-left-open" class="lucide-inline"></i></button>
+                    </div>
                     <div class="config-header">
                         <h3>Configuration</h3>
-                        <button type="button" id="save-default-config-btn" class="config-save-default-btn" title="Save current configuration as default for new voice chats"><i data-lucide="chevrons-left" class="lucide-inline config-save-default-icon"></i> Save as default config</button>
+                        <div class="config-header-actions">
+                            <button type="button" id="auto-hide-config-btn" class="config-auto-hide-btn" title="When on, Configuration pane collapses when you start the session"><i data-lucide="panel-left-close" class="lucide-inline config-auto-hide-icon"></i> <span id="auto-hide-config-label">Auto hide once session start &lt;&lt;</span></button>
+                            <button type="button" id="config-collapse-btn" class="config-collapse-btn" style="display: none;" title="Collapse Configuration pane"><i data-lucide="panel-left-close" class="lucide-inline"></i></button>
+                        </div>
                     </div>
                     <div class="config-content" id="config-content">
                         <nav class="config-tabs" role="tablist">
@@ -68,13 +74,14 @@
                 <!-- Chat Panel (Always 3 sections in order) -->
                 <section class="chat-panel" id="chat-panel">
                     <!-- 1. Session Meta (Title + Stats) – same info as session list button -->
-                    <div class="session-meta-container" id="session-meta">
-                        <div class="session-meta-icon" aria-hidden="true"><i data-lucide="message-square" class="lucide-inline"></i></div>
-                        <div class="session-meta-content">
+                    <div class="session-meta-container session-meta-container--two-line" id="session-meta">
+                        <div class="session-meta-left">
+                            <div class="session-meta-icon" aria-hidden="true"><i data-lucide="message-square" class="lucide-inline"></i></div>
                             <h2 class="session-title" id="session-title">New Session</h2>
-                            <div class="session-meta-line2" id="session-meta-line2"><!-- Date & time, turns --></div>
-                            <div class="session-meta-line3 session-stats" id="session-stats"><!-- Avg TTL, TTFA, etc. --></div>
-                            <div class="session-meta-line4 session-filename" id="session-filename"><!-- Session filename (recorded only) --></div>
+                        </div>
+                        <div class="session-meta-right" id="session-meta-right" aria-label="Session recorded and filename">
+                            <div class="session-meta-recorded" id="session-meta-recorded"></div>
+                            <div class="session-meta-filename-right" id="session-filename-right"></div>
                         </div>
                         <div class="device-tags" id="device-tags" style="display: none;">
                             <span class="device-tag device-tag-camera" id="device-tag-camera"><i data-lucide="video" class="lucide-inline"></i> <span id="device-indicator-camera">—</span></span>
@@ -82,16 +89,18 @@
                             <span class="device-tag"><i data-lucide="volume-2" class="lucide-inline"></i> <span id="device-indicator-speaker">—</span></span>
                         </div>
                     </div>
-                    <!-- Pipeline config (devices + models); below session-meta, updates when config/devices change -->
+                    <!-- Pipeline config (devices + models); directly below session-meta, full width -->
                     <div class="pipeline-config-container" id="pipeline-config" style="display: none;" aria-label="Session pipeline configuration"></div>
-                    <!-- Server health (Ollama + Riva) when in setup; visible only for new voice chat -->
-                    <div class="server-health-row" id="server-health-row" style="display: none;" aria-label="Server connectivity">
-                        <span id="server-health-status" class="server-health-status"></span>
-                        <button type="button" id="server-health-check-btn" class="btn-secondary server-health-check-btn" title="Check if Ollama and Riva servers are reachable">Check servers</button>
-                    </div>
+                    <!-- Left column when config collapsed: image + controls -->
+                    <div class="chat-panel-main-wrap" id="chat-panel-main-wrap">
+                        <!-- Server health (Ollama + Riva) when in setup; visible only for new voice chat -->
+                        <div class="server-health-row" id="server-health-row" style="display: none;" aria-label="Server connectivity">
+                            <span id="server-health-status" class="server-health-status"></span>
+                            <button type="button" id="server-health-check-btn" class="btn-secondary server-health-check-btn" title="Check if Ollama and Riva servers are reachable">Check servers</button>
+                        </div>
 
-                    <!-- 2. Session Image (Preview or Video) -->
-                    <div class="session-image-container" id="session-image">
+                        <!-- 2. Session Image (Preview or Video) -->
+                        <div class="session-image-container" id="session-image">
                         <!-- Historical: Static preview image -->
                         <img id="preview-image" class="session-preview-image" alt="Session preview" style="display: none;">
                         <div class="image-placeholder" id="image-placeholder">
@@ -113,36 +122,40 @@
                         <div class="mic-waveform-overlay" id="mic-waveform-overlay" style="display: none;" aria-hidden="true">
                             <canvas id="mic-waveform-canvas"></canvas>
                         </div>
-                    </div>
+                        </div>
 
-                    <!-- STOP button when recording (no Setup Mode / PREVIEW) -->
-                    <div class="device-controls-container" id="device-controls-container" style="display: none;">
-                        <div class="session-control">
-                            <button id="stop-session-btn" class="stop-btn" style="display: none;">
-                                <span class="btn-icon"><i data-lucide="square" class="lucide-inline"></i></span>
-                                STOP Session
-                            </button>
+                        <!-- STOP button when recording (no Setup Mode / PREVIEW) -->
+                        <div class="device-controls-container" id="device-controls-container" style="display: none;">
+                            <div class="session-control">
+                                <button id="stop-session-btn" class="stop-btn" style="display: none;">
+                                    <span class="btn-icon"><i data-lucide="square" class="lucide-inline"></i></span>
+                                    STOP Session
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Live ASR label (updated on every partial; like Live RIVA WebUI) -->
+                        <div class="live-asr-label-wrap" id="live-asr-label-wrap" style="display: none;">
+                            <span class="live-asr-prefix">Listening: </span><span id="live-asr-text"></span>
                         </div>
                     </div>
-
-                    <!-- Live ASR label (updated on every partial; like Live RIVA WebUI) -->
-                    <div class="live-asr-label-wrap" id="live-asr-label-wrap" style="display: none;">
-                        <span class="live-asr-prefix">Listening: </span><span id="live-asr-text"></span>
-                    </div>
-                    <!-- 3. Chat History -->
-                    <div class="chat-history" id="chat-history">
-                        <div class="empty-state">
-                            <p>👈 Select a session from the sidebar</p>
+                    <!-- Right column when config collapsed: chat history + voice debug at bottom -->
+                    <div class="chat-panel-right-col" id="chat-panel-right-col">
+                        <!-- 3. Chat History -->
+                        <div class="chat-history" id="chat-history">
+                            <div class="empty-state">
+                                <p>👈 Select a session from the sidebar</p>
+                            </div>
                         </div>
-                    </div>
 
-                    <!-- Voice / LLM message log (JSON, like Live RIVA WebUI) -->
-                    <div class="voice-debug-panel" id="voice-debug-panel" style="display: none;">
-                        <div class="voice-debug-header">
-                            <span>Voice pipeline messages (JSON)</span>
-                            <button type="button" class="icon-btn voice-debug-toggle" id="voice-debug-toggle" title="Collapse">−</button>
+                        <!-- Voice / LLM message log (JSON) – at bottom of right column when config collapsed -->
+                        <div class="voice-debug-panel" id="voice-debug-panel" style="display: none;">
+                            <div class="voice-debug-header">
+                                <span>Voice pipeline messages (JSON)</span>
+                                <button type="button" class="icon-btn voice-debug-toggle" id="voice-debug-toggle" title="Collapse">−</button>
+                            </div>
+                            <pre class="voice-debug-log" id="voice-debug-log"></pre>
                         </div>
-                        <pre class="voice-debug-log" id="voice-debug-log"></pre>
                     </div>
 
                     <!-- Text input at bottom when Mic = None (Text Only), ChatGPT-style -->
