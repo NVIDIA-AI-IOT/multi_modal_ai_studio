@@ -757,6 +757,10 @@ code, pre {
     border-radius: var(--radius-lg);
     padding: var(--space-lg);
     flex-shrink: 0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    box-sizing: border-box;
 }
 
 .device-group {
@@ -807,8 +811,12 @@ code, pre {
     display: flex;
     gap: var(--space-md);
     align-items: center;
+    justify-content: center;
     padding-top: var(--space-md);
     border-top: 1px solid var(--border-color);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .start-btn, .stop-btn {
@@ -824,6 +832,7 @@ code, pre {
     justify-content: center;
     gap: var(--space-sm);
     transition: all var(--transition-base);
+    white-space: nowrap;
 }
 
 .start-btn {
@@ -846,6 +855,17 @@ code, pre {
 .stop-btn:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-lg);
+}
+
+/* Push-to-talk: same size as STOP, centered; text single line */
+.mic-mute-btn,
+.session-control .stop-btn {
+    flex: 0 0 auto;
+    min-width: 11rem;
+    width: 11rem;
+}
+.mic-mute-btn {
+    white-space: nowrap;
 }
 
 /* ===== Chat History (compact: more lines visible) ===== */

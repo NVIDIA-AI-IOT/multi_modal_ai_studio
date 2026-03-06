@@ -54,6 +54,8 @@ const state = {
     selectedBrowserSpeakerId: null,
     /** ScriptProcessor or worklet node for PCM capture; disconnect on stop */
     voicePcmNode: null,
+    /** Push-to-talk: when true, server does not feed mic to ASR (waveform still sent and displayed) */
+    micMuted: true,
     /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
     liveSessionStartTime: 0,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
@@ -472,6 +474,8 @@ const defaultConfig = {
         vision_quality: 0.8,
         vision_max_width: 640,
         vision_buffer_fps: 3.0,
+        vision_api_format: 'openai',
+        vision_video_encode: false,
         enable_reasoning: false
     },
     tts: {
@@ -1087,6 +1091,7 @@ function renderLLMConfig(config, readonly = false) {
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8000/v1', 'vLLM')"><strong>vLLM</strong><span>http://localhost:8000/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
+                            <div class="api-preset-item" onclick="selectTensorRTEdgePreset()"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
                             <div style="border-top: 1px solid var(--border-color);"></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://api.openai.com/v1', 'OpenAI')"><strong>OpenAI</strong><span>https://api.openai.com/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://integrate.api.nvidia.com/v1', 'NVIDIA')"><strong>NVIDIA API Catalog</strong><span>https://integrate.api.nvidia.com/v1</span></div>
@@ -1173,6 +1178,13 @@ function renderLLMConfig(config, readonly = false) {
                 <input type="range" ${disabled} id="llm-vision-max-width" min="320" max="1280" step="64" value="${config.vision_max_width || 640}"
                        oninput="updateConfig('llm', 'vision_max_width', parseInt(this.value)); document.getElementById('vision-max-width-value').textContent = this.value + 'px';">
                 <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
+
+                <label style="margin-top: 10px;">Vision API Format</label>
+                <select ${disabled} id="llm-vision-api-format" onchange="onVisionApiFormatChange(this.value)">
+                    <option value="openai" ${(config.vision_api_format || 'openai') === 'openai' ? 'selected' : ''}>OpenAI (vLLM, Ollama, SGLang)</option>
+                    <option value="tensorrt_edge" ${(config.vision_api_format || '') === 'tensorrt_edge' ? 'selected' : ''}>TensorRT Edge LLM</option>
+                </select>
+                ${!readonly ? '<span class="input-hint">Payload format for vision. Use TensorRT Edge when using TensorRT Edge LLM server.</span>' : ''}
 
                 <label class="checkbox-label" style="margin-top: 12px;">
                     <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
@@ -2175,6 +2187,32 @@ function selectLLMPreset(url, label) {
     if (input) input.value = url;
     document.getElementById('presetsMenu').style.display = 'none';
     updateConfig('llm', 'api_base', url);
+}
+
+function selectTensorRTEdgePreset() {
+    var url = 'http://localhost:58010/v1';
+    currentConfig.llm.api_base = url;
+    currentConfig.llm.vision_api_format = 'tensorrt_edge';
+    currentConfig.llm.vision_video_encode = false;
+    var input = document.getElementById('llm-api-base');
+    if (input) input.value = url;
+    var formatSelect = document.getElementById('llm-vision-api-format');
+    if (formatSelect) {
+        formatSelect.value = 'tensorrt_edge';
+    }
+    document.getElementById('presetsMenu').style.display = 'none';
+    updateConfig('llm', 'api_base', url);
+    updateConfig('llm', 'vision_api_format', 'tensorrt_edge');
+    updateConfig('llm', 'vision_video_encode', false);
+    fetchLLMModels(url);
+}
+
+function onVisionApiFormatChange(value) {
+    updateConfig('llm', 'vision_api_format', value);
+    if (value === 'tensorrt_edge') {
+        currentConfig.llm.vision_video_encode = false;
+        updateConfig('llm', 'vision_video_encode', false);
+    }
 }
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;
@@ -4711,6 +4749,7 @@ function updateLiveSessionUI() {
     const pipelineConfigEl = document.getElementById('pipeline-config');
     const startBtn = document.getElementById('start-session-btn');
     const stopBtn = document.getElementById('stop-session-btn');
+    const micMuteBtn = document.getElementById('mic-mute-btn');
 
     const sessionImageEl = document.getElementById('session-image');
     if (sessionImageEl && state.isLiveSession) sessionImageEl.style.display = '';
@@ -4752,6 +4791,7 @@ function updateLiveSessionUI() {
             if (startOverlay) startOverlay.style.display = 'flex';
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
+            if (micMuteBtn) micMuteBtn.style.display = 'none';
             // Preview (camera + mic waveform slot) is shown in setup so user sees what they’ll get before clicking START
             startPreviewStream();
             if (isServerMicSelected()) startMicWaveformFromServer();
@@ -4809,6 +4849,16 @@ function updateLiveSessionUI() {
             if (startOverlay) startOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'flex';
+            if (micMuteBtn) {
+                micMuteBtn.style.display = 'flex';
+                micMuteBtn.classList.toggle('muted', state.micMuted);
+                var icon = micMuteBtn.querySelector('.btn-icon i');
+                var textSpan = micMuteBtn.querySelector('.mic-mute-btn-text');
+                if (icon) {
+                    icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
+                }
+                if (textSpan) textSpan.textContent = state.micMuted ? 'Unmute Mic' : 'Mute Mic';
+            }
             renderTimeline();
             updateVoiceDebugPanel();
         } else if (state.sessionState === 'stopped') {
@@ -4832,6 +4882,7 @@ function updateLiveSessionUI() {
             if (startOverlay) startOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'none';
+            if (micMuteBtn) micMuteBtn.style.display = 'none';
             renderTimeline();
             if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         }
@@ -5546,7 +5597,9 @@ function startSessionRecording() {
         startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
+        state.micMuted = true;
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
+        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: true }));
         updateVoiceDebugPanel();
         document.getElementById('chat-history').innerHTML = `
         <div class="empty-state">
@@ -5612,6 +5665,8 @@ function startSessionRecording() {
         var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
         ws.send(JSON.stringify({ type: 'start_session', config: config }));
+        state.micMuted = true;
+        ws.send(JSON.stringify({ type: 'mic_mute', muted: true }));
         console.log('[Voice] Config and start_session sent, starting mic stream');
         startVoiceMicStream();
     };
@@ -5993,6 +6048,21 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
     }
 }
 
+function toggleMicMute() {
+    if (state.sessionState !== 'live' || !state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN) return;
+    state.micMuted = !state.micMuted;
+    state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+    var btn = document.getElementById('mic-mute-btn');
+    if (btn) {
+        btn.classList.toggle('muted', state.micMuted);
+        var icon = btn.querySelector('.btn-icon i');
+        var textSpan = btn.querySelector('.mic-mute-btn-text');
+        if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
+        if (textSpan) textSpan.textContent = state.micMuted ? 'Unmute Mic' : 'Mute Mic';
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+    }
+}
+
 function stopSessionRecording() {
     if (state.sessionState !== 'live') return;
 
@@ -6014,6 +6084,7 @@ function stopSessionRecording() {
     stopVoiceMicStream();
     stopPreviewStream();
     state.sessionState = 'stopped';
+    state.micMuted = true; // reset for next session
     // Keep isLiveSession true so timeline still shows and can be zoomed/panned
 
     document.getElementById('chat-history').innerHTML = `
@@ -6212,6 +6283,9 @@ function setupEventHandlers() {
     // Stop session recording
     document.getElementById('stop-session-btn').addEventListener('click', () => {
         stopSessionRecording();
+    });
+    document.getElementById('mic-mute-btn').addEventListener('click', () => {
+        toggleMicMute();
     });
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter

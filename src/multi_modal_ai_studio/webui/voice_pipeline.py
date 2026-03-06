@@ -253,6 +253,7 @@ async def _run_realtime_loop(
     stopped = asyncio.Event()
     session_ready = asyncio.Event()  # Set when Realtime session.updated received; must wait before send_audio
     _user_amplitude_sent = False
+    mic_muted = True  # push-to-talk: session starts muted; gate client.send_audio, waveform always sent
     preview_start_time = time.time()
     amplitude_interval = 0.05
     # Optional: record 24 kHz PCM sent to Realtime (export REALTIME_DEBUG_RECORD_PCM=1; optional REALTIME_DEBUG_PCM_DIR)
@@ -443,7 +444,7 @@ async def _run_realtime_loop(
                 stop_server_speaker_playback(server_speaker_proc)
 
     async def receive_loop() -> None:
-        nonlocal _user_amplitude_sent
+        nonlocal _user_amplitude_sent, mic_muted
         last_amplitude_time = 0.0
         user_amp_buf: list = []  # last 3 raw amplitudes for smoothing green waveform (16 kHz PCM)
         try:
@@ -451,6 +452,16 @@ async def _run_realtime_loop(
                 if msg.type == web.WSMsgType.TEXT:
                     try:
                         obj = json.loads(msg.data)
+                        if obj.get("type") == "mic_mute":
+                            mic_muted = obj.get("muted", True)
+                            if mic_muted and session.timeline.start_time is not None:
+                                # Inject ~0.5s silence so Realtime endpoints any partial (24 kHz)
+                                _silence_05s_24k = int(24000 * 2 * 0.5)
+                                try:
+                                    await client.send_audio(b"\x00" * _silence_05s_24k)
+                                except Exception as e:
+                                    logger.debug("PTT Realtime: inject silence failed %s", e)
+                            logger.debug("PTT Realtime: mic_muted=%s", mic_muted)
                         if obj.get("type") == "start_session":
                             if use_server_mic and not pipeline_live.is_set():
                                 session.start()
@@ -474,7 +485,8 @@ async def _run_realtime_loop(
                     await session_ready.wait()
                     pcm_24 = pcm_for_realtime(msg.data)
                     _write_debug_pcm(pcm_24)
-                    await client.send_audio(pcm_24)
+                    if not mic_muted:
+                        await client.send_audio(pcm_24)
                     if session.timeline.start_time is not None:
                         now = time.time() - session.timeline.start_time
                         if now - last_amplitude_time >= amplitude_interval:
@@ -516,7 +528,8 @@ async def _run_realtime_loop(
                 await session_ready.wait()
                 pcm_24 = pcm_for_realtime(chunk)
                 _write_debug_pcm(pcm_24)
-                await client.send_audio(pcm_24)
+                if not mic_muted:
+                    await client.send_audio(pcm_24)
                 if session.timeline.start_time is not None:
                     now = time.time() - session.timeline.start_time
                     if now - last_amplitude_time >= amplitude_interval:
@@ -722,6 +735,7 @@ async def _run_voice_pipeline(
     finals_queue: asyncio.Queue = asyncio.Queue()
     pipeline_live = asyncio.Event()  # set when client sends start_session; then we start ASR and feed pipeline
     pipeline_live.clear()
+    mic_muted = True  # push-to-talk: session starts muted; server gates ASR, waveform always sent
 
     logger.info(
         "Voice pipeline devices: audio_input_source=%s audio_input_device=%s use_server_mic=%s",
@@ -946,7 +960,8 @@ async def _run_voice_pipeline(
         if session.timeline.start_time is None:
             return (last_amplitude_time, False, 0.0, 0.0)
         now = time.time() - session.timeline.start_time
-        await asr.send_audio(pcm_bytes)
+        if not mic_muted:
+            await asr.send_audio(pcm_bytes)
         amplitudes = _pcm_rms_slices(pcm_bytes, sample_rate=16000, window_s=_amplitude_window_s)
         did_send = False
         amp = 0.0
@@ -979,6 +994,18 @@ async def _run_voice_pipeline(
                 if msg.type == web.WSMsgType.TEXT:
                     try:
                         obj = json.loads(msg.data)
+                        if obj.get("type") == "mic_mute":
+                            nonlocal mic_muted
+                            muted = obj.get("muted", True)
+                            if muted and session.timeline.start_time is not None:
+                                # Inject ~0.5s silence so Riva VAD endpoints any partial
+                                _silence_05s = 16000 * 2 * 0.5  # 16 kHz, 16-bit, 0.5 s
+                                try:
+                                    await asr.send_audio(b"\x00" * int(_silence_05s))
+                                except Exception as e:
+                                    logger.debug("PTT: inject silence failed %s", e)
+                            mic_muted = muted
+                            logger.debug("PTT: mic_muted=%s", mic_muted)
                         if obj.get("type") == "start_session":
                             # Optional: client sends current config so saved session has correct devices (e.g. speaker changed after preview)
                             if "config" in obj:

@@ -1817,14 +1817,22 @@ code, pre {
 /* ===== Device controls: STOP button only (indicators moved to session-meta) ===== */
 .device-controls-container {
     flex-shrink: 0;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 .session-control {
     display: flex;
     gap: var(--space-md);
     align-items: center;
+    justify-content: center;
     padding-top: var(--space-md);
     border-top: 1px solid var(--border-color);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .start-btn, .stop-btn {
@@ -1840,6 +1848,7 @@ code, pre {
     justify-content: center;
     gap: var(--space-sm);
     transition: all var(--transition-base);
+    white-space: nowrap;
 }
 
 .start-btn {
@@ -1862,6 +1871,46 @@ code, pre {
 .stop-btn:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-lg);
+}
+
+/* Push-to-talk: Unmute / Mute Mic (shown only when live); same size as STOP */
+.mic-mute-btn,
+.session-control .stop-btn {
+    flex: 0 0 auto;
+    min-width: 11rem;
+    width: 11rem;
+}
+.mic-mute-btn {
+    padding: var(--space-md) var(--space-xl);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    transition: all var(--transition-base);
+    white-space: nowrap;
+}
+.mic-mute-btn.muted {
+    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
+    color: white;
+    box-shadow: var(--shadow-md), var(--glow-nvidia);
+}
+.mic-mute-btn.muted:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
+}
+.mic-mute-btn:not(.muted) {
+    background: linear-gradient(135deg, #6b7280, #4b5563);
+    color: white;
+    box-shadow: var(--shadow-md);
+}
+.mic-mute-btn:not(.muted):hover {
+    background: linear-gradient(135deg, #4b5563, #374151);
+    transform: translateY(-2px);
 }
 
 /* Start button loading state */
