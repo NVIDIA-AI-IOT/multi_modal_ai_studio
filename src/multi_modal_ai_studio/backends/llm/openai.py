@@ -148,6 +148,12 @@ def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
     return text
 
 
+def _is_ollama_backend(config) -> bool:
+    """Return True if the configured api_base points to an Ollama server."""
+    api_base = getattr(config, "api_base", "") or ""
+    return "11434" in api_base or "ollama" in api_base.lower()
+
+
 def _should_use_video(config) -> bool:
     """Return True when frames should be encoded as MP4 video.
 
@@ -156,8 +162,7 @@ def _should_use_video(config) -> bool:
     """
     if not bool(getattr(config, "vision_video_encode", False)):
         return False
-    api_base = getattr(config, "api_base", "") or ""
-    if "11434" in api_base or "ollama" in api_base.lower():
+    if _is_ollama_backend(config):
         return False
     return True
 
@@ -520,13 +525,19 @@ class OpenAILLMBackend(LLMBackend):
         """
         # Build messages array
         messages = []
-        reasoning_enabled = getattr(self.config, "enable_reasoning", False)
-
         # Add system prompt
         sys_prompt = system_prompt or self.config.system_prompt
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
+        elif getattr(self.config, "enable_reasoning", False) and not _is_ollama_backend(self.config):
+            # Cosmos with vLLM (--reasoning-parser): instruct model to use <think> format
+            reasoning_fmt = (
+                "\n\nAnswer the question using the following format:\n\n<think>\n"
+                "Your reasoning.\n</think>\n\n"
+                "Write your final answer immediately after the </think> tag."
+            )
+            sys_prompt = (sys_prompt or "") + reasoning_fmt
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
@@ -554,17 +565,6 @@ class OpenAILLMBackend(LLMBackend):
         max_tokens = self.config.max_tokens
         if self.config.minimal_output:
             max_tokens = min(max_tokens, 16)
-        # Cap max_tokens for Cosmos VLM turns.
-        # max_tokens is a hard cap on ALL completion tokens (reasoning + answer).
-        # The model typically generates 135-275 reasoning tokens + ~20 answer,
-        # so we need at least ~300 to avoid mid-reasoning truncation.
-        # Without reasoning, 64 tokens is plenty for a concise spoken answer.
-        if _should_use_video(self.config) and image_data_urls:
-            cap = 512 if reasoning_enabled else 64
-            if max_tokens > cap:
-                self.logger.info("Cosmos VLM: capping max_tokens %d → %d (reasoning=%s)",
-                                 max_tokens, cap, reasoning_enabled)
-                max_tokens = cap
         payload = {
             "model": self.config.model,
             "messages": messages,
@@ -671,6 +671,12 @@ class OpenAILLMBackend(LLMBackend):
                                     continue
 
                                 content = strip_markdown(content, preserve_spaces=True)
+
+                                # Strip leading whitespace from first answer token after reasoning
+                                if token_count == 0:
+                                    content = content.lstrip()
+                                    if not content:
+                                        continue
 
                                 full_response += content
                                 token_count += 1

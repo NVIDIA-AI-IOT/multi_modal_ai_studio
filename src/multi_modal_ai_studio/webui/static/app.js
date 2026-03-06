@@ -486,6 +486,7 @@ const defaultConfig = {
     },
     devices: {
         camera: 'browser',
+        video_source: 'browser',
         microphone: 'browser',
         speaker: 'browser',
         video_file: null
@@ -1248,6 +1249,7 @@ function toggleVlmSettings() {
             if (currentConfig.devices.video_source === 'none' || currentConfig.devices.camera === 'none') {
                 currentConfig.devices.video_source = 'browser';
                 currentConfig.devices.camera = 'browser';
+                currentConfig.devices.video_file = null;
                 console.log('Vision enabled: auto-switching camera from "none" to "browser"');
                 // Update camera dropdown if visible
                 const cameraSelect = document.getElementById('device-camera-list');
@@ -1529,6 +1531,7 @@ function onDeviceListChange(type, value) {
         if (value === 'none') {
             currentConfig.devices.camera = 'none';
             currentConfig.devices.video_source = 'none';
+            currentConfig.devices.video_file = null;
             state.selectedBrowserCameraId = null;
         } else if (value === 'local') {
             currentConfig.devices.camera = 'local';
@@ -1538,15 +1541,18 @@ function onDeviceListChange(type, value) {
         } else if (value === '') {
             currentConfig.devices.camera = 'browser';
             currentConfig.devices.video_source = 'browser';
+            currentConfig.devices.video_file = null;
             state.selectedBrowserCameraId = null;
         } else if (value.indexOf('/dev/') === 0) {
             currentConfig.devices.camera = value;
             currentConfig.devices.video_source = 'usb';
             currentConfig.devices.video_device = value;
+            currentConfig.devices.video_file = null;
             state.selectedBrowserCameraId = null;
         } else {
             currentConfig.devices.camera = value;
             currentConfig.devices.video_source = 'browser';
+            currentConfig.devices.video_file = null;
             state.selectedBrowserCameraId = value;
         }
         // Show/hide local video picker
@@ -4332,6 +4338,10 @@ function buildVoiceConfig() {
     } else if (spk.startsWith('pyaudio:')) {
         config.devices.audio_output_source = 'usb';
         config.devices.audio_output_device = spk.slice(8) || '';
+    }
+    // Consistency: video_file only valid when video_source is 'local'
+    if (config.devices.video_source !== 'local') {
+        config.devices.video_file = null;
     }
     // Device names (stable across reboots; session can resolve id by name when hw:N,M changes)
     var cam = (config.devices.camera || config.devices.video_device) ? String(config.devices.camera || config.devices.video_device) : '';

@@ -1858,15 +1858,14 @@ async def _run_voice_pipeline(
     if session.turns:
         async def _generate_title() -> None:
             transcript_parts = []
-            for t in session.turns[:5]:  # first 5 turns to avoid huge prompt
+            for t in session.turns[:5]:
                 transcript_parts.append(f"User: {t.user_transcript or ''}")
                 transcript_parts.append(f"Assistant: {(t.ai_response or '')[:200]}")
-            transcript = "\n".join(transcript_parts).strip()[:800]
-            prompt = f"""Based on this conversation, suggest a very short title (3-8 words). Reply with only the title, no quotes or extra punctuation.
-
-{transcript}
-
-Title:"""
+            prompt = "\n".join(transcript_parts).strip()[:800]
+            title_sys = (
+                "Based on the conversation, suggest a very short title (3-8 words). "
+                "Reply with only the title, no quotes or extra punctuation."
+            )
             title_text = ""
             saved_reasoning = getattr(llm.config, "enable_reasoning", False)
             llm.config.enable_reasoning = False
@@ -1874,7 +1873,7 @@ Title:"""
                 async for token in llm.generate_stream(
                     prompt=prompt,
                     history=None,
-                    system_prompt="You reply with only a short phrase. No explanation.",
+                    system_prompt=title_sys,
                 ):
                     if token.token:
                         title_text += token.token
