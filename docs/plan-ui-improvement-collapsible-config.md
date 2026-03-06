@@ -31,7 +31,7 @@
 ## Phase 2: Session controls and video overlay (can be split)
 
 ### 2.1 Stop button; Start morphs to Stop
-- **Goal:** When session starts, Start button is replaced by a **Stop** button (e.g. top-left). One clear Stop control during the session.
+- **Goal:** When session starts, Start button is replaced by a **Stop** button. One clear Stop control during the session. Move the STOP control onto the video container (remove the big red STOP button from its current spot).
 
 ### 2.2 Full-screen / shrink overlay and Mirror
 - **Goal:** Full-screen overlay toggle; Mirror button for horizontal flip of the video feed.

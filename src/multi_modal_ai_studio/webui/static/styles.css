@@ -190,11 +190,6 @@
     box-shadow: 0 2px 8px rgba(118, 185, 0, 0.08);
 }
 
-/* Light mode elevated surfaces */
-[data-theme="light"] .device-controls-container {
-    background: var(--bg-primary);
-    box-shadow: var(--shadow-md);
-}
 /* Session meta: slightly darker than page to read as "title bar"; keep green left ear like session-item */
 [data-theme="light"] .session-meta-container {
     background: rgba(0, 0, 0, 0.06);
@@ -1963,9 +1958,9 @@ code, pre {
     height: 100%;
     object-fit: contain;
 }
-/* Video fills container when container has video-aspect (no letterboxing) */
+/* Keep video aspect ratio (contain); container aspect is set from video to minimize letterboxing */
 .session-image-container.session-image-container--video-aspect .session-video-feed {
-    object-fit: fill;
+    object-fit: contain;
 }
 
 .image-placeholder,
@@ -1980,19 +1975,44 @@ code, pre {
     text-align: center;
 }
 
-/* START button overlay: centered on image placeholder so no vertical scroll; shown only in setup mode via JS */
-.start-session-overlay {
+/* Session control overlay: morphs from center (Start) to top-left (Stop) like Live VLM WebUI */
+.session-control-overlay {
     position: absolute;
-    inset: 0;
-    display: none;
+    z-index: 3;
+    display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 2;
     pointer-events: none;
+    transition: top 0.35s ease-out, left 0.35s ease-out, transform 0.35s ease-out;
 }
-.start-session-overlay .start-btn {
+.session-control-overlay .start-btn,
+.session-control-overlay .stop-btn {
     pointer-events: auto;
     flex: none;
+}
+/* Centered (setup): Play/Start button */
+.session-control-overlay--start {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+/* Top-left (live): STOP button like Live VLM WebUI */
+.session-control-overlay--stop {
+    top: var(--space-md);
+    left: var(--space-md);
+    right: auto;
+    bottom: auto;
+    transform: none;
+    justify-content: flex-start;
+    align-items: flex-start;
+}
+.session-control-overlay--stop .stop-btn--overlay {
+    padding: var(--space-sm) var(--space-lg);
+    font-size: 0.9rem;
+    box-shadow: var(--shadow-lg);
+}
+.session-control-overlay--stop .stop-btn--overlay:hover {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
 }
 
 .placeholder-icon {
@@ -2037,19 +2057,6 @@ code, pre {
     display: block;
     width: 100%;
     height: 100%;
-}
-
-/* ===== Device controls: STOP button only (indicators moved to session-meta) ===== */
-.device-controls-container {
-    flex-shrink: 0;
-}
-
-.session-control {
-    display: flex;
-    gap: var(--space-md);
-    align-items: center;
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border-color);
 }
 
 .start-btn, .stop-btn {
