@@ -8,6 +8,7 @@ Adapted from live-riva-webui with timeline event support.
 
 import json
 import logging
+import os
 import re
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -52,9 +53,24 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> None:
             base[k] = v
 
 
+def _truncate_payload_for_log(obj: Any) -> Any:
+    """Return a copy of obj with data URLs (base64 image/video) replaced by '<+ N characters>'.
+    Normal text (system prompt, user message, etc.) is shown in full."""
+    if isinstance(obj, str):
+        if obj.startswith("data:image") or obj.startswith("data:video"):
+            return f"<+ {len(obj)} characters>"
+        return obj
+    if isinstance(obj, dict):
+        return {k: _truncate_payload_for_log(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_truncate_payload_for_log(v) for v in obj]
+    return obj
+
+
 def _curl_for_post(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> str:
     """Build an equivalent curl command for a POST request (for debugging)."""
-    body = json.dumps(payload, ensure_ascii=False)
+    payload_log = _truncate_payload_for_log(payload)
+    body = json.dumps(payload_log, ensure_ascii=False)
     body_escaped = body.replace("'", "'\"'\"'")
     parts = [f"curl -X POST '{url}'"]
     for k, v in headers.items():
@@ -62,6 +78,36 @@ def _curl_for_post(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -
         parts.append(f"-H '{k}: {v_escaped}'")
     parts.append(f"-d '{body_escaped}'")
     return " \\\n  ".join(parts)
+
+
+def _colorize_json(pretty_json: str) -> str:
+    """Add ANSI colors to pretty-printed JSON. No-op if NO_COLOR is set."""
+    if os.environ.get("NO_COLOR"):
+        return pretty_json
+    reset = "\033[0m"
+    key_c = "\033[36m"      # cyan for keys
+    str_c = "\033[32m"      # green for string values
+    num_c = "\033[33m"      # yellow for numbers
+    other_c = "\033[35m"    # magenta for true/false/null
+    s = re.sub(r'(^\s*)"([^"]+)"(\s*:)', rf'\1{key_c}"\2"{reset}\3', pretty_json, flags=re.MULTILINE)
+    s = re.sub(r'(: )"((?:[^"\\]|\\.)*)"([,\s\n\]}])', rf'\1{str_c}"\2"{reset}\3', s)
+    s = re.sub(r'(: )([-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)([,}\s\n])', rf'\1{num_c}\2{reset}\3', s)
+    s = re.sub(r'(: )(true|false|null)([,}\s\n])', rf'\1{other_c}\2{reset}\3', s)
+    return s
+
+
+def _format_payload_preview(payload: Dict[str, Any]) -> str:
+    """Pretty-print truncated payload with optional color for debug log."""
+    payload_log = _truncate_payload_for_log(payload)
+    pretty = json.dumps(payload_log, indent=2, ensure_ascii=False)
+    return _colorize_json(pretty)
+
+
+def _build_request_debug_log(url: str, headers: Dict[str, str], payload: Dict[str, Any]) -> str:
+    """Curl equivalent plus formatted, colorized payload preview."""
+    curl = _curl_for_post(url, headers, payload)
+    preview = _format_payload_preview(payload)
+    return f"{curl}\n\nPayload (preview):\n{preview}"
 
 
 def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
@@ -100,6 +146,170 @@ def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
         text = text.strip()
 
     return text
+
+
+def _is_ollama_backend(config) -> bool:
+    """Return True if the configured api_base points to an Ollama server."""
+    api_base = getattr(config, "api_base", "") or ""
+    return "11434" in api_base or "ollama" in api_base.lower()
+
+
+def _should_use_video(config) -> bool:
+    """Return True when frames should be encoded as MP4 video.
+
+    Controlled by ``vision_video_encode`` config flag, but automatically
+    disabled for backends that don't support video_url (e.g. Ollama).
+    """
+    if not bool(getattr(config, "vision_video_encode", False)):
+        return False
+    if _is_ollama_backend(config):
+        return False
+    return True
+
+
+def _strip_data_url_prefix(data_url: str) -> str:
+    """Extract raw base64 payload from a data URL.
+
+    "data:image/jpeg;base64,/9j/4AAQ..." → "/9j/4AAQ..."
+    If the string has no prefix, return it unchanged.
+    """
+    if "," in data_url:
+        return data_url.split(",", 1)[1]
+    return data_url
+
+
+# Cosmos-Reason models always use video encoding (even for few frames)
+# for temporal understanding.  The browser capture FPS is raised
+# dynamically for Cosmos so both browser and USB cameras provide a
+# similar number of frames.
+_MIN_FRAMES_FOR_VIDEO = 2
+
+# When sending individual images (non-Cosmos VLMs), cap the count to
+# limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
+# is a good trade-off between visual context and prefill latency.
+_MAX_INDIVIDUAL_IMAGES = 6
+
+
+def _encode_images_to_video_base64(
+    image_data_urls: List[str],
+    speech_duration_secs: float = 0.0,
+) -> Optional[str]:
+    """
+    Convert base64 JPEG images to MP4 video base64.
+
+    Cosmos-Reason models support video input with temporal token compression,
+    providing ~3x faster inference compared to multi-image input.
+
+    The fps is calculated from the number of frames and speech duration so the
+    resulting video length matches the original speech window.  This preserves
+    temporal information (motion, actions, state changes) that the Cosmos
+    temporal encoder relies on.
+
+    Args:
+        image_data_urls: List of base64 image data URLs (data:image/jpeg;base64,...)
+        speech_duration_secs: Duration of the speech window these frames span.
+            Used to calculate fps so video duration ≈ speech duration.
+            If 0 or negative a sensible default (10 fps) is used.
+
+    Returns:
+        Video data URL (data:video/mp4;base64,...) or None if encoding fails
+    """
+    if not image_data_urls or len(image_data_urls) < 2:
+        return None
+
+    try:
+        import av
+        import io
+        import base64
+        import os
+        import time as _time
+        from PIL import Image
+    except ImportError:
+        logger.warning("[Video Encode] PyAV or PIL not available, falling back to multi-image")
+        return None
+
+    n_frames = len(image_data_urls)
+
+    # Calculate fps so that video_duration ≈ speech_duration
+    #   fps = n_frames / speech_duration
+    # Clamp to [2, 30] to avoid degenerate cases.
+    if speech_duration_secs > 0.1:
+        fps = max(2, min(30, round(n_frames / speech_duration_secs)))
+    else:
+        fps = 10  # Sensible default when duration unknown
+
+    t0 = _time.monotonic()
+
+    try:
+        # Decode first image to get dimensions
+        first_b64 = image_data_urls[0].split(",", 1)[1]
+        first_img = Image.open(io.BytesIO(base64.b64decode(first_b64)))
+        width, height = first_img.size
+
+        # Create video in memory
+        output_buffer = io.BytesIO()
+        container = av.open(output_buffer, mode='w', format='mp4')
+        stream = container.add_stream('h264', rate=fps)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = 'yuv420p'
+        stream.options = {'preset': 'ultrafast', 'tune': 'zerolatency', 'crf': '23'}
+
+        # Encode each frame
+        encoded_count = 0
+        for img_url in image_data_urls:
+            try:
+                b64_data = img_url.split(",", 1)[1]
+                img = Image.open(io.BytesIO(base64.b64decode(b64_data)))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+
+                av_frame = av.VideoFrame.from_image(img)
+                av_frame = av_frame.reformat(format='yuv420p')
+                for packet in stream.encode(av_frame):
+                    container.mux(packet)
+                encoded_count += 1
+            except Exception as e:
+                logger.warning("[Video Encode] Failed to encode frame: %s", e)
+                continue
+
+        # Flush encoder
+        for packet in stream.encode():
+            container.mux(packet)
+
+        container.close()
+
+        video_bytes = output_buffer.getvalue()
+        video_b64 = base64.b64encode(video_bytes).decode('utf-8')
+        encode_ms = (_time.monotonic() - t0) * 1000
+        video_duration = encoded_count / fps if fps else 0
+
+        logger.info(
+            "[Video Encode] %d frames → MP4 %d KB | fps=%d video=%.1fs speech=%.1fs encode=%.0fms",
+            encoded_count, len(video_bytes) // 1024, fps,
+            video_duration, speech_duration_secs, encode_ms,
+        )
+
+        # Optional: save debug video when MMAS_DEBUG_VIDEOS=1
+        if os.environ.get("MMAS_DEBUG_VIDEOS") == "1":
+            try:
+                from datetime import datetime
+                debug_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug_videos")
+                debug_dir = os.path.abspath(debug_dir)
+                os.makedirs(debug_dir, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = f"{debug_dir}/cosmos_{ts}_{encoded_count}f_{fps}fps.mp4"
+                with open(path, 'wb') as f:
+                    f.write(video_bytes)
+                logger.info("[Video Encode] Debug video saved: %s", path)
+            except Exception as e:
+                logger.debug("[Video Encode] Debug save failed: %s", e)
+
+        return f"data:video/mp4;base64,{video_b64}"
+
+    except Exception as e:
+        logger.warning("[Video Encode] Failed to create video: %s", e)
+        return None
 
 
 class OpenAILLMBackend(LLMBackend):
@@ -190,11 +400,108 @@ class OpenAILLMBackend(LLMBackend):
         self.logger.warning("Failed to detect models from API")
         return []
 
+    # -----------------------------------------------------------------
+    # Vision content formatting — one method per API format
+    # -----------------------------------------------------------------
+
+    def _build_vision_content(
+        self,
+        image_data_urls: List[str],
+        prompt: str,
+        vision_fmt: str,
+        speech_duration: Optional[float],
+    ) -> list:
+        """Build the multimodal ``content`` list for a user message.
+
+        Dispatches to the correct format based on *vision_fmt*:
+          • ``"openai"``       — vLLM / Ollama / SGLang / OpenAI (image_url, video_url)
+          • ``"tensorrt_edge"`` — TensorRT Edge LLM ({"type":"image","image":"<b64>"})
+
+        Returns the ``content`` list ready to be placed inside a user message.
+        """
+        if vision_fmt == "tensorrt_edge":
+            return self._vision_content_tensorrt_edge(image_data_urls, prompt, speech_duration)
+        return self._vision_content_openai(image_data_urls, prompt, speech_duration)
+
+    def _vision_content_openai(
+        self,
+        image_data_urls: List[str],
+        prompt: str,
+        speech_duration: Optional[float],
+    ) -> list:
+        """OpenAI-standard format (vLLM, Ollama, SGLang, OpenAI API)."""
+        content: list = []
+
+        # Video encoding for temporal understanding (Cosmos-Reason or explicit flag).
+        video_url = None
+        if (
+            _should_use_video(self.config)
+            and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
+        ):
+            video_url = _encode_images_to_video_base64(
+                image_data_urls,
+                speech_duration_secs=speech_duration or 0.0,
+            )
+            if video_url:
+                content.append({
+                    "type": "video_url",
+                    "video_url": {"url": video_url},
+                })
+                self.logger.info("VLM request (Cosmos video): %d frames encoded to MP4", len(image_data_urls))
+            else:
+                self.logger.warning("Video encoding failed, falling back to multi-image")
+                video_url = None
+
+        # Multi-image fallback: non-Cosmos models or video encoding failure.
+        if not video_url:
+            detail = getattr(self.config, "vision_detail", "auto")
+            imgs = image_data_urls
+            if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
+                step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
+                imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
+                self.logger.info("VLM: sub-sampled %d → %d images", len(image_data_urls), len(imgs))
+            for img_url in imgs:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": img_url, "detail": detail},
+                })
+            self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
+
+        content.append({"type": "text", "text": prompt})
+        return content
+
+    def _vision_content_tensorrt_edge(
+        self,
+        image_data_urls: List[str],
+        prompt: str,
+        speech_duration: Optional[float],
+    ) -> list:
+        """TensorRT Edge LLM format: ``{"type":"image","image":"<raw_base64>"}``."""
+        content: list = []
+        imgs = image_data_urls
+
+        if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
+            step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
+            imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
+            self.logger.info("VLM (TRT-Edge): sub-sampled %d → %d images", len(image_data_urls), len(imgs))
+
+        for img_url in imgs:
+            content.append({
+                "type": "image",
+                "image": _strip_data_url_prefix(img_url),
+            })
+
+        self.logger.info("VLM request (TRT-Edge): %d image(s) + text prompt", len(imgs))
+        content.append({"type": "text", "text": prompt})
+        return content
+
     async def generate_stream(
         self,
         prompt: str,
         history: Optional[List[Dict[str, str]]] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        image_data_urls: Optional[List[str]] = None,
+        speech_duration: Optional[float] = None,
     ) -> AsyncIterator[LLMToken]:
         """Generate response tokens in streaming fashion.
 
@@ -203,6 +510,12 @@ class OpenAILLMBackend(LLMBackend):
             history: Conversation history in format:
                      [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
             system_prompt: Optional system prompt (overrides config if provided)
+            image_data_urls: Optional list of base64 image data URLs for VLM models.
+                            Format: ["data:image/jpeg;base64,...", ...]
+                            Images are sent in order (first = earliest frame).
+            speech_duration: Duration in seconds of the speech window the frames
+                            span.  Used by Cosmos video encoder to set fps so the
+                            video duration matches the real speech duration.
 
         Yields:
             LLMToken: Generated tokens
@@ -212,12 +525,19 @@ class OpenAILLMBackend(LLMBackend):
         """
         # Build messages array
         messages = []
-
         # Add system prompt
         sys_prompt = system_prompt or self.config.system_prompt
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
+        elif getattr(self.config, "enable_reasoning", False) and not _is_ollama_backend(self.config):
+            # Cosmos with vLLM (--reasoning-parser): instruct model to use <think> format
+            reasoning_fmt = (
+                "\n\nAnswer the question using the following format:\n\n<think>\n"
+                "Your reasoning.\n</think>\n\n"
+                "Write your final answer immediately after the </think> tag."
+            )
+            sys_prompt = (sys_prompt or "") + reasoning_fmt
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
@@ -225,8 +545,15 @@ class OpenAILLMBackend(LLMBackend):
         if history:
             messages.extend(history)
 
-        # Add current prompt
-        messages.append({"role": "user", "content": prompt})
+        # Add current prompt - with images/video if provided (VLM multi-modal format)
+        vision_fmt = getattr(self.config, "vision_api_format", "openai")
+        if image_data_urls and len(image_data_urls) > 0:
+            user_content = self._build_vision_content(
+                image_data_urls, prompt, vision_fmt, speech_duration,
+            )
+            messages.append({"role": "user", "content": user_content})
+        else:
+            messages.append({"role": "user", "content": prompt})
 
         # Prepare API request
         url = f"{self.api_base}/chat/completions"
@@ -248,6 +575,7 @@ class OpenAILLMBackend(LLMBackend):
             "presence_penalty": self.config.presence_penalty,
             "stream": True,
         }
+
         extra = getattr(self.config, "extra_request_body", None)
         if extra and isinstance(extra, str) and extra.strip():
             try:
@@ -258,10 +586,13 @@ class OpenAILLMBackend(LLMBackend):
                 self.logger.warning("Invalid extra_request_body JSON: %s", e)
 
         self.logger.debug(f"LLM request: {prompt[:50]}...")
-        self.logger.info("LLM request (curl equivalent):\n%s", _curl_for_post(url, headers, payload))
+        self.logger.info("LLM request:\n%s", _build_request_debug_log(url, headers, payload))
 
         full_response = ""
+        reasoning_response = ""
         token_count = 0
+        reasoning_started = False
+        in_think_block = False  # fallback tracker if server lacks reasoning parser
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -284,42 +615,80 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Check for end of stream
                         if line == "[DONE]":
-                            # Yield final token
+                            final_meta: Dict[str, Any] = {
+                                "token_count": token_count,
+                                "full_response": full_response,
+                            }
+                            if reasoning_response:
+                                final_meta["reasoning"] = reasoning_response
                             yield LLMToken(
                                 token="",
                                 is_final=True,
-                                metadata={
-                                    "token_count": token_count,
-                                    "full_response": full_response,
-                                }
+                                metadata=final_meta,
                             )
                             break
 
                         try:
-                            # Parse JSON chunk
                             chunk = json.loads(line)
 
-                            # Extract content from chunk
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta", {})
+
+                                # vLLM reasoning parser puts thinking into
+                                # reasoning_content and answer into content.
+                                rc = delta.get("reasoning_content") or ""
+                                if rc:
+                                    if not reasoning_started:
+                                        reasoning_started = True
+                                        yield LLMToken(
+                                            token="",
+                                            is_final=False,
+                                            metadata={"reasoning_start": True},
+                                        )
+                                    reasoning_response += rc
+                                    continue
+
                                 content = delta.get("content", "")
+                                if not content:
+                                    continue
 
-                                if content:
-                                    # Strip markdown for voice output
-                                    content = strip_markdown(content, preserve_spaces=True)
+                                # Fallback: strip <think>...</think> if the
+                                # server doesn't have a reasoning parser.
+                                if "<think>" in content:
+                                    in_think_block = True
+                                    content = content.split("<think>", 1)[0]
+                                if in_think_block:
+                                    if "</think>" in content:
+                                        after = content.split("</think>", 1)[1]
+                                        reasoning_response += content.split("</think>", 1)[0]
+                                        in_think_block = False
+                                        content = after
+                                    else:
+                                        reasoning_response += content
+                                        continue
 
-                                    full_response += content
-                                    token_count += 1
+                                if not content:
+                                    continue
 
-                                    # Yield token
-                                    yield LLMToken(
-                                        token=content,
-                                        is_final=False,
-                                        metadata={
-                                            "token_count": token_count,
-                                            "partial_response": full_response,
-                                        }
-                                    )
+                                content = strip_markdown(content, preserve_spaces=True)
+
+                                # Strip leading whitespace from first answer token after reasoning
+                                if token_count == 0:
+                                    content = content.lstrip()
+                                    if not content:
+                                        continue
+
+                                full_response += content
+                                token_count += 1
+
+                                yield LLMToken(
+                                    token=content,
+                                    is_final=False,
+                                    metadata={
+                                        "token_count": token_count,
+                                        "partial_response": full_response,
+                                    }
+                                )
 
                         except json.JSONDecodeError as e:
                             self.logger.warning(f"Failed to parse JSON: {e}")
@@ -334,11 +703,18 @@ class OpenAILLMBackend(LLMBackend):
             raise
 
         finally:
-            if full_response or token_count:
+            if full_response or token_count or reasoning_response:
                 self.logger.info(f"LLM response: {len(full_response)} chars, {token_count} tokens")
                 response_log: Dict[str, Any] = {
                     "response": full_response or "(empty)",
                     "chars": len(full_response),
                     "tokens": token_count,
                 }
+                if reasoning_response:
+                    response_log["reasoning"] = reasoning_response
+                    self.logger.info(
+                        "LLM reasoning (%d chars): %.200s%s",
+                        len(reasoning_response), reasoning_response,
+                        "..." if len(reasoning_response) > 200 else "",
+                    )
                 self.logger.info("LLM response (optional jq for pretty):\n%s", _format_json(response_log))

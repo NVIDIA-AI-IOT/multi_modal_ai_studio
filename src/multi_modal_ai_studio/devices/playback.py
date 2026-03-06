@@ -35,6 +35,9 @@ def start_server_speaker_playback(
     Returns:
         Popen with stdin=PIPE, or None if aplay could not be started.
     """
+    if not device:
+        return None
+
     dev = (device or "default").strip()
     if dev.startswith("hw:") and not dev.startswith("plughw:"):
         dev = "plug" + dev

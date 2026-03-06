@@ -23,6 +23,7 @@ tts:
   server: localhost:50051
   voice: ""  # Empty = use default voice
   sample_rate: 22050
+  stream_tts: true
 
 devices:
   video_source: none  # Disable video for lower latency

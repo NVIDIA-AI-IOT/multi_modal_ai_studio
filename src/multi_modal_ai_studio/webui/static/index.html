@@ -54,7 +54,7 @@
                     <div class="config-content" id="config-content">
                         <nav class="config-tabs" role="tablist">
                             <button type="button" class="config-tab active" role="tab" aria-selected="true" data-tab="asr"><i data-lucide="mic" class="lucide-inline config-tab-icon"></i> ASR</button>
-                            <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="llm"><i data-lucide="bot" class="lucide-inline config-tab-icon"></i> LLM</button>
+                            <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="llm"><i data-lucide="bot" class="lucide-inline config-tab-icon"></i> LLM / VLM</button>
                             <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="tts"><i data-lucide="volume-2" class="lucide-inline config-tab-icon"></i> TTS</button>
                             <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="device"><i data-lucide="monitor" class="lucide-inline config-tab-icon"></i> Devices</button>
                             <button type="button" class="config-tab" role="tab" aria-selected="false" data-tab="app"><i data-lucide="settings" class="lucide-inline config-tab-icon"></i> App</button>
@@ -101,9 +101,9 @@
                         </div>
                         <!-- START overlay: centered on placeholder so no vertical scroll needed -->
                         <div class="start-session-overlay" id="start-session-overlay">
-                            <button id="start-session-btn" class="start-btn">
-                                <span class="btn-icon"><i data-lucide="play" class="lucide-inline"></i></span>
-                                START Session
+                            <button id="start-session-btn" class="start-btn loading" disabled>
+                                <span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span>
+                                Loading Session...
                             </button>
                         </div>
                         <!-- Live: Video feed (browser = video element; server MJPEG = img, since video does not support multipart/x-mixed-replace) -->

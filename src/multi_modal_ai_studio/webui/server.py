@@ -132,6 +132,7 @@ class WebUIServer:
         port: int = 8080,
         session_dir: Path = None,
         ssl_context: Optional[object] = None,
+        initial_config: Optional[Dict[str, Any]] = None,
     ):
         """Initialize web server.
 
@@ -140,12 +141,14 @@ class WebUIServer:
             port: Port to listen on
             session_dir: Directory containing session JSON files
             ssl_context: Optional ssl.SSLContext for HTTPS (e.g. self-signed cert)
+            initial_config: Optional preset/config dict loaded from YAML (served to frontend)
         """
         self.host = host
         self.port = port
         self.session_dir = session_dir or Path("sessions")
         self._session_dir_override: Optional[str] = None  # "sessions" | "mock_sessions" | None
         self.ssl_context = ssl_context
+        self.initial_config = initial_config
         self.app = web.Application()
         self.app["session_dir"] = self.session_dir
         self.app["_server"] = self  # so voice pipeline can read current effective session dir
@@ -164,6 +167,7 @@ class WebUIServer:
         self.app.router.add_patch('/api/sessions/{session_id}', self.handle_patch_session)
         self.app.router.add_delete('/api/sessions/{session_id}', self.handle_delete_session)
         self.app.router.add_get('/api/llm/models', self.handle_llm_models)
+        self.app.router.add_post('/api/llm/warmup', self.handle_llm_warmup)
         self.app.router.add_get('/api/asr/models', self.handle_asr_models)
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
         self.app.router.add_get('/api/health/llm', self.handle_health_llm)
@@ -172,6 +176,9 @@ class WebUIServer:
         self.app.router.add_get('/api/devices/audio-inputs', self.handle_list_audio_inputs)
         self.app.router.add_get('/api/devices/audio-outputs', self.handle_list_audio_outputs)
         self.app.router.add_get('/api/camera/stream', self.handle_camera_stream)
+        self.app.router.add_get('/api/config/initial', self.handle_initial_config)
+        self.app.router.add_get('/api/videos/list', self.handle_list_videos)
+        self.app.router.add_get('/api/videos/file', self.handle_serve_video)
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
         self.app.router.add_get('/api/config/prefills', self.handle_config_prefills)
@@ -330,6 +337,12 @@ class WebUIServer:
             "override": self._session_dir_override,
         })
 
+    async def handle_initial_config(self, request: web.Request) -> web.Response:
+        """GET /api/config/initial: return preset/config loaded from CLI --preset or --config."""
+        if self.initial_config:
+            return web.json_response(self.initial_config)
+        return web.json_response({})
+
     async def handle_llm_models(self, request: web.Request) -> web.Response:
         """List available LLM models at the given API base URL (Ollama, vLLM, OpenAI, etc.)."""
         api_base = request.query.get("api_base", "").strip().rstrip("/")
@@ -350,6 +363,188 @@ class WebUIServer:
                 {"error": str(e), "models": []},
                 status=500
             )
+
+    async def _detect_vlm_capability(self, api_base: str, api_key: Optional[str], model: str) -> dict:
+        """
+        Detect if a model supports vision (VLM) across different backends.
+        
+        Detection methods (in order of preference):
+        1. Ollama API: Check /api/show for "projector" field
+        2. Name pattern: Check for known VLM patterns (vl, vision, llava, etc.)
+        3. Image probe: Try sending a tiny image (universal fallback)
+        
+        Returns: {"is_vlm": bool, "detection_method": str, "confidence": str}
+        """
+        import aiohttp
+        import re
+        
+        result = {"is_vlm": False, "detection_method": "unknown", "confidence": "low"}
+        
+        # -------------------------------------------------------------------------
+        # Method 1: Ollama-specific detection (fast, no inference)
+        # -------------------------------------------------------------------------
+        if "11434" in api_base or "ollama" in api_base.lower():
+            try:
+                # Ollama's /api/show returns model details including vision components
+                ollama_base = api_base.replace("/v1", "").rstrip("/")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{ollama_base}/api/show",
+                        json={"name": model},
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("projector"):
+                                result = {"is_vlm": True, "detection_method": "ollama_projector", "confidence": "high"}
+                                logger.info("[VLM Detect] Ollama projector found → VLM")
+                                return result
+                            families = data.get("details", {}).get("families", [])
+                            if any("vl" in f.lower() for f in families):
+                                result = {"is_vlm": True, "detection_method": "ollama_family", "confidence": "high"}
+                                logger.info("[VLM Detect] Ollama family contains 'vl' → VLM")
+                                return result
+                            model_info = data.get("model_info", {})
+                            has_vision = any("vision" in k for k in model_info)
+                            if has_vision:
+                                result = {"is_vlm": True, "detection_method": "ollama_model_info", "confidence": "high"}
+                                logger.info("[VLM Detect] Ollama model_info has vision keys → VLM")
+                                return result
+                            result = {"is_vlm": False, "detection_method": "ollama_api", "confidence": "high"}
+                            logger.info("[VLM Detect] Ollama model has no vision components → LLM")
+                            return result
+            except Exception as e:
+                logger.debug("[VLM Detect] Ollama API check failed: %s", e)
+        
+        # -------------------------------------------------------------------------
+        # Method 3: Image probe (universal, works for any backend)
+        # Send a tiny 1x1 image and see if model accepts it
+        # -------------------------------------------------------------------------
+        try:
+            # 1x1 white PNG (smallest possible valid image)
+            tiny_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+            
+            config = LLMConfig(
+                api_base=api_base,
+                api_key=api_key,
+                model=model,
+                max_tokens=1,
+                temperature=0.0,
+            )
+            backend = OpenAILLMBackend(config)
+            
+            # Create multimodal message with image
+            test_messages = [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": tiny_image}},
+                    {"type": "text", "text": "1"}
+                ]
+            }]
+            
+            # Try to generate with image - VLMs will accept, LLMs will error
+            async for token in backend.generate_stream("", test_messages):
+                # If we get any response, model accepted the image → VLM
+                result = {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
+                logger.info("[VLM Detect] Image probe succeeded → VLM")
+                return result
+                
+        except Exception as e:
+            error_str = str(e).lower()
+            # Check for specific error messages that indicate image rejection
+            if any(x in error_str for x in ["image", "vision", "multimodal", "unsupported"]):
+                result = {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
+                logger.info("[VLM Detect] Image probe rejected → LLM")
+                return result
+            # Other errors might be network issues, etc.
+            logger.debug("[VLM Detect] Image probe error: %s", e)
+        
+        # Default: unknown, assume LLM for safety
+        result = {"is_vlm": False, "detection_method": "default", "confidence": "low"}
+        logger.info("[VLM Detect] Could not determine, defaulting to LLM")
+        return result
+
+    async def handle_llm_warmup(self, request: web.Request) -> web.Response:
+        """
+        Warm up an LLM/VLM model by sending a minimal prompt.
+        Also detects if the model supports vision (VLM).
+        
+        This loads the model into GPU memory before the user starts a session,
+        reducing first-response latency. Works with any OpenAI-compatible backend
+        (Ollama, vLLM, SGLang, OpenAI, etc.).
+        
+        POST body: {"api_base": "...", "api_key": "...", "model": "...", "detect_vlm": true}
+        
+        Returns: {
+            "success": true,
+            "model": "...",
+            "warmup_time_seconds": X.XX,
+            "is_vlm": true/false,
+            "vlm_detection_method": "...",
+            "vlm_confidence": "high/medium/low"
+        }
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+        
+        api_base = (body.get("api_base") or "").strip().rstrip("/")
+        api_key = body.get("api_key") or None
+        model = (body.get("model") or "").strip()
+        detect_vlm = body.get("detect_vlm", True)  # Default: detect VLM capability
+        
+        if not api_base or not model:
+            return web.json_response(
+                {"error": "api_base and model are required"},
+                status=400
+            )
+        
+        logger.info("[LLM Warmup] Warming up model: %s @ %s", model, api_base)
+        
+        try:
+            import time
+            start_time = time.time()
+            
+            # Detect VLM capability (if requested)
+            vlm_info = {"is_vlm": False, "detection_method": "skipped", "confidence": "none"}
+            if detect_vlm:
+                vlm_info = await self._detect_vlm_capability(api_base, api_key, model)
+            
+            # Create config and backend for warmup
+            config = LLMConfig(
+                api_base=api_base,
+                api_key=api_key,
+                model=model,
+                max_tokens=1,  # Minimal tokens to reduce overhead
+                temperature=0.0,
+            )
+            backend = OpenAILLMBackend(config)
+            
+            # Send a minimal prompt to trigger model loading
+            warmup_response = ""
+            async for token in backend.generate_stream("Say OK", []):
+                warmup_response += token.token
+                break  # We only need the first token to confirm model is loaded
+            
+            elapsed = time.time() - start_time
+            logger.info("[LLM Warmup] Model %s warmed up in %.2fs (VLM: %s)", 
+                       model, elapsed, vlm_info["is_vlm"])
+            
+            return web.json_response({
+                "success": True,
+                "model": model,
+                "warmup_time_seconds": round(elapsed, 2),
+                "is_vlm": vlm_info["is_vlm"],
+                "vlm_detection_method": vlm_info["detection_method"],
+                "vlm_confidence": vlm_info["confidence"],
+            })
+        except Exception as e:
+            logger.warning("[LLM Warmup] Failed to warm up %s: %s", model, e)
+            return web.json_response({
+                "success": False,
+                "error": str(e),
+            }, status=500)
 
     async def handle_asr_models(self, request: web.Request) -> web.Response:
         """List available Riva ASR models at the given server (query: server=host:port)."""
@@ -472,6 +667,74 @@ class WebUIServer:
             logger.debug("List audio outputs error: %s", e)
             return web.json_response({"devices": []})
 
+    def _get_videos_dir(self) -> Path:
+        """Return the videos/ folder (repo root or next to session_dir)."""
+        candidates = [
+            Path(__file__).resolve().parents[3] / "videos",  # repo root
+            self.session_dir.parent / "videos",
+        ]
+        for d in candidates:
+            if d.is_dir():
+                return d
+        return candidates[0]
+
+    async def handle_list_videos(self, request: web.Request) -> web.Response:
+        """GET /api/videos/list — list MP4 files in the videos/ folder."""
+        videos_dir = self._get_videos_dir()
+        if not videos_dir.is_dir():
+            return web.json_response({"videos": [], "videos_dir": str(videos_dir)})
+        result = []
+        for f in sorted(videos_dir.iterdir()):
+            if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".avi") and f.is_file():
+                result.append({
+                    "name": f.name,
+                    "size_kb": round(f.stat().st_size / 1024, 1),
+                })
+        return web.json_response({"videos": result, "videos_dir": str(videos_dir)})
+
+    async def handle_serve_video(self, request: web.Request) -> web.Response:
+        """GET /api/videos/file?name=x.mp4 — serve an MP4 with range request support."""
+        name = (request.query.get("name") or "").strip()
+        if not name or "/" in name or "\\" in name or ".." in name:
+            return web.Response(text="Invalid filename", status=400)
+        videos_dir = self._get_videos_dir()
+        file_path = videos_dir / name
+        if not file_path.is_file():
+            return web.Response(text="Video not found", status=404)
+
+        file_size = file_path.stat().st_size
+        suffix = file_path.suffix.lower()
+        mime = {"mp4": "video/mp4", "webm": "video/webm", "mkv": "video/x-matroska", "avi": "video/x-msvideo"}.get(
+            suffix.lstrip("."), "video/mp4"
+        )
+
+        range_header = request.headers.get("Range")
+        if range_header:
+            try:
+                range_spec = range_header.replace("bytes=", "")
+                start_str, end_str = range_spec.split("-", 1)
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else file_size - 1
+                end = min(end, file_size - 1)
+                length = end - start + 1
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    data = f.read(length)
+                return web.Response(
+                    body=data,
+                    status=206,
+                    headers={
+                        "Content-Type": mime,
+                        "Content-Range": f"bytes {start}-{end}/{file_size}",
+                        "Content-Length": str(length),
+                        "Accept-Ranges": "bytes",
+                    },
+                )
+            except (ValueError, IndexError):
+                pass
+
+        return web.FileResponse(file_path, headers={"Content-Type": mime, "Accept-Ranges": "bytes"})
+
     async def handle_camera_stream(self, request: web.Request) -> web.Response:
         """MJPEG stream from a server USB camera. device= query: /dev/video0 or empty for first camera.
         Requires opencv-python-headless and a camera attached to the server. When unavailable, returns 503."""
@@ -513,6 +776,16 @@ class WebUIServer:
         )
         await response.prepare(request)
 
+        # Get FrameBroker for VLM access
+        frame_broker = None
+        try:
+            from multi_modal_ai_studio.backends.vision.frame_broker import get_frame_broker
+            frame_broker = get_frame_broker()
+            logger.info("[Camera MJPEG] FrameBroker connected for VLM frame storage")
+        except ImportError:
+            logger.debug("[Camera MJPEG] FrameBroker not available")
+        
+        frame_count = 0
         try:
             while True:
                 ret, frame = await asyncio.get_running_loop().run_in_executor(
@@ -520,6 +793,18 @@ class WebUIServer:
                 )
                 if not ret or frame is None:
                     break
+                
+                # Store frame in FrameBroker for VLM (every 3rd frame = ~10fps)
+                frame_count += 1
+                if frame_broker and frame_count % 3 == 0:
+                    try:
+                        frame_copy = frame.copy()
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, lambda f=frame_copy: frame_broker.store_frame(f, jpeg_quality=70)
+                        )
+                    except Exception as e:
+                        logger.debug("[Camera MJPEG] FrameBroker store failed: %s", e)
+                
                 _, jpeg = await asyncio.get_running_loop().run_in_executor(
                     None, lambda f=frame: cv2.imencode(".jpg", f)
                 )

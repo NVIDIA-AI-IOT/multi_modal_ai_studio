@@ -102,6 +102,19 @@ class LLMConfig:
         top_p: Nucleus sampling parameter
         frequency_penalty: Frequency penalty (-2.0 to 2.0)
         presence_penalty: Presence penalty (-2.0 to 2.0)
+        enable_vision: If True, capture and send camera frames to VLM with each prompt
+        vision_system_prompt: System prompt used when vision is enabled (overrides system_prompt)
+        vision_detail: Image detail level for VLM ("low", "high", "auto") - affects token usage
+        vision_frames: Number of frames to capture per turn (1=single frame, 2-10=multi-frame during speech)
+        vision_quality: JPEG quality for captured frames (0.3-1.0)
+        vision_max_width: Maximum frame width in pixels (smaller = faster, larger = more detail)
+        vision_buffer_fps: Frame capture rate for ring buffer (frames per second)
+        vision_api_format: Image/video payload format for the VLM backend:
+            "openai" — standard OpenAI format (image_url / video_url), works with vLLM, Ollama, SGLang
+            "tensorrt_edge" — TensorRT Edge LLM format ({"type": "image", "image": "<base64>"})
+        vision_video_encode: If True, encode frames as MP4 video for temporal understanding
+            (e.g. Cosmos-Reason models). Must be set explicitly in preset/config.
+        history_turns: Number of previous turns to include as context (0=no history)
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
     api_base: str = "http://localhost:11434/v1"
@@ -115,6 +128,22 @@ class LLMConfig:
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
+    history_turns: int = 3  # Previous turns sent as text-only context (0=disabled)
+    
+    # -------------------------------------------------------------------------
+    # Vision (VLM) settings - send camera frames with prompts
+    # When enable_vision=True, camera frames are captured and sent with each prompt
+    # -------------------------------------------------------------------------
+    enable_vision: bool = False  # Set True for VLM models (Cosmos-Reason, LLaVA, GPT-4V, etc.)
+    vision_system_prompt: str = "You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations."
+    vision_detail: Literal["low", "high", "auto"] = "auto"  # OpenAI vision detail level
+    vision_frames: int = 4       # Frames per turn (1=single at speech end, 2-10=during speech)
+    vision_quality: float = 0.7  # JPEG quality (0.3=fast/small, 1.0=high quality)
+    vision_max_width: int = 640  # Max frame width in pixels (smaller=faster)
+    vision_buffer_fps: float = 3.0  # Ring buffer capture rate (fps)
+    vision_api_format: Literal["openai", "tensorrt_edge"] = "openai"
+    vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
+    enable_reasoning: bool = False  # True to allow <think> chain-of-thought; filtered from TTS
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -165,6 +194,7 @@ class TTSConfig:
     sample_rate: int = 24000
     speed: float = 1.0
     response_format: str = "pcm"
+    stream_tts: bool = True
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -209,9 +239,10 @@ class DeviceConfig:
         audio_output_device: Device path/id for USB/ALSA audio
         audio_output_device_name: Human-readable name for speaker
     """
-    video_source: Literal["browser", "usb", "none"] = "browser"
+    video_source: Literal["browser", "usb", "local", "none"] = "browser"
     video_device: Optional[str] = None
     video_device_name: Optional[str] = None
+    video_file: Optional[str] = None
     audio_input_source: Literal["browser", "usb", "alsa", "none"] = "browser"
     audio_input_device: Optional[str] = None
     audio_input_device_name: Optional[str] = None
@@ -348,6 +379,8 @@ class SessionConfig:
             # Camera (for round-trip)
             if d.get("video_source") == "usb" and d.get("video_device"):
                 d["camera"] = d["video_device"]
+            elif d.get("video_source") == "local":
+                d["camera"] = "local"
             elif d.get("video_source") in ("browser", "none"):
                 d["camera"] = d.get("video_source", "browser")
             # Microphone (for round-trip)
@@ -397,7 +430,9 @@ class SessionConfig:
         devices_data = dict(data.get('devices', {}))
         if 'camera' in devices_data and 'video_source' not in devices_data:
             cam = devices_data.pop('camera', 'browser')
-            if cam and cam.startswith('/dev/'):
+            if cam == 'local':
+                devices_data['video_source'] = 'local'
+            elif cam and cam.startswith('/dev/'):
                 devices_data['video_source'] = 'usb'
                 devices_data['video_device'] = cam
             else:

@@ -43,6 +43,7 @@ docs/cursor/
 docs/*.md
 !docs/asr_model_for_multi_utterance.md
 !docs/audio_pipeline.md
+!docs/VLM_SETUP.md
 *.log
 # Session storage: ignore all except committed example sessions
 sessions/*
@@ -51,12 +52,15 @@ sessions/*
 mock_sessions/
 *.session.json
 user_presets/
-
+src/debug_videos/
 # Secrets
 .env
 *.key
 *.pem
 credentials.json
+
+# Debug videos
+debug_videos/
 
 # Test outputs
 .pytest_cache/

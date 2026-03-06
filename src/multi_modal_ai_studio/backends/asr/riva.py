@@ -230,23 +230,52 @@ class RivaASRBackend(ASRBackend):
 
         self.logger.info("Riva ASR stream stopped")
 
+    # Pre-buffer size for the FIRST audio chunk only (bytes).
+    # Browser sends tiny PCM chunks (~4096 B = 128ms).  Accumulating ~300ms
+    # before the first yield gives Riva enough initial context to produce a
+    # more stable first partial.  After the first yield, chunks stream
+    # immediately with no added latency.
+    _PREBUFFER_BYTES = 9600  # ~300ms at 16kHz 16-bit mono
+
     async def _stream_to_riva(self) -> None:
         """Background task to stream audio to Riva and receive results.
 
-        The Riva client's streaming_response_generator blocks while consuming
-        audio and waiting for responses. We run that entire loop in an executor
-        so the main event loop can run receive_loop() to feed PCM. Results are
-        passed back via a sync queue.
+        First audio chunk is pre-buffered for stability; subsequent chunks
+        stream immediately.  Results are pushed directly into the async
+        _results_queue via loop.call_soon_threadsafe (no intermediate polling).
         """
         config = self._create_streaming_config()
-        results_sync_queue: queue.Queue = queue.Queue()
-        _EMPTY = object()
+        loop = asyncio.get_running_loop()
+        rq = self._results_queue
+        _last_partial_text: list = [""]  # mutable container for dedup across calls
 
         def audio_chunk_generator():
-            """Generator consumed only inside the executor thread."""
+            """Pre-buffer first chunk, then yield immediately."""
             q = self._sync_audio_queue
             if not q:
                 return
+
+            # Phase 1: accumulate initial audio for a stable first partial
+            prebuf = bytearray()
+            while len(prebuf) < self._PREBUFFER_BYTES:
+                try:
+                    chunk = q.get(timeout=10.0)
+                except queue.Empty:
+                    break
+                except Exception as e:
+                    self.logger.error("Error in audio generator: %s", e)
+                    if prebuf:
+                        yield bytes(prebuf)
+                    return
+                if chunk is None:
+                    if prebuf:
+                        yield bytes(prebuf)
+                    return
+                prebuf.extend(chunk)
+            if prebuf:
+                yield bytes(prebuf)
+
+            # Phase 2: stream remaining chunks immediately (no buffering)
             while True:
                 try:
                     chunk = q.get(timeout=10.0)
@@ -259,12 +288,15 @@ class RivaASRBackend(ASRBackend):
                     self.logger.error("Error in audio generator: %s", e)
                     break
 
+        def _enqueue(item):
+            """Thread-safe push into the async results queue."""
+            loop.call_soon_threadsafe(rq.put_nowait, item)
+
         def process_response(response):
-            """Run in executor: extract ASRResults from one Riva response. Returns list."""
+            """Extract ASRResults from one Riva response, dedup identical partials."""
             out = []
             if not response.results:
                 return out
-            # Log first time we get any response from Riva (diagnostic for "no ASR at all")
             if not hasattr(process_response, "_logged_first"):
                 process_response._logged_first = True
                 self.logger.info("Riva ASR first response: %d result(s)", len(response.results))
@@ -275,34 +307,42 @@ class RivaASRBackend(ASRBackend):
                 text = alternative.transcript.strip()
                 if not text:
                     continue
+
+                is_final = result.is_final
+
+                # Deduplicate consecutive identical partials
+                if not is_final and text == _last_partial_text[0]:
+                    continue
+                if not is_final:
+                    _last_partial_text[0] = text
+                else:
+                    _last_partial_text[0] = ""
+
                 if self.timeline and self._speech_start_time is None:
                     event = self.timeline.add_event("vad_start", Lane.AUDIO)
                     self._speech_start_time = event.timestamp
                     self._vad_start_time = event.timestamp
-                    self._last_final_text = None  # New utterance; allow next final
+                    self._last_final_text = None
                     self.logger.debug("Speech started at %.3fs", self._speech_start_time)
                 asr_result = ASRResult(
                     text=text,
-                    is_final=result.is_final,
+                    is_final=is_final,
                     confidence=alternative.confidence if alternative.confidence > 0 else 1.0,
                     metadata={
                         "stability": getattr(alternative, "stability", 1.0),
                         "language_code": self.config.language,
                     },
                 )
-                if result.is_final:
+                if is_final:
                     finals_emitted = getattr(process_response, "_finals_emitted", 0) + 1
                     process_response._finals_emitted = finals_emitted
                     self.logger.info(
                         "Final transcript #%d: %s (confidence=%.2f)", finals_emitted, text, asr_result.confidence
                     )
                     if self.timeline and self._speech_start_time is not None:
-                        # Skip duplicate asr_final (same text as last) to avoid repeated final_transcript in timeline
                         if text == self._last_final_text:
                             self.logger.debug("Skipping duplicate asr_final in timeline: %r", text[:50])
-                            # Still set event_timestamp from current time so pipeline can dedupe consistently
                             asr_result.metadata["event_timestamp"] = time.time() - (self.timeline.start_time or 0)
-                            # Clear speech state so next utterance gets fresh vad_start
                             self._speech_start_time = None
                             self._vad_start_time = None
                         else:
@@ -332,39 +372,47 @@ class RivaASRBackend(ASRBackend):
             return out
 
         def run_riva_in_executor():
-            """Run entire Riva stream in this thread so main loop can feed audio."""
-            try:
-                responses = self.asr_service.streaming_response_generator(
-                    audio_chunks=audio_chunk_generator(),
-                    streaming_config=config,
-                )
-                for response in responses:
-                    for asr_result in process_response(response):
-                        results_sync_queue.put(asr_result)
-            except Exception as e:
-                self.logger.error("Riva streaming error: %s", e, exc_info=True)
-            finally:
-                results_sync_queue.put(None)
+            """Run Riva stream in thread. Push results directly to async queue.
+            Auto-reconnects on stream failure up to max_retries times.
+            """
+            max_retries = 5
+            retry_delay = 1.0
+            retry_count = 0
+
+            while retry_count < max_retries:
+                try:
+                    if retry_count > 0:
+                        self.logger.info("Riva ASR reconnecting (attempt %d/%d)...", retry_count + 1, max_retries)
+                        import time as _time
+                        _time.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 2, 10.0)
+
+                    responses = self.asr_service.streaming_response_generator(
+                        audio_chunks=audio_chunk_generator(),
+                        streaming_config=config,
+                    )
+                    for response in responses:
+                        for asr_result in process_response(response):
+                            _enqueue(asr_result)
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    self.logger.error("Riva streaming error (attempt %d/%d): %s", retry_count, max_retries, e)
+                    if retry_count >= max_retries:
+                        self.logger.error("Riva ASR max retries reached, giving up")
+                        break
+                    q = self._sync_audio_queue
+                    if q:
+                        try:
+                            while not q.empty():
+                                item = q.get_nowait()
+                                if item is None:
+                                    return
+                        except Exception:
+                            pass
 
         try:
-            loop = asyncio.get_running_loop()
-            executor_future = loop.run_in_executor(None, run_riva_in_executor)
-
-            def get_next_result():
-                try:
-                    return results_sync_queue.get(timeout=0.5)
-                except queue.Empty:
-                    return _EMPTY
-
-            while True:
-                result = await loop.run_in_executor(None, get_next_result)
-                if result is _EMPTY:
-                    continue
-                if result is None:
-                    break
-                await self._results_queue.put(result)
-
-            await executor_future
+            await loop.run_in_executor(None, run_riva_in_executor)
         except asyncio.CancelledError:
             raise
         except Exception as e:
