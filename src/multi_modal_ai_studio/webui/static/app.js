@@ -4850,11 +4850,10 @@ function updateLiveSessionUI() {
         if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
         if (state.isLiveSession && state.sessionState === 'live' && showInterim) updateLiveAsrLabel();
     }
-    const deviceControls = document.getElementById('device-controls-container');
+    const sessionControlOverlay = document.getElementById('session-control-overlay');
     const deviceTags = document.getElementById('device-tags');
     const videoFeed = document.getElementById('video-feed');
     const imagePlaceholder = document.getElementById('image-placeholder');
-    const startOverlay = document.getElementById('start-session-overlay');
     const previewImage = document.getElementById('preview-image');
     const sessionTitle = document.getElementById('session-title');
     const pipelineConfigEl = document.getElementById('pipeline-config');
@@ -4866,7 +4865,6 @@ function updateLiveSessionUI() {
     if (sessionImageEl && state.isLiveSession) sessionImageEl.style.display = '';
 
     if (state.isLiveSession) {
-        deviceControls.style.display = 'flex';
         updateDeviceIndicators();
         if (deviceTags) deviceTags.style.display = 'none'; // Pipeline table shows devices when visible
         if (pipelineConfigEl) {
@@ -4897,7 +4895,11 @@ function updateLiveSessionUI() {
             setSessionMetaRight('', '');
             document.getElementById('new-session-btn')?.classList.add('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.add('config-panel--start-ready');
-            if (startOverlay) startOverlay.style.display = 'flex';
+            if (sessionControlOverlay) {
+                sessionControlOverlay.style.display = 'flex';
+                sessionControlOverlay.classList.add('session-control-overlay--start');
+                sessionControlOverlay.classList.remove('session-control-overlay--stop');
+            }
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
             if (micMuteBtn) micMuteBtn.style.display = 'none';
@@ -4955,8 +4957,12 @@ function updateLiveSessionUI() {
             } else if (videoFeed) {
                 videoFeed.style.display = 'block';
             }
-            if (startOverlay) startOverlay.style.display = 'none';
-            if (startBtn) startBtn.style.display = 'flex';
+            if (sessionControlOverlay) {
+                sessionControlOverlay.style.display = 'flex';
+                sessionControlOverlay.classList.remove('session-control-overlay--start');
+                sessionControlOverlay.classList.add('session-control-overlay--stop');
+            }
+            if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'flex';
             if (micMuteBtn) {
                 micMuteBtn.style.display = 'flex';
@@ -4986,7 +4992,7 @@ function updateLiveSessionUI() {
                 updateImagePlaceholderContent();
             }
             if (videoFeed) videoFeed.style.display = 'none';
-            if (startOverlay) startOverlay.style.display = 'none';
+            if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'none';
             if (micMuteBtn) micMuteBtn.style.display = 'none';
@@ -5000,9 +5006,8 @@ function updateLiveSessionUI() {
         document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
         document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
         stopPreviewStream();
-        deviceControls.style.display = 'none';
+        if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
         if (videoFeed) videoFeed.style.display = 'none';
-        if (startOverlay) startOverlay.style.display = 'none';
         if (deviceTags) deviceTags.style.display = 'none';
         if (pipelineConfigEl) pipelineConfigEl.style.display = 'none';
         var serverHealthRow = document.getElementById('server-health-row');
@@ -6175,12 +6180,15 @@ function stopSessionRecording() {
     state.sessionState = 'stopped';
     state.micMuted = true; // reset for next session
     // Keep isLiveSession true so timeline still shows and can be zoomed/panned
-
-    document.getElementById('chat-history').innerHTML = `
-        <div class="empty-state">
-            <p>✅ Session saved! Check the session list.</p>
-        </div>
-    `;
+    // Keep message history/balloons visible (no "Session saved!" message)
+    const chatEl = document.getElementById('chat-history');
+    if (chatEl) {
+        if (state.liveChatTurns && state.liveChatTurns.length > 0) {
+            renderLiveChat();
+        } else {
+            chatEl.innerHTML = '<div class="empty-state"><p>No messages in this session.</p></div>';
+        }
+    }
 
     updateLiveSessionUI();
     loadSessions(); // Refresh session list so new recording appears
