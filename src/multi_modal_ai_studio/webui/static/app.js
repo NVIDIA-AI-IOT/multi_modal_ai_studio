@@ -585,7 +585,6 @@ const defaultConfig = {
         vision_quality: 0.8,
         vision_max_width: 640,
         vision_buffer_fps: 3.0,
-        vision_api_format: 'openai',
         vision_video_encode: false,
         enable_reasoning: false
     },
@@ -1289,13 +1288,6 @@ function renderLLMConfig(config, readonly = false) {
                 <input type="range" ${disabled} id="llm-vision-max-width" min="320" max="1280" step="64" value="${config.vision_max_width || 640}"
                        oninput="updateConfig('llm', 'vision_max_width', parseInt(this.value)); document.getElementById('vision-max-width-value').textContent = this.value + 'px';">
                 <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
-
-                <label style="margin-top: 10px;">Vision API Format</label>
-                <select ${disabled} id="llm-vision-api-format" onchange="onVisionApiFormatChange(this.value)">
-                    <option value="openai" ${(config.vision_api_format || 'openai') === 'openai' ? 'selected' : ''}>OpenAI (vLLM, Ollama, SGLang)</option>
-                    <option value="tensorrt_edge" ${(config.vision_api_format || '') === 'tensorrt_edge' ? 'selected' : ''}>TensorRT Edge LLM</option>
-                </select>
-                ${!readonly ? '<span class="input-hint">Payload format for vision. Use TensorRT Edge when using TensorRT Edge LLM server.</span>' : ''}
 
                 <label class="checkbox-label" style="margin-top: 12px;">
                     <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
@@ -2303,27 +2295,13 @@ function selectLLMPreset(url, label) {
 function selectTensorRTEdgePreset() {
     var url = 'http://localhost:58010/v1';
     currentConfig.llm.api_base = url;
-    currentConfig.llm.vision_api_format = 'tensorrt_edge';
     currentConfig.llm.vision_video_encode = false;
     var input = document.getElementById('llm-api-base');
     if (input) input.value = url;
-    var formatSelect = document.getElementById('llm-vision-api-format');
-    if (formatSelect) {
-        formatSelect.value = 'tensorrt_edge';
-    }
     document.getElementById('presetsMenu').style.display = 'none';
     updateConfig('llm', 'api_base', url);
-    updateConfig('llm', 'vision_api_format', 'tensorrt_edge');
     updateConfig('llm', 'vision_video_encode', false);
     fetchLLMModels(url);
-}
-
-function onVisionApiFormatChange(value) {
-    updateConfig('llm', 'vision_api_format', value);
-    if (value === 'tensorrt_edge') {
-        currentConfig.llm.vision_video_encode = false;
-        updateConfig('llm', 'vision_video_encode', false);
-    }
 }
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;
@@ -4967,12 +4945,10 @@ function updateLiveSessionUI() {
             if (micMuteBtn) {
                 micMuteBtn.style.display = 'flex';
                 micMuteBtn.classList.toggle('muted', state.micMuted);
+                micMuteBtn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
                 var icon = micMuteBtn.querySelector('.btn-icon i');
-                var textSpan = micMuteBtn.querySelector('.mic-mute-btn-text');
-                if (icon) {
-                    icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
-                }
-                if (textSpan) textSpan.textContent = state.micMuted ? 'Unmute Mic' : 'Mute Mic';
+                if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(micMuteBtn);
             }
             renderTimeline();
             updateVoiceDebugPanel();
@@ -6149,10 +6125,9 @@ function toggleMicMute() {
     var btn = document.getElementById('mic-mute-btn');
     if (btn) {
         btn.classList.toggle('muted', state.micMuted);
+        btn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
         var icon = btn.querySelector('.btn-icon i');
-        var textSpan = btn.querySelector('.mic-mute-btn-text');
         if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
-        if (textSpan) textSpan.textContent = state.micMuted ? 'Unmute Mic' : 'Mute Mic';
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
     }
 }
