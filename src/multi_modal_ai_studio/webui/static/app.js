@@ -13,6 +13,15 @@ const state = {
     timelineDuration: 0, // Total timeline duration in seconds
     isLiveSession: false,
     sessionState: 'setup', // 'setup', 'live', 'stopped'
+    /** Config panel: collapse to narrow strip when in session (toggle + auto-hide on start) */
+    configPanelCollapsed: false,
+    autoHideConfigOnStart: (function () {
+        try {
+            return localStorage.getItem('mmai_config_auto_hide_on_start') === '1';
+        } catch (e) {
+            return false;
+        }
+    })(),
     /** MediaStream from getUserMedia for camera/mic preview (setup mode); stop on STOP or config change */
     previewStream: null,
     /** Mic waveform: last 2000ms amplitude ring buffer (one value per ~16ms at 60fps) */
@@ -54,6 +63,8 @@ const state = {
     selectedBrowserSpeakerId: null,
     /** ScriptProcessor or worklet node for PCM capture; disconnect on stop */
     voicePcmNode: null,
+    /** Push-to-talk: when true, server does not feed mic to ASR (waveform still sent and displayed) */
+    micMuted: true,
     /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
     liveSessionStartTime: 0,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
@@ -388,13 +399,115 @@ function renderSessionDetail() {
 function updateConfigPanelState() {
     const panel = document.getElementById('config-panel');
     if (!panel) return;
-    const saveDefaultBtn = document.getElementById('save-default-config-btn');
-    if (state.isLiveSession) {
+    const autoHideBtn = document.getElementById('auto-hide-config-btn');
+    const configContent = document.getElementById('config-content');
+    const isSetup = state.sessionState === 'setup';
+    const canEditConfig = state.isLiveSession && isSetup;
+
+    if (canEditConfig) {
         panel.classList.add('config-panel--editable');
-        if (saveDefaultBtn) saveDefaultBtn.disabled = false;
+        panel.classList.remove('config-panel--locked');
+        if (autoHideBtn) autoHideBtn.disabled = false;
+        setConfigInputsDisabled(false);
     } else {
         panel.classList.remove('config-panel--editable');
-        if (saveDefaultBtn) saveDefaultBtn.disabled = true;
+        if (state.isLiveSession && (state.sessionState === 'live' || state.sessionState === 'stopped')) {
+            panel.classList.add('config-panel--locked');
+        } else {
+            panel.classList.remove('config-panel--locked');
+        }
+        if (autoHideBtn) autoHideBtn.disabled = !state.isLiveSession;
+        setConfigInputsDisabled(!canEditConfig);
+    }
+}
+
+function setConfigInputsDisabled(disabled) {
+    const content = document.getElementById('config-content');
+    if (!content) return;
+    content.querySelectorAll('input, select, textarea, button.config-tab').forEach(function (el) {
+        if (el.id === 'auto-hide-config-btn') return;
+        el.disabled = disabled;
+    });
+}
+
+var CONFIG_AUTO_HIDE_KEY = 'mmai_config_auto_hide_on_start';
+
+function applyConfigPanelCollapse() {
+    const contentArea = document.querySelector('.content-area');
+    const configPanel = document.getElementById('config-panel');
+    const chatPanel = document.getElementById('chat-panel');
+    const expandStrip = document.getElementById('config-expand-strip');
+    const collapseBtn = document.getElementById('config-collapse-btn');
+    const inSession = state.isLiveSession && (state.sessionState === 'live' || state.sessionState === 'stopped');
+    const collapsed = inSession && state.configPanelCollapsed;
+    if (contentArea) {
+        if (collapsed) contentArea.classList.add('content-area--config-collapsed');
+        else contentArea.classList.remove('content-area--config-collapsed');
+    }
+    if (configPanel) {
+        if (collapsed) configPanel.classList.add('config-panel--collapsed');
+        else configPanel.classList.remove('config-panel--collapsed');
+    }
+    if (chatPanel) {
+        if (collapsed) chatPanel.classList.add('chat-panel--config-collapsed');
+        else chatPanel.classList.remove('chat-panel--config-collapsed');
+    }
+    if (expandStrip) expandStrip.style.display = collapsed ? 'flex' : 'none';
+    if (collapseBtn) collapseBtn.style.display = (inSession && !collapsed) ? 'inline-flex' : 'none';
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
+function updateAutoHideConfigLabel() {
+    const label = document.getElementById('auto-hide-config-label');
+    const btn = document.getElementById('auto-hide-config-btn');
+    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide once session start \u2713' : 'Auto hide once session start <<';
+    if (btn) {
+        if (state.autoHideConfigOnStart) btn.classList.add('config-auto-hide-btn--on');
+        else btn.classList.remove('config-auto-hide-btn--on');
+    }
+}
+
+/** Update session-image-container aspect ratio from visible video/mjpeg to avoid gray letterboxing. */
+function updateSessionImageContainerAspect() {
+    const container = document.getElementById('session-image');
+    const videoFeed = document.getElementById('video-feed');
+    const mjpegFeed = document.getElementById('video-feed-mjpeg');
+    if (!container) return;
+    var w = 0, h = 0;
+    if (videoFeed && videoFeed.style.display === 'block' && videoFeed.videoWidth > 0 && videoFeed.videoHeight > 0) {
+        w = videoFeed.videoWidth;
+        h = videoFeed.videoHeight;
+    } else if (mjpegFeed && mjpegFeed.style.display === 'block' && mjpegFeed.naturalWidth > 0 && mjpegFeed.naturalHeight > 0) {
+        w = mjpegFeed.naturalWidth;
+        h = mjpegFeed.naturalHeight;
+    }
+    if (w > 0 && h > 0) {
+        container.style.aspectRatio = w + ' / ' + h;
+        container.classList.add('session-image-container--video-aspect');
+    } else {
+        container.style.aspectRatio = '';
+        container.classList.remove('session-image-container--video-aspect');
+    }
+}
+
+/** Set session-meta right block (Session recorded + filename). Two-line layout: left = title only; right = this when available. */
+function setSessionMetaRight(recordedText, filenameHtml) {
+    const container = document.getElementById('session-meta');
+    const recordedEl = document.getElementById('session-meta-recorded');
+    const filenameRightEl = document.getElementById('session-filename-right');
+    const hasRight = !!(recordedText || (filenameHtml && filenameHtml.trim()));
+    if (container) {
+        if (hasRight) container.classList.add('session-meta--has-right');
+        else container.classList.remove('session-meta--has-right');
+    }
+    if (recordedEl) {
+        recordedEl.textContent = recordedText || '';
+        recordedEl.style.display = recordedText ? '' : 'none';
+    }
+    if (filenameRightEl) {
+        filenameRightEl.innerHTML = filenameHtml || '';
+        filenameRightEl.style.display = (filenameHtml && filenameHtml.trim()) ? '' : 'none';
+        if (filenameHtml && typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(filenameRightEl);
     }
 }
 
@@ -406,7 +519,7 @@ function renderConfig() {
     // Device tab uses 'devices' key in config
     const configKey = tab === 'device' ? 'devices' : tab;
 
-    // If in live session mode, show editable forms
+    // If in live session setup mode, show editable forms; when live/stopped, form is disabled via updateConfigPanelState
     if (state.isLiveSession) {
         contentEl.innerHTML = renderEditableConfigForm(tab, currentConfig[configKey], false);
         if (tab === 'llm' && !isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
@@ -472,6 +585,7 @@ const defaultConfig = {
         vision_quality: 0.8,
         vision_max_width: 640,
         vision_buffer_fps: 3.0,
+        vision_video_encode: false,
         enable_reasoning: false
     },
     tts: {
@@ -525,7 +639,7 @@ function getDefaultConfig() {
 }
 
 function saveDefaultConfig() {
-    if (!state.isLiveSession) return;
+    if (!state.isLiveSession || state.sessionState !== 'setup') return;
     try {
         localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(currentConfig));
         const btn = document.getElementById('save-default-config-btn');
@@ -1087,6 +1201,7 @@ function renderLLMConfig(config, readonly = false) {
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8000/v1', 'vLLM')"><strong>vLLM</strong><span>http://localhost:8000/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
+                            <div class="api-preset-item" onclick="selectTensorRTEdgePreset()"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
                             <div style="border-top: 1px solid var(--border-color);"></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://api.openai.com/v1', 'OpenAI')"><strong>OpenAI</strong><span>https://api.openai.com/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://integrate.api.nvidia.com/v1', 'NVIDIA')"><strong>NVIDIA API Catalog</strong><span>https://integrate.api.nvidia.com/v1</span></div>
@@ -2175,6 +2290,18 @@ function selectLLMPreset(url, label) {
     if (input) input.value = url;
     document.getElementById('presetsMenu').style.display = 'none';
     updateConfig('llm', 'api_base', url);
+}
+
+function selectTensorRTEdgePreset() {
+    var url = 'http://localhost:58010/v1';
+    currentConfig.llm.api_base = url;
+    currentConfig.llm.vision_video_encode = false;
+    var input = document.getElementById('llm-api-base');
+    if (input) input.value = url;
+    document.getElementById('presetsMenu').style.display = 'none';
+    updateConfig('llm', 'api_base', url);
+    updateConfig('llm', 'vision_video_encode', false);
+    fetchLLMModels(url);
 }
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;
@@ -4690,7 +4817,10 @@ function updateLiveAsrLabel() {
 }
 
 function updateLiveSessionUI() {
+    if (!state.isLiveSession) state.configPanelCollapsed = false;
+    if (state.isLiveSession && state.sessionState === 'live' && state.autoHideConfigOnStart) state.configPanelCollapsed = true;
     updateConfigPanelState();
+    applyConfigPanelCollapse();
     const liveAsrWrap = document.getElementById('live-asr-label-wrap');
     if (liveAsrWrap) {
         const showInterim = (currentConfig.app && currentConfig.app.show_interim_asr !== false);
@@ -4698,25 +4828,21 @@ function updateLiveSessionUI() {
         if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
         if (state.isLiveSession && state.sessionState === 'live' && showInterim) updateLiveAsrLabel();
     }
-    const deviceControls = document.getElementById('device-controls-container');
+    const sessionControlOverlay = document.getElementById('session-control-overlay');
     const deviceTags = document.getElementById('device-tags');
     const videoFeed = document.getElementById('video-feed');
     const imagePlaceholder = document.getElementById('image-placeholder');
-    const startOverlay = document.getElementById('start-session-overlay');
     const previewImage = document.getElementById('preview-image');
     const sessionTitle = document.getElementById('session-title');
-    const sessionMetaLine2 = document.getElementById('session-meta-line2');
-    const sessionStats = document.getElementById('session-stats');
-    const sessionFilenameEl = document.getElementById('session-filename');
     const pipelineConfigEl = document.getElementById('pipeline-config');
     const startBtn = document.getElementById('start-session-btn');
     const stopBtn = document.getElementById('stop-session-btn');
+    const micMuteBtn = document.getElementById('mic-mute-btn');
 
     const sessionImageEl = document.getElementById('session-image');
     if (sessionImageEl && state.isLiveSession) sessionImageEl.style.display = '';
 
     if (state.isLiveSession) {
-        deviceControls.style.display = 'flex';
         updateDeviceIndicators();
         if (deviceTags) deviceTags.style.display = 'none'; // Pipeline table shows devices when visible
         if (pipelineConfigEl) {
@@ -4741,17 +4867,20 @@ function updateLiveSessionUI() {
 
         const turnCount = (state.liveChatTurns && state.liveChatTurns.length) || 0;
         const dateTimeStr = state.liveSessionStartTime > 0 ? formatSessionDateTime(state.liveSessionStartTime) : new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-        sessionTitle.textContent = state.liveSessionStartTime > 0 ? ('Session – ' + dateTimeStr) : ('Live Session – ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }));
-        if (sessionMetaLine2) sessionMetaLine2.textContent = dateTimeStr + ', ' + turnCount + ' turn' + (turnCount !== 1 ? 's' : '');
-
+        const turnsSuffix = dateTimeStr + ', ' + turnCount + ' turn' + (turnCount !== 1 ? 's' : '');
         if (state.sessionState === 'setup') {
+            sessionTitle.textContent = state.liveSessionStartTime > 0 ? ('Session – ' + turnsSuffix) : ('Live Session – ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }));
+            setSessionMetaRight('', '');
             document.getElementById('new-session-btn')?.classList.add('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.add('config-panel--start-ready');
-            if (sessionStats) sessionStats.innerHTML = '';
-            if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
-            if (startOverlay) startOverlay.style.display = 'flex';
+            if (sessionControlOverlay) {
+                sessionControlOverlay.style.display = 'flex';
+                sessionControlOverlay.classList.add('session-control-overlay--start');
+                sessionControlOverlay.classList.remove('session-control-overlay--stop');
+            }
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
+            if (micMuteBtn) micMuteBtn.style.display = 'none';
             // Preview (camera + mic waveform slot) is shown in setup so user sees what they’ll get before clicking START
             startPreviewStream();
             if (isServerMicSelected()) startMicWaveformFromServer();
@@ -4781,10 +4910,10 @@ function updateLiveSessionUI() {
                 if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
             }
         } else if (state.sessionState === 'live') {
+            sessionTitle.textContent = 'Session – ' + turnsSuffix + ' – RECORDING';
+            setSessionMetaRight('', '');
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
-            if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: #ef4444;"><i data-lucide="circle" class="lucide-inline" style="fill: currentColor;"></i> RECORDING</span>';
-            if (sessionFilenameEl) { sessionFilenameEl.innerHTML = ''; sessionFilenameEl.style.display = 'none'; }
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             var mjpegFeedLive = document.getElementById('video-feed-mjpeg');
             var hasWebRTC = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
@@ -4806,32 +4935,43 @@ function updateLiveSessionUI() {
             } else if (videoFeed) {
                 videoFeed.style.display = 'block';
             }
-            if (startOverlay) startOverlay.style.display = 'none';
-            if (startBtn) startBtn.style.display = 'flex';
+            if (sessionControlOverlay) {
+                sessionControlOverlay.style.display = 'flex';
+                sessionControlOverlay.classList.remove('session-control-overlay--start');
+                sessionControlOverlay.classList.add('session-control-overlay--stop');
+            }
+            if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'flex';
+            if (micMuteBtn) {
+                micMuteBtn.style.display = 'flex';
+                micMuteBtn.classList.toggle('muted', state.micMuted);
+                micMuteBtn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
+                var icon = micMuteBtn.querySelector('.btn-icon i');
+                if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(micMuteBtn);
+            }
             renderTimeline();
             updateVoiceDebugPanel();
         } else if (state.sessionState === 'stopped') {
+            sessionTitle.textContent = 'Session – ' + turnsSuffix;
+            var recordedLine = 'Session recorded: ' + turnsSuffix;
+            var filenameHtml = '';
+            if (state.lastSavedSessionId) {
+                var sessionFileName = state.lastSavedSessionId + '.json';
+                filenameHtml = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
+            }
+            setSessionMetaRight(recordedLine, filenameHtml);
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
-            if (sessionStats) sessionStats.innerHTML = '<span class="stat-value" style="color: var(--text-secondary);"><i data-lucide="check-circle" class="lucide-inline"></i> Session recorded</span>';
-            if (sessionFilenameEl && state.lastSavedSessionId) {
-                var sessionFileName = state.lastSavedSessionId + '.json';
-                sessionFilenameEl.innerHTML = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
-                sessionFilenameEl.style.display = '';
-                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(sessionFilenameEl);
-            } else if (sessionFilenameEl) {
-                sessionFilenameEl.innerHTML = '';
-                sessionFilenameEl.style.display = 'none';
-            }
             if (imagePlaceholder) {
                 imagePlaceholder.style.display = 'flex';
                 updateImagePlaceholderContent();
             }
             if (videoFeed) videoFeed.style.display = 'none';
-            if (startOverlay) startOverlay.style.display = 'none';
+            if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'none';
+            if (micMuteBtn) micMuteBtn.style.display = 'none';
             renderTimeline();
             if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         }
@@ -4842,23 +4982,21 @@ function updateLiveSessionUI() {
         document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
         document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
         stopPreviewStream();
-        deviceControls.style.display = 'none';
+        if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
         if (videoFeed) videoFeed.style.display = 'none';
-        if (startOverlay) startOverlay.style.display = 'none';
         if (deviceTags) deviceTags.style.display = 'none';
         if (pipelineConfigEl) pipelineConfigEl.style.display = 'none';
         var serverHealthRow = document.getElementById('server-health-row');
         if (serverHealthRow) serverHealthRow.style.display = 'none';
+        setSessionMetaRight('', '');
         updateChatInputVisibility();
     }
+    updateSessionImageContainerAspect();
 }
 
 function updateHistoricalSessionPreview() {
     const sessionMeta = document.getElementById('session-meta');
     const sessionTitle = document.getElementById('session-title');
-    const sessionMetaLine2 = document.getElementById('session-meta-line2');
-    const sessionStats = document.getElementById('session-stats');
-    const sessionFilenameEl = document.getElementById('session-filename');
     const pipelineConfigEl = document.getElementById('pipeline-config');
     const previewImage = document.getElementById('preview-image');
     const imagePlaceholder = document.getElementById('image-placeholder');
@@ -4879,33 +5017,16 @@ function updateHistoricalSessionPreview() {
         const metrics = session.metrics || {};
         const turns = metrics.total_turns || 0;
         const dateTimeStr = formatSessionDateTime(session.created_at);
+        const turnsStr = dateTimeStr + ', ' + turns + ' turn' + (turns !== 1 ? 's' : '');
 
         sessionTitle.textContent = session.name || 'Unnamed Session';
-        if (sessionMetaLine2) sessionMetaLine2.textContent = dateTimeStr + ', ' + turns + ' turn' + (turns !== 1 ? 's' : '');
-
-        const ttl = formatLatency(metrics.avg_ttl);
-        const ttfa = metrics.avg_ttfa != null ? formatLatency(metrics.avg_ttfa) : '—';
-        sessionStats.innerHTML = `
-            <span class="session-stat-item">
-                <span class="stat-label">Avg TTL:</span>
-                <span class="stat-value">${ttl}</span>
-            </span>
-            <span class="session-stat-item">
-                <span class="stat-label">TTFA:</span>
-                <span class="stat-value">${ttfa}</span>
-            </span>
-        `;
+        var recordedLine = 'Session recorded: ' + turnsStr;
+        var filenameHtml = '';
         const sessionFileName = session.session_id ? (session.session_id + '.json') : '';
-        if (sessionFilenameEl) {
-            if (sessionFileName) {
-                sessionFilenameEl.innerHTML = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
-                sessionFilenameEl.style.display = '';
-                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(sessionFilenameEl);
-            } else {
-                sessionFilenameEl.innerHTML = '';
-                sessionFilenameEl.style.display = 'none';
-            }
+        if (sessionFileName) {
+            filenameHtml = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
         }
+        setSessionMetaRight(recordedLine, filenameHtml);
 
         if (pipelineConfigEl && session.config) {
             pipelineConfigEl.style.display = 'block';
@@ -4937,9 +5058,7 @@ function updateHistoricalSessionPreview() {
         sessionMeta.style.display = 'flex';
     } else if (!state.selectedSession) {
         sessionTitle.textContent = 'New Session';
-        if (sessionMetaLine2) sessionMetaLine2.textContent = '';
-        sessionStats.innerHTML = '';
-        if (sessionFilenameEl) { sessionFilenameEl.textContent = ''; sessionFilenameEl.style.display = 'none'; }
+        setSessionMetaRight('', '');
         const sessionImageEl = document.getElementById('session-image');
         if (state.isLiveSession) {
             if (sessionImageEl) sessionImageEl.style.display = '';
@@ -4954,7 +5073,7 @@ function updateHistoricalSessionPreview() {
             if (sessionImageEl) sessionImageEl.style.display = '';
         }
     } else {
-        if (sessionFilenameEl) { sessionFilenameEl.textContent = ''; sessionFilenameEl.style.display = 'none'; }
+        setSessionMetaRight('', '');
         const sessionImageEl = document.getElementById('session-image');
         if (sessionImageEl) sessionImageEl.style.display = '';
     }
@@ -5536,6 +5655,7 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
+        if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
         if (!state.ttsAudioContext) {
             state.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
             state.ttsNextStartTime = 0;
@@ -5546,7 +5666,9 @@ function startSessionRecording() {
         startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
+        state.micMuted = true;
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
+        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: true }));
         updateVoiceDebugPanel();
         document.getElementById('chat-history').innerHTML = `
         <div class="empty-state">
@@ -5588,6 +5710,7 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
+        if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
 
@@ -5612,6 +5735,8 @@ function startSessionRecording() {
         var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
         ws.send(JSON.stringify({ type: 'start_session', config: config }));
+        state.micMuted = true;
+        ws.send(JSON.stringify({ type: 'mic_mute', muted: true }));
         console.log('[Voice] Config and start_session sent, starting mic stream');
         startVoiceMicStream();
     };
@@ -5993,6 +6118,20 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
     }
 }
 
+function toggleMicMute() {
+    if (state.sessionState !== 'live' || !state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN) return;
+    state.micMuted = !state.micMuted;
+    state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+    var btn = document.getElementById('mic-mute-btn');
+    if (btn) {
+        btn.classList.toggle('muted', state.micMuted);
+        btn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
+        var icon = btn.querySelector('.btn-icon i');
+        if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+    }
+}
+
 function stopSessionRecording() {
     if (state.sessionState !== 'live') return;
 
@@ -6014,13 +6153,17 @@ function stopSessionRecording() {
     stopVoiceMicStream();
     stopPreviewStream();
     state.sessionState = 'stopped';
+    state.micMuted = true; // reset for next session
     // Keep isLiveSession true so timeline still shows and can be zoomed/panned
-
-    document.getElementById('chat-history').innerHTML = `
-        <div class="empty-state">
-            <p>✅ Session saved! Check the session list.</p>
-        </div>
-    `;
+    // Keep message history/balloons visible (no "Session saved!" message)
+    const chatEl = document.getElementById('chat-history');
+    if (chatEl) {
+        if (state.liveChatTurns && state.liveChatTurns.length > 0) {
+            renderLiveChat();
+        } else {
+            chatEl.innerHTML = '<div class="empty-state"><p>No messages in this session.</p></div>';
+        }
+    }
 
     updateLiveSessionUI();
     loadSessions(); // Refresh session list so new recording appears
@@ -6032,6 +6175,15 @@ function stopSessionRecording() {
 // ===== Event Handlers =====
 function setupEventHandlers() {
     console.log('setupEventHandlers() called');
+
+    // Session image container: match aspect to video/mjpeg to avoid gray letterboxing
+    const videoFeed = document.getElementById('video-feed');
+    const mjpegFeed = document.getElementById('video-feed-mjpeg');
+    if (videoFeed) {
+        videoFeed.addEventListener('loadedmetadata', updateSessionImageContainerAspect);
+        videoFeed.addEventListener('resize', updateSessionImageContainerAspect);
+    }
+    if (mjpegFeed) mjpegFeed.addEventListener('load', updateSessionImageContainerAspect);
 
     // Theme: Auto / Light / Dark (matches Live RIVA WebUI – Lucide icons)
     const themeToggle = document.getElementById('theme-toggle');
@@ -6186,11 +6338,33 @@ function setupEventHandlers() {
         startNewSession();
     });
 
-    // Save as default config (enabled only when config panel is editable)
-    const saveDefaultConfigBtn = document.getElementById('save-default-config-btn');
-    if (saveDefaultConfigBtn) {
-        saveDefaultConfigBtn.addEventListener('click', saveDefaultConfig);
-        saveDefaultConfigBtn.disabled = !state.isLiveSession;
+    // Auto hide config once session start (toggle preference)
+    const autoHideConfigBtn = document.getElementById('auto-hide-config-btn');
+    if (autoHideConfigBtn) {
+        autoHideConfigBtn.addEventListener('click', function () {
+            state.autoHideConfigOnStart = !state.autoHideConfigOnStart;
+            try {
+                localStorage.setItem(CONFIG_AUTO_HIDE_KEY, state.autoHideConfigOnStart ? '1' : '0');
+            } catch (e) {}
+            updateAutoHideConfigLabel();
+        });
+        updateAutoHideConfigLabel();
+    }
+    // Collapse config pane (when in session)
+    const configCollapseBtn = document.getElementById('config-collapse-btn');
+    if (configCollapseBtn) {
+        configCollapseBtn.addEventListener('click', function () {
+            state.configPanelCollapsed = true;
+            applyConfigPanelCollapse();
+        });
+    }
+    // Expand config pane (when collapsed)
+    const configExpandBtn = document.getElementById('config-expand-btn');
+    if (configExpandBtn) {
+        configExpandBtn.addEventListener('click', function () {
+            state.configPanelCollapsed = false;
+            applyConfigPanelCollapse();
+        });
     }
 
     // Start session recording
@@ -6212,6 +6386,9 @@ function setupEventHandlers() {
     // Stop session recording
     document.getElementById('stop-session-btn').addEventListener('click', () => {
         stopSessionRecording();
+    });
+    document.getElementById('mic-mute-btn').addEventListener('click', () => {
+        toggleMicMute();
     });
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter

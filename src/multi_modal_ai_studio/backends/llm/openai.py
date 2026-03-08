@@ -154,15 +154,24 @@ def _is_ollama_backend(config) -> bool:
     return "11434" in api_base or "ollama" in api_base.lower()
 
 
+def _is_tensorrt_edge_backend(config) -> bool:
+    """Return True if api_base points to a TensorRT Edge LLM server (image payload format)."""
+    api_base = getattr(config, "api_base", "") or ""
+    base_lower = api_base.lower()
+    return "58010" in api_base or "tensorrt" in base_lower or "edge-llm" in base_lower
+
+
 def _should_use_video(config) -> bool:
     """Return True when frames should be encoded as MP4 video.
 
     Controlled by ``vision_video_encode`` config flag, but automatically
-    disabled for backends that don't support video_url (e.g. Ollama).
+    disabled for backends that don't support video_url (e.g. Ollama, TensorRT Edge).
     """
     if not bool(getattr(config, "vision_video_encode", False)):
         return False
     if _is_ollama_backend(config):
+        return False
+    if _is_tensorrt_edge_backend(config):
         return False
     return True
 
@@ -546,7 +555,8 @@ class OpenAILLMBackend(LLMBackend):
             messages.extend(history)
 
         # Add current prompt - with images/video if provided (VLM multi-modal format)
-        vision_fmt = getattr(self.config, "vision_api_format", "openai")
+        # Format is derived from api_base: TensorRT Edge (e.g. :58010) uses image payload; else OpenAI-style.
+        vision_fmt = "tensorrt_edge" if _is_tensorrt_edge_backend(self.config) else "openai"
         if image_data_urls and len(image_data_urls) > 0:
             user_content = self._build_vision_content(
                 image_data_urls, prompt, vision_fmt, speech_duration,
