@@ -25,7 +25,7 @@ llm:
   vision_detail: auto
   vision_quality: 0.8
   vision_max_width: 768
-  vision_buffer_fps: 3.0
+  vision_buffer_fps: 5.0
   vision_video_encode: true      # Encode frames as MP4 video for temporal understanding
   enable_reasoning: true         # Allow <think> chain-of-thought (filtered from TTS, shown in UI)
 

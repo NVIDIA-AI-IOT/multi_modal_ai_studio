@@ -196,7 +196,8 @@ _MIN_FRAMES_FOR_VIDEO = 2
 # When sending individual images (non-Cosmos VLMs), cap the count to
 # limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
 # is a good trade-off between visual context and prefill latency.
-_MAX_INDIVIDUAL_IMAGES = 6
+_MAX_VIDEO_FALLBACK_IMAGES = 10
+_MAX_TENSORRT_EDGE_IMAGES = 3
 
 
 def _encode_images_to_video_base64(
@@ -417,31 +418,18 @@ class OpenAILLMBackend(LLMBackend):
         self,
         image_data_urls: List[str],
         prompt: str,
-        vision_fmt: str,
         speech_duration: Optional[float],
     ) -> list:
         """Build the multimodal ``content`` list for a user message.
 
-        Dispatches to the correct format based on *vision_fmt*:
-          • ``"openai"``       — vLLM / Ollama / SGLang / OpenAI (image_url, video_url)
-          • ``"tensorrt_edge"`` — TensorRT Edge LLM ({"type":"image","image":"<b64>"})
+        All backends (vLLM, Ollama, TensorRT Edge LLM, SGLang, OpenAI) use
+        the standard OpenAI ``image_url`` format.  Cosmos-Reason models
+        additionally support ``video_url`` when video encoding is enabled.
 
         Returns the ``content`` list ready to be placed inside a user message.
         """
-        if vision_fmt == "tensorrt_edge":
-            return self._vision_content_tensorrt_edge(image_data_urls, prompt, speech_duration)
-        return self._vision_content_openai(image_data_urls, prompt, speech_duration)
-
-    def _vision_content_openai(
-        self,
-        image_data_urls: List[str],
-        prompt: str,
-        speech_duration: Optional[float],
-    ) -> list:
-        """OpenAI-standard format (vLLM, Ollama, SGLang, OpenAI API)."""
         content: list = []
 
-        # Video encoding for temporal understanding (Cosmos-Reason or explicit flag).
         video_url = None
         if (
             _should_use_video(self.config)
@@ -461,14 +449,17 @@ class OpenAILLMBackend(LLMBackend):
                 self.logger.warning("Video encoding failed, falling back to multi-image")
                 video_url = None
 
-        # Multi-image fallback: non-Cosmos models or video encoding failure.
         if not video_url:
             detail = getattr(self.config, "vision_detail", "auto")
             imgs = image_data_urls
-            if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
-                step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images", len(image_data_urls), len(imgs))
+            if _is_tensorrt_edge_backend(self.config) and len(imgs) > _MAX_TENSORRT_EDGE_IMAGES:
+                step = len(imgs) / _MAX_TENSORRT_EDGE_IMAGES
+                imgs = [imgs[int(i * step)] for i in range(_MAX_TENSORRT_EDGE_IMAGES)]
+                self.logger.info("VLM: sub-sampled %d → %d images (Edge LLM limit)", len(image_data_urls), len(imgs))
+            elif _should_use_video(self.config) and len(imgs) > _MAX_VIDEO_FALLBACK_IMAGES:
+                step = len(imgs) / _MAX_VIDEO_FALLBACK_IMAGES
+                imgs = [imgs[int(i * step)] for i in range(_MAX_VIDEO_FALLBACK_IMAGES)]
+                self.logger.info("VLM: sub-sampled %d → %d images (Cosmos video fallback)", len(image_data_urls), len(imgs))
             for img_url in imgs:
                 content.append({
                     "type": "image_url",
@@ -476,31 +467,6 @@ class OpenAILLMBackend(LLMBackend):
                 })
             self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
 
-        content.append({"type": "text", "text": prompt})
-        return content
-
-    def _vision_content_tensorrt_edge(
-        self,
-        image_data_urls: List[str],
-        prompt: str,
-        speech_duration: Optional[float],
-    ) -> list:
-        """TensorRT Edge LLM format: ``{"type":"image","image":"<raw_base64>"}``."""
-        content: list = []
-        imgs = image_data_urls
-
-        if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
-            step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
-            imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
-            self.logger.info("VLM (TRT-Edge): sub-sampled %d → %d images", len(image_data_urls), len(imgs))
-
-        for img_url in imgs:
-            content.append({
-                "type": "image",
-                "image": _strip_data_url_prefix(img_url),
-            })
-
-        self.logger.info("VLM request (TRT-Edge): %d image(s) + text prompt", len(imgs))
         content.append({"type": "text", "text": prompt})
         return content
 
@@ -539,14 +505,10 @@ class OpenAILLMBackend(LLMBackend):
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
-        elif getattr(self.config, "enable_reasoning", False) and not _is_ollama_backend(self.config):
-            # Cosmos with vLLM (--reasoning-parser): instruct model to use <think> format
-            reasoning_fmt = (
-                "\n\nAnswer the question using the following format:\n\n<think>\n"
-                "Your reasoning.\n</think>\n\n"
-                "Write your final answer immediately after the </think> tag."
-            )
-            sys_prompt = (sys_prompt or "") + reasoning_fmt
+        elif getattr(self.config, "enable_reasoning", False):
+            reasoning_fmt = getattr(self.config, "reasoning_prompt", "") or ""
+            if reasoning_fmt:
+                sys_prompt = (sys_prompt or "") + reasoning_fmt
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
@@ -554,12 +516,9 @@ class OpenAILLMBackend(LLMBackend):
         if history:
             messages.extend(history)
 
-        # Add current prompt - with images/video if provided (VLM multi-modal format)
-        # Format is derived from api_base: TensorRT Edge (e.g. :58010) uses image payload; else OpenAI-style.
-        vision_fmt = "tensorrt_edge" if _is_tensorrt_edge_backend(self.config) else "openai"
         if image_data_urls and len(image_data_urls) > 0:
             user_content = self._build_vision_content(
-                image_data_urls, prompt, vision_fmt, speech_duration,
+                image_data_urls, prompt, speech_duration,
             )
             messages.append({"role": "user", "content": user_content})
         else:
@@ -605,8 +564,11 @@ class OpenAILLMBackend(LLMBackend):
         in_think_block = False  # fallback tracker if server lacks reasoning parser
 
         try:
+            body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Length"] = str(len(body_bytes))
+            self.logger.debug("LLM request body: %d bytes", len(body_bytes))
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
+                async with session.post(url, headers=headers, data=body_bytes) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
                         self.logger.error(f"LLM API error: {resp.status} - {error_text}")
@@ -618,6 +580,8 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Skip empty lines and non-data lines
                         if not line or not line.startswith("data: "):
+                            if line and ("error" in line.lower() or "500" in line):
+                                self.logger.warning("SSE non-data line (possible error): %.300s", line)
                             continue
 
                         # Remove "data: " prefix
@@ -642,7 +606,7 @@ class OpenAILLMBackend(LLMBackend):
                             chunk = json.loads(line)
 
                             if "choices" in chunk and len(chunk["choices"]) > 0:
-                                delta = chunk["choices"][0].get("delta", {})
+                                delta = chunk["choices"][0].get("delta") or {}
 
                                 # vLLM reasoning parser puts thinking into
                                 # reasoning_content and answer into content.

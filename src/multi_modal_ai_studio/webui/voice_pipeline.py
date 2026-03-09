@@ -761,13 +761,11 @@ async def _run_voice_pipeline(
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
     
     _use_video_encode = bool(getattr(llm_config, "vision_video_encode", False))
-    COSMOS_BROWSER_FPS = 5.0
-    if _use_video_encode and vision_buffer_fps < COSMOS_BROWSER_FPS:
-        logger.info(
-            "[VLM] Cosmos model detected: raising browser capture FPS from %.1f to %.1f",
-            vision_buffer_fps, COSMOS_BROWSER_FPS,
+    if _use_video_encode and vision_buffer_fps < 3.0:
+        logger.warning(
+            "[VLM] vision_buffer_fps=%.1f is very low for video encoding; consider >= 5.0",
+            vision_buffer_fps,
         )
-        vision_buffer_fps = COSMOS_BROWSER_FPS
     
     # Determine if using server-side camera (USB or local video). Use session.config at call time
     # so that start_session-merged config (e.g. browser camera when using server mic) is respected.

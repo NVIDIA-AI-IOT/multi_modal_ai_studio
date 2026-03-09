@@ -60,6 +60,12 @@ src/debug_videos/
 *.pem
 credentials.json
 
+# Videos: ignore all except committed sample videos
+videos/*
+!videos/cosmos_20260304_123451_30f_5fps.mp4
+!videos/robot_hand_768_5fps.mp4
+!videos/package_768_5fps.mp4
+
 # Debug videos
 debug_videos/
 
