@@ -198,6 +198,11 @@ _MIN_FRAMES_FOR_VIDEO = 2
 # is a good trade-off between visual context and prefill latency.
 _MAX_VIDEO_FALLBACK_IMAGES = 10
 _MAX_TENSORRT_EDGE_IMAGES = 3
+# Qwen3-VL uses ~170 tokens per video frame.  With max_model_len=8192,
+# system prompt ≈ 300 tokens, user text ≈ 50, max_tokens ≈ 512,
+# budget ≈ 8192 - 300 - 50 - 512 = 7330 → ~43 frames.
+# Use 35 as a safe cap to leave headroom.
+_MAX_COSMOS_VIDEO_FRAMES = 35
 
 
 def _encode_images_to_video_base64(
@@ -435,8 +440,13 @@ class OpenAILLMBackend(LLMBackend):
             _should_use_video(self.config)
             and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
         ):
+            imgs_for_video = image_data_urls
+            if len(imgs_for_video) > _MAX_COSMOS_VIDEO_FRAMES:
+                step = len(imgs_for_video) / _MAX_COSMOS_VIDEO_FRAMES
+                imgs_for_video = [imgs_for_video[int(i * step)] for i in range(_MAX_COSMOS_VIDEO_FRAMES)]
+                self.logger.info("VLM: sub-sampled %d → %d frames for video (token budget)", len(image_data_urls), len(imgs_for_video))
             video_url = _encode_images_to_video_base64(
-                image_data_urls,
+                imgs_for_video,
                 speech_duration_secs=speech_duration or 0.0,
             )
             if video_url:
@@ -562,6 +572,9 @@ class OpenAILLMBackend(LLMBackend):
         token_count = 0
         reasoning_started = False
         in_think_block = False  # fallback tracker if server lacks reasoning parser
+        _post_think_buf = ""  # buffer after </think> to detect <answer> tags
+        _post_think_buffering = False
+        _POST_THINK_BUF_MAX = 500  # flush if no <answer> found within this many chars
 
         try:
             body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -582,6 +595,11 @@ class OpenAILLMBackend(LLMBackend):
                         if not line or not line.startswith("data: "):
                             if line and ("error" in line.lower() or "500" in line):
                                 self.logger.warning("SSE non-data line (possible error): %.300s", line)
+                                if "500" in line or "Internal Server Error" in line:
+                                    err_msg = "[LLM backend error — the model crashed. This often means the image payload is too large for Edge LLM.]"
+                                    self.logger.error("Edge LLM 500: yielding error to user")
+                                    yield LLMToken(token=err_msg, is_final=False)
+                                    full_response += err_msg
                             continue
 
                         # Remove "data: " prefix
@@ -589,6 +607,20 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Check for end of stream
                         if line == "[DONE]":
+                            # Flush post-think buffer if stream ends while buffering
+                            if _post_think_buffering and _post_think_buf:
+                                leftover = _post_think_buf
+                                if "<answer>" in leftover:
+                                    leftover = leftover.split("<answer>", 1)[1]
+                                leftover = leftover.replace("</answer>", "")
+                                leftover = strip_markdown(leftover, preserve_spaces=True).strip()
+                                if leftover:
+                                    full_response += leftover
+                                    token_count += 1
+                                    yield LLMToken(token=leftover, is_final=False)
+                                _post_think_buffering = False
+                                _post_think_buf = ""
+
                             final_meta: Dict[str, Any] = {
                                 "token_count": token_count,
                                 "full_response": full_response,
@@ -637,9 +669,36 @@ class OpenAILLMBackend(LLMBackend):
                                         reasoning_response += content.split("</think>", 1)[0]
                                         in_think_block = False
                                         content = after
+                                        _post_think_buffering = True
+                                        _post_think_buf = ""
                                     else:
                                         reasoning_response += content
                                         continue
+
+                                if not content and not _post_think_buffering:
+                                    continue
+
+                                # After </think>, buffer briefly to detect <answer> tags
+                                # which indicate leaked reasoning before the real answer.
+                                if _post_think_buffering:
+                                    _post_think_buf += content
+                                    if "<answer>" in _post_think_buf:
+                                        content = _post_think_buf.split("<answer>", 1)[1]
+                                        content = content.replace("</answer>", "")
+                                        _post_think_buffering = False
+                                        _post_think_buf = ""
+                                    elif len(_post_think_buf) >= _POST_THINK_BUF_MAX:
+                                        content = _post_think_buf
+                                        content = content.replace("<answer>", "").replace("</answer>", "")
+                                        _post_think_buffering = False
+                                        _post_think_buf = ""
+                                    else:
+                                        continue
+
+                                # Strip any remaining <answer>/<​/answer> tags
+                                if "<answer>" in content:
+                                    content = content.split("<answer>", 1)[1]
+                                content = content.replace("</answer>", "")
 
                                 if not content:
                                     continue

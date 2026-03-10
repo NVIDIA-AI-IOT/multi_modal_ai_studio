@@ -135,16 +135,24 @@ class FrameBroker:
                 return []
             
             # Find frames in time range
+            buf_oldest = self._buffer[0].timestamp if self._buffer else 0
+            buf_newest = self._buffer[-1].timestamp if self._buffer else 0
             frames_in_range = [
                 f for f in self._buffer
                 if t_start <= f.timestamp <= t_end
             ]
             
             if not frames_in_range:
-                # Fall back to most recent frames
-                logger.info("[FrameBroker] No frames in range [%.2f, %.2f], using recent frames",
-                           t_start, t_end)
+                logger.info(
+                    "[FrameBroker] No frames in range [%.2f, %.2f], buffer=[%.2f, %.2f] (%d frames). Using recent.",
+                    t_start, t_end, buf_oldest, buf_newest, len(self._buffer),
+                )
                 frames_in_range = list(self._buffer)[-n_frames:]
+            else:
+                logger.info(
+                    "[FrameBroker] Found %d frames in range [%.2f, %.2f] (buffer %d total)",
+                    len(frames_in_range), t_start, t_end, len(self._buffer),
+                )
             
             # Evenly sample n_frames
             if len(frames_in_range) <= n_frames:

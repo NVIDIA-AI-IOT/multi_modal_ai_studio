@@ -587,7 +587,7 @@ const defaultConfig = {
         vision_buffer_fps: 3.0,
         vision_video_encode: false,
         enable_reasoning: false,
-        reasoning_prompt: '\n\nAnswer the question using the following format:\n\n<think>\nYour reasoning.\n</think>\n\nWrite your final answer immediately after the </think> tag.'
+        reasoning_prompt: '\n\nThink step-by-step inside <think>...</think> tags, then write your final answer immediately after </think>. The final answer MUST be exactly one descriptive sentence — no lists, no paragraphs, no tags.'
     },
     tts: {
         backend: 'riva',
@@ -1211,6 +1211,7 @@ function renderLLMConfig(config, readonly = false) {
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
                             <div class="api-preset-item" onclick="selectTensorRTEdgePreset()"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMRouterPreset()"><strong>LLM Router</strong><span>http://10.110.51.30:8801/v1</span></div>
                             <div style="border-top: 1px solid var(--border-color);"></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://api.openai.com/v1', 'OpenAI')"><strong>OpenAI</strong><span>https://api.openai.com/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://integrate.api.nvidia.com/v1', 'NVIDIA')"><strong>NVIDIA API Catalog</strong><span>https://integrate.api.nvidia.com/v1</span></div>
@@ -1733,6 +1734,8 @@ function onDeviceListChange(type, value) {
     }
 }
 
+var _videoScenarios = {};
+
 function loadLocalVideoPicker() {
     var picker = document.getElementById('local-video-picker');
     if (!picker) return;
@@ -1745,17 +1748,27 @@ function loadLocalVideoPicker() {
                 picker.innerHTML = '<div class="local-video-picker-empty">No video files found. Place .mp4 files in the <code>videos/</code> folder.</div>';
                 return;
             }
+            _videoScenarios = {};
+            for (var i = 0; i < videos.length; i++) {
+                if (videos[i].scenario) _videoScenarios[videos[i].name] = videos[i].scenario;
+            }
             var selectedFile = (currentConfig.devices && currentConfig.devices.video_file) || '';
             var html = '';
             for (var i = 0; i < videos.length; i++) {
                 var v = videos[i];
+                var sc = v.scenario;
                 var isSelected = v.name === selectedFile;
-                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + '" '
+                var label = sc ? sc.label : v.name;
+                var tooltip = sc ? (sc.label + ': ' + sc.description) : (v.name + ' (' + v.size_kb + ' KB)');
+                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + (sc ? ' has-scenario' : '') + '" '
                     + 'onclick="selectLocalVideo(\'' + v.name.replace(/'/g, "\\'") + '\')" '
-                    + 'title="' + v.name + ' (' + v.size_kb + ' KB)">'
+                    + 'title="' + escapeHtml(tooltip) + '">'
                     + '<video src="' + getApiBase() + '/api/videos/file?name=' + encodeURIComponent(v.name) + '" '
-                    + 'muted autoplay loop playsinline preload="metadata"></video>'
-                    + '<div class="local-video-thumb-name">' + v.name + '</div>'
+                    + 'muted autoplay loop playsinline preload="metadata"></video>';
+                if (sc) {
+                    html += '<div class="local-video-scenario-badge">' + escapeHtml(sc.label) + '</div>';
+                }
+                html += '<div class="local-video-thumb-name" data-filename="' + escapeHtml(v.name) + '">' + escapeHtml(label) + '</div>'
                     + '</div>';
             }
             picker.innerHTML = html;
@@ -1769,12 +1782,24 @@ function selectLocalVideo(filename) {
     currentConfig.devices.video_file = filename;
     currentConfig.devices.video_source = 'local';
     currentConfig.devices.camera = 'local';
-    // Highlight selected thumbnail
+
+    var sc = _videoScenarios[filename];
+    if (sc && sc.llm) {
+        var overrides = sc.llm;
+        for (var key in overrides) {
+            if (overrides.hasOwnProperty(key)) {
+                currentConfig.llm[key] = overrides[key];
+            }
+        }
+        console.log('[DemoScenario] Applied "' + (sc.label || filename) + '" config overrides:', Object.keys(overrides).join(', '));
+    }
+
     var picker = document.getElementById('local-video-picker');
     if (picker) {
         var thumbs = picker.querySelectorAll('.local-video-thumb');
         for (var i = 0; i < thumbs.length; i++) {
-            thumbs[i].classList.toggle('selected', thumbs[i].querySelector('.local-video-thumb-name').textContent === filename);
+            var nameEl = thumbs[i].querySelector('.local-video-thumb-name');
+            thumbs[i].classList.toggle('selected', !!(nameEl && nameEl.getAttribute('data-filename') === filename));
         }
     }
     if (state.isLiveSession && state.sessionState === 'setup') {
@@ -2317,6 +2342,18 @@ function selectTensorRTEdgePreset() {
     updateConfig('llm', 'api_base', url);
     updateConfig('llm', 'vision_video_encode', false);
     fetchLLMModels(url);
+}
+function selectLLMRouterPreset() {
+    var url = 'http://10.110.51.30:8801/v1';
+    currentConfig.llm.api_base = url;
+    currentConfig.llm.model = 'MoM';
+    var input = document.getElementById('llm-api-base');
+    if (input) input.value = url;
+    document.getElementById('presetsMenu').style.display = 'none';
+    updateConfig('llm', 'api_base', url);
+    updateConfig('llm', 'model', 'MoM');
+    var select = document.getElementById('llm-model-select');
+    if (select) select.innerHTML = '<option value="MoM" selected>MoM</option>';
 }
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;

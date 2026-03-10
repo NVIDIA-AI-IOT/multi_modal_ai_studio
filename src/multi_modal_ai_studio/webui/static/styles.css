@@ -3232,6 +3232,30 @@ code, pre {
     border-top: 1px solid var(--border-color);
 }
 
+.local-video-scenario-badge {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    background: rgba(118, 185, 0, 0.9);
+    color: #000;
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.4;
+    pointer-events: none;
+}
+
+.local-video-thumb.has-scenario {
+    position: relative;
+}
+
+.local-video-thumb.has-scenario.selected .local-video-scenario-badge {
+    background: var(--nvidia-green);
+}
+
 /* ===== Responsive Design ===== */
 /* Wide screens: larger session-list sidebar */
 @media (min-width: 1600px) {

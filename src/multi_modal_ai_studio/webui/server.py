@@ -679,17 +679,36 @@ class WebUIServer:
         return candidates[0]
 
     async def handle_list_videos(self, request: web.Request) -> web.Response:
-        """GET /api/videos/list — list MP4 files in the videos/ folder."""
+        """GET /api/videos/list — list MP4 files in the videos/ folder.
+
+        If videos/demo_scenarios.json exists, each video entry is enriched with
+        scenario metadata (label, description, llm config overrides) so the UI
+        can auto-apply per-video prompts without a server restart.
+        """
         videos_dir = self._get_videos_dir()
         if not videos_dir.is_dir():
-            return web.json_response({"videos": [], "videos_dir": str(videos_dir)})
+            return web.json_response({"videos": [], "scenarios": {}, "videos_dir": str(videos_dir)})
+
+        scenarios: dict = {}
+        scenarios_file = videos_dir / "demo_scenarios.json"
+        if scenarios_file.is_file():
+            try:
+                import json as _json
+                scenarios = _json.loads(scenarios_file.read_text()).get("scenarios", {})
+            except Exception as exc:
+                logger.warning("Failed to load demo_scenarios.json: %s", exc)
+
         result = []
         for f in sorted(videos_dir.iterdir()):
             if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".avi") and f.is_file():
-                result.append({
+                entry: dict = {
                     "name": f.name,
                     "size_kb": round(f.stat().st_size / 1024, 1),
-                })
+                }
+                sc = scenarios.get(f.name)
+                if sc:
+                    entry["scenario"] = sc
+                result.append(entry)
         return web.json_response({"videos": result, "videos_dir": str(videos_dir)})
 
     async def handle_serve_video(self, request: web.Request) -> web.Response:

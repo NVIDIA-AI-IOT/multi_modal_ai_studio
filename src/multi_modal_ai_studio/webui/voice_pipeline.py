@@ -759,7 +759,27 @@ async def _run_voice_pipeline(
     vision_quality = getattr(llm_config, "vision_quality", 0.7)
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
-    
+
+    # Edge LLM crashes with large image payloads (500 Streaming inference failed).
+    # Auto-cap width/quality so any preset works with any backend.
+    _EDGE_LLM_MAX_WIDTH = 640
+    _EDGE_LLM_MAX_QUALITY = 0.7
+    _api_base = getattr(llm_config, "api_base", "") or ""
+    _api_lower = _api_base.lower()
+    if "58010" in _api_base or "tensorrt" in _api_lower or "edge-llm" in _api_lower:
+        if vision_max_width > _EDGE_LLM_MAX_WIDTH:
+            logger.warning(
+                "[VLM] Edge LLM detected — capping vision_max_width %d → %d to avoid payload crash",
+                vision_max_width, _EDGE_LLM_MAX_WIDTH,
+            )
+            vision_max_width = _EDGE_LLM_MAX_WIDTH
+        if vision_quality > _EDGE_LLM_MAX_QUALITY:
+            logger.warning(
+                "[VLM] Edge LLM detected — capping vision_quality %.2f → %.2f",
+                vision_quality, _EDGE_LLM_MAX_QUALITY,
+            )
+            vision_quality = _EDGE_LLM_MAX_QUALITY
+
     _use_video_encode = bool(getattr(llm_config, "vision_video_encode", False))
     if _use_video_encode and vision_buffer_fps < 3.0:
         logger.warning(
@@ -767,14 +787,14 @@ async def _run_voice_pipeline(
             vision_buffer_fps,
         )
     
-    # Determine if using server-side camera (USB or local video). Use session.config at call time
+    # Determine if using server-side camera (USB). Use session.config at call time
     # so that start_session-merged config (e.g. browser camera when using server mic) is respected.
+    # Local video uses the browser path: the <video> element plays the MP4,
+    # and vlmCaptureFrame captures from it — so the VLM sees exactly what the user sees.
     def _use_server_camera() -> bool:
         dc = session.config.devices
         vs = getattr(dc, "video_source", "browser")
         if vs == "usb" and bool(getattr(dc, "video_device", None)):
-            return True
-        if vs == "local":
             return True
         return False
 
@@ -861,13 +881,19 @@ async def _run_voice_pipeline(
         # Server camera: read from FrameBroker
         if _use_server_camera() and _frame_broker is not None:
             try:
+                # t_start/t_end are session-relative (seconds since session start),
+                # but FrameBroker stores frames with time.time() epoch timestamps.
+                # Convert to absolute time for correct range lookup.
+                epoch_offset = session.timeline.start_time or 0
+                abs_start = t_start + epoch_offset
+                abs_end = t_end + epoch_offset
                 loop = asyncio.get_event_loop()
                 frames = await loop.run_in_executor(
                     None, 
-                    lambda: _frame_broker.get_frames(t_start, t_end, n_frames, vision_max_width)
+                    lambda: _frame_broker.get_frames(abs_start, abs_end, n_frames, vision_max_width)
                 )
-                logger.info("[VLM] Retrieved %d frames from FrameBroker (t=%.2f to %.2f)", 
-                           len(frames), t_start, t_end)
+                logger.info("[VLM] Retrieved %d frames from FrameBroker (t=%.2f to %.2f, abs=%.2f to %.2f)", 
+                           len(frames), t_start, t_end, abs_start, abs_end)
                 return frames
             except Exception as e:
                 logger.warning("[VLM] FrameBroker get_frames failed: %s", e)
@@ -1288,7 +1314,7 @@ async def _run_voice_pipeline(
                     # from before the user started speaking.  This ensures the
                     # model sees the full action context (e.g. user picks up an
                     # object then asks "what did I just do?").
-                    ASR_LATENCY_LOOKBACK = 1.0  # seconds
+                    ASR_LATENCY_LOOKBACK = 2.0  # seconds
                     t_start = max(0, t_start - ASR_LATENCY_LOOKBACK)
                     speech_duration_secs = t_end - t_start
                     
@@ -1343,6 +1369,7 @@ async def _run_voice_pipeline(
                             "source": source,
                             "cosmos_video": is_cosmos,
                         })
+
                     else:
                         logger.warning("[VLM] Vision enabled but frame capture failed")
                     
