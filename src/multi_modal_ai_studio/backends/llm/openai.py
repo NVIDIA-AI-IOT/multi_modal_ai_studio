@@ -196,7 +196,13 @@ _MIN_FRAMES_FOR_VIDEO = 2
 # When sending individual images (non-Cosmos VLMs), cap the count to
 # limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
 # is a good trade-off between visual context and prefill latency.
-_MAX_INDIVIDUAL_IMAGES = 6
+_MAX_VIDEO_FALLBACK_IMAGES = 10
+_MAX_TENSORRT_EDGE_IMAGES = 3
+# Qwen3-VL uses ~170 tokens per video frame.  With max_model_len=8192,
+# system prompt ≈ 300 tokens, user text ≈ 50, max_tokens ≈ 512,
+# budget ≈ 8192 - 300 - 50 - 512 = 7330 → ~43 frames.
+# Use 35 as a safe cap to leave headroom.
+_MAX_COSMOS_VIDEO_FRAMES = 35
 
 
 def _encode_images_to_video_base64(
@@ -417,38 +423,30 @@ class OpenAILLMBackend(LLMBackend):
         self,
         image_data_urls: List[str],
         prompt: str,
-        vision_fmt: str,
         speech_duration: Optional[float],
     ) -> list:
         """Build the multimodal ``content`` list for a user message.
 
-        Dispatches to the correct format based on *vision_fmt*:
-          • ``"openai"``       — vLLM / Ollama / SGLang / OpenAI (image_url, video_url)
-          • ``"tensorrt_edge"`` — TensorRT Edge LLM ({"type":"image","image":"<b64>"})
+        All backends (vLLM, Ollama, TensorRT Edge LLM, SGLang, OpenAI) use
+        the standard OpenAI ``image_url`` format.  Cosmos-Reason models
+        additionally support ``video_url`` when video encoding is enabled.
 
         Returns the ``content`` list ready to be placed inside a user message.
         """
-        if vision_fmt == "tensorrt_edge":
-            return self._vision_content_tensorrt_edge(image_data_urls, prompt, speech_duration)
-        return self._vision_content_openai(image_data_urls, prompt, speech_duration)
-
-    def _vision_content_openai(
-        self,
-        image_data_urls: List[str],
-        prompt: str,
-        speech_duration: Optional[float],
-    ) -> list:
-        """OpenAI-standard format (vLLM, Ollama, SGLang, OpenAI API)."""
         content: list = []
 
-        # Video encoding for temporal understanding (Cosmos-Reason or explicit flag).
         video_url = None
         if (
             _should_use_video(self.config)
             and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
         ):
+            imgs_for_video = image_data_urls
+            if len(imgs_for_video) > _MAX_COSMOS_VIDEO_FRAMES:
+                step = len(imgs_for_video) / _MAX_COSMOS_VIDEO_FRAMES
+                imgs_for_video = [imgs_for_video[int(i * step)] for i in range(_MAX_COSMOS_VIDEO_FRAMES)]
+                self.logger.info("VLM: sub-sampled %d → %d frames for video (token budget)", len(image_data_urls), len(imgs_for_video))
             video_url = _encode_images_to_video_base64(
-                image_data_urls,
+                imgs_for_video,
                 speech_duration_secs=speech_duration or 0.0,
             )
             if video_url:
@@ -461,14 +459,17 @@ class OpenAILLMBackend(LLMBackend):
                 self.logger.warning("Video encoding failed, falling back to multi-image")
                 video_url = None
 
-        # Multi-image fallback: non-Cosmos models or video encoding failure.
         if not video_url:
             detail = getattr(self.config, "vision_detail", "auto")
             imgs = image_data_urls
-            if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
-                step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images", len(image_data_urls), len(imgs))
+            if _is_tensorrt_edge_backend(self.config) and len(imgs) > _MAX_TENSORRT_EDGE_IMAGES:
+                step = len(imgs) / _MAX_TENSORRT_EDGE_IMAGES
+                imgs = [imgs[int(i * step)] for i in range(_MAX_TENSORRT_EDGE_IMAGES)]
+                self.logger.info("VLM: sub-sampled %d → %d images (Edge LLM limit)", len(image_data_urls), len(imgs))
+            elif _should_use_video(self.config) and len(imgs) > _MAX_VIDEO_FALLBACK_IMAGES:
+                step = len(imgs) / _MAX_VIDEO_FALLBACK_IMAGES
+                imgs = [imgs[int(i * step)] for i in range(_MAX_VIDEO_FALLBACK_IMAGES)]
+                self.logger.info("VLM: sub-sampled %d → %d images (Cosmos video fallback)", len(image_data_urls), len(imgs))
             for img_url in imgs:
                 content.append({
                     "type": "image_url",
@@ -476,31 +477,6 @@ class OpenAILLMBackend(LLMBackend):
                 })
             self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
 
-        content.append({"type": "text", "text": prompt})
-        return content
-
-    def _vision_content_tensorrt_edge(
-        self,
-        image_data_urls: List[str],
-        prompt: str,
-        speech_duration: Optional[float],
-    ) -> list:
-        """TensorRT Edge LLM format: ``{"type":"image","image":"<raw_base64>"}``."""
-        content: list = []
-        imgs = image_data_urls
-
-        if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
-            step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
-            imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
-            self.logger.info("VLM (TRT-Edge): sub-sampled %d → %d images", len(image_data_urls), len(imgs))
-
-        for img_url in imgs:
-            content.append({
-                "type": "image",
-                "image": _strip_data_url_prefix(img_url),
-            })
-
-        self.logger.info("VLM request (TRT-Edge): %d image(s) + text prompt", len(imgs))
         content.append({"type": "text", "text": prompt})
         return content
 
@@ -539,14 +515,10 @@ class OpenAILLMBackend(LLMBackend):
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
-        elif getattr(self.config, "enable_reasoning", False) and not _is_ollama_backend(self.config):
-            # Cosmos with vLLM (--reasoning-parser): instruct model to use <think> format
-            reasoning_fmt = (
-                "\n\nAnswer the question using the following format:\n\n<think>\n"
-                "Your reasoning.\n</think>\n\n"
-                "Write your final answer immediately after the </think> tag."
-            )
-            sys_prompt = (sys_prompt or "") + reasoning_fmt
+        elif getattr(self.config, "enable_reasoning", False):
+            reasoning_fmt = getattr(self.config, "reasoning_prompt", "") or ""
+            if reasoning_fmt:
+                sys_prompt = (sys_prompt or "") + reasoning_fmt
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
@@ -554,12 +526,9 @@ class OpenAILLMBackend(LLMBackend):
         if history:
             messages.extend(history)
 
-        # Add current prompt - with images/video if provided (VLM multi-modal format)
-        # Format is derived from api_base: TensorRT Edge (e.g. :58010) uses image payload; else OpenAI-style.
-        vision_fmt = "tensorrt_edge" if _is_tensorrt_edge_backend(self.config) else "openai"
         if image_data_urls and len(image_data_urls) > 0:
             user_content = self._build_vision_content(
-                image_data_urls, prompt, vision_fmt, speech_duration,
+                image_data_urls, prompt, speech_duration,
             )
             messages.append({"role": "user", "content": user_content})
         else:
@@ -603,10 +572,16 @@ class OpenAILLMBackend(LLMBackend):
         token_count = 0
         reasoning_started = False
         in_think_block = False  # fallback tracker if server lacks reasoning parser
+        _post_think_buf = ""  # buffer after </think> to detect <answer> tags
+        _post_think_buffering = False
+        _POST_THINK_BUF_MAX = 500  # flush if no <answer> found within this many chars
 
         try:
+            body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Length"] = str(len(body_bytes))
+            self.logger.debug("LLM request body: %d bytes", len(body_bytes))
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
+                async with session.post(url, headers=headers, data=body_bytes) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
                         self.logger.error(f"LLM API error: {resp.status} - {error_text}")
@@ -618,6 +593,13 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Skip empty lines and non-data lines
                         if not line or not line.startswith("data: "):
+                            if line and ("error" in line.lower() or "500" in line):
+                                self.logger.warning("SSE non-data line (possible error): %.300s", line)
+                                if "500" in line or "Internal Server Error" in line:
+                                    err_msg = "[LLM backend error — the model crashed. This often means the image payload is too large for Edge LLM.]"
+                                    self.logger.error("Edge LLM 500: yielding error to user")
+                                    yield LLMToken(token=err_msg, is_final=False)
+                                    full_response += err_msg
                             continue
 
                         # Remove "data: " prefix
@@ -625,6 +607,20 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Check for end of stream
                         if line == "[DONE]":
+                            # Flush post-think buffer if stream ends while buffering
+                            if _post_think_buffering and _post_think_buf:
+                                leftover = _post_think_buf
+                                if "<answer>" in leftover:
+                                    leftover = leftover.split("<answer>", 1)[1]
+                                leftover = leftover.replace("</answer>", "")
+                                leftover = strip_markdown(leftover, preserve_spaces=True).strip()
+                                if leftover:
+                                    full_response += leftover
+                                    token_count += 1
+                                    yield LLMToken(token=leftover, is_final=False)
+                                _post_think_buffering = False
+                                _post_think_buf = ""
+
                             final_meta: Dict[str, Any] = {
                                 "token_count": token_count,
                                 "full_response": full_response,
@@ -642,7 +638,7 @@ class OpenAILLMBackend(LLMBackend):
                             chunk = json.loads(line)
 
                             if "choices" in chunk and len(chunk["choices"]) > 0:
-                                delta = chunk["choices"][0].get("delta", {})
+                                delta = chunk["choices"][0].get("delta") or {}
 
                                 # vLLM reasoning parser puts thinking into
                                 # reasoning_content and answer into content.
@@ -673,9 +669,36 @@ class OpenAILLMBackend(LLMBackend):
                                         reasoning_response += content.split("</think>", 1)[0]
                                         in_think_block = False
                                         content = after
+                                        _post_think_buffering = True
+                                        _post_think_buf = ""
                                     else:
                                         reasoning_response += content
                                         continue
+
+                                if not content and not _post_think_buffering:
+                                    continue
+
+                                # After </think>, buffer briefly to detect <answer> tags
+                                # which indicate leaked reasoning before the real answer.
+                                if _post_think_buffering:
+                                    _post_think_buf += content
+                                    if "<answer>" in _post_think_buf:
+                                        content = _post_think_buf.split("<answer>", 1)[1]
+                                        content = content.replace("</answer>", "")
+                                        _post_think_buffering = False
+                                        _post_think_buf = ""
+                                    elif len(_post_think_buf) >= _POST_THINK_BUF_MAX:
+                                        content = _post_think_buf
+                                        content = content.replace("<answer>", "").replace("</answer>", "")
+                                        _post_think_buffering = False
+                                        _post_think_buf = ""
+                                    else:
+                                        continue
+
+                                # Strip any remaining <answer>/<​/answer> tags
+                                if "<answer>" in content:
+                                    content = content.split("<answer>", 1)[1]
+                                content = content.replace("</answer>", "")
 
                                 if not content:
                                     continue

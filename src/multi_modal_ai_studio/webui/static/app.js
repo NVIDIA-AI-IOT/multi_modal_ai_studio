@@ -586,7 +586,8 @@ const defaultConfig = {
         vision_max_width: 640,
         vision_buffer_fps: 3.0,
         vision_video_encode: false,
-        enable_reasoning: false
+        enable_reasoning: false,
+        reasoning_prompt: '\n\nThink step-by-step inside <think>...</think> tags, then write your final answer immediately after </think>. The final answer MUST be exactly one descriptive sentence — no lists, no paragraphs, no tags.'
     },
     tts: {
         backend: 'riva',
@@ -711,6 +712,14 @@ async function fetchAndApplyInitialConfig() {
         console.log('[Preset] Server preset loaded:', _serverPresetConfig.name || '(unnamed)');
 
         currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
+        // Fill in defaults for any fields missing from the preset
+        for (var _dk of Object.keys(defaultConfig)) {
+            if (defaultConfig[_dk] && typeof defaultConfig[_dk] === 'object' && currentConfig[_dk]) {
+                for (var _fk of Object.keys(defaultConfig[_dk])) {
+                    if (currentConfig[_dk][_fk] === undefined) currentConfig[_dk][_fk] = defaultConfig[_dk][_fk];
+                }
+            }
+        }
 
         if (state.isLiveSession) {
             renderConfig();
@@ -1202,6 +1211,7 @@ function renderLLMConfig(config, readonly = false) {
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
                             <div class="api-preset-item" onclick="selectTensorRTEdgePreset()"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMRouterPreset()"><strong>LLM Router</strong><span>http://10.110.51.30:8801/v1</span></div>
                             <div style="border-top: 1px solid var(--border-color);"></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://api.openai.com/v1', 'OpenAI')"><strong>OpenAI</strong><span>https://api.openai.com/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://integrate.api.nvidia.com/v1', 'NVIDIA')"><strong>NVIDIA API Catalog</strong><span>https://integrate.api.nvidia.com/v1</span></div>
@@ -1291,10 +1301,16 @@ function renderLLMConfig(config, readonly = false) {
 
                 <label class="checkbox-label" style="margin-top: 12px;">
                     <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
-                           onchange="updateConfig('llm', 'enable_reasoning', this.checked)">
+                           onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
                     Enable Reasoning (chain-of-thought)
                 </label>
-                ${!readonly ? '<span class="input-hint">Model thinks in &lt;think&gt; tags before answering. Improves accuracy but increases latency.</span>' : ''}
+                ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to the system prompt. Reasoning text is stripped before TTS.</span>' : ''}
+                <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
+                    <label>Reasoning Prompt</label>
+                    <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;"
+                              onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt || defaultConfig.llm.reasoning_prompt || '')}</textarea>
+                    ${!readonly ? '<span class="input-hint">Appended to system prompt when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
+                </div>
             </div>
 
             <div class="form-group">
@@ -1718,6 +1734,8 @@ function onDeviceListChange(type, value) {
     }
 }
 
+var _videoScenarios = {};
+
 function loadLocalVideoPicker() {
     var picker = document.getElementById('local-video-picker');
     if (!picker) return;
@@ -1730,17 +1748,27 @@ function loadLocalVideoPicker() {
                 picker.innerHTML = '<div class="local-video-picker-empty">No video files found. Place .mp4 files in the <code>videos/</code> folder.</div>';
                 return;
             }
+            _videoScenarios = {};
+            for (var i = 0; i < videos.length; i++) {
+                if (videos[i].scenario) _videoScenarios[videos[i].name] = videos[i].scenario;
+            }
             var selectedFile = (currentConfig.devices && currentConfig.devices.video_file) || '';
             var html = '';
             for (var i = 0; i < videos.length; i++) {
                 var v = videos[i];
+                var sc = v.scenario;
                 var isSelected = v.name === selectedFile;
-                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + '" '
+                var label = sc ? sc.label : v.name;
+                var tooltip = sc ? (sc.label + ': ' + sc.description) : (v.name + ' (' + v.size_kb + ' KB)');
+                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + (sc ? ' has-scenario' : '') + '" '
                     + 'onclick="selectLocalVideo(\'' + v.name.replace(/'/g, "\\'") + '\')" '
-                    + 'title="' + v.name + ' (' + v.size_kb + ' KB)">'
+                    + 'title="' + escapeHtml(tooltip) + '">'
                     + '<video src="' + getApiBase() + '/api/videos/file?name=' + encodeURIComponent(v.name) + '" '
-                    + 'muted autoplay loop playsinline preload="metadata"></video>'
-                    + '<div class="local-video-thumb-name">' + v.name + '</div>'
+                    + 'muted autoplay loop playsinline preload="metadata"></video>';
+                if (sc) {
+                    html += '<div class="local-video-scenario-badge">' + escapeHtml(sc.label) + '</div>';
+                }
+                html += '<div class="local-video-thumb-name" data-filename="' + escapeHtml(v.name) + '">' + escapeHtml(label) + '</div>'
                     + '</div>';
             }
             picker.innerHTML = html;
@@ -1754,12 +1782,24 @@ function selectLocalVideo(filename) {
     currentConfig.devices.video_file = filename;
     currentConfig.devices.video_source = 'local';
     currentConfig.devices.camera = 'local';
-    // Highlight selected thumbnail
+
+    var sc = _videoScenarios[filename];
+    if (sc && sc.llm) {
+        var overrides = sc.llm;
+        for (var key in overrides) {
+            if (overrides.hasOwnProperty(key)) {
+                currentConfig.llm[key] = overrides[key];
+            }
+        }
+        console.log('[DemoScenario] Applied "' + (sc.label || filename) + '" config overrides:', Object.keys(overrides).join(', '));
+    }
+
     var picker = document.getElementById('local-video-picker');
     if (picker) {
         var thumbs = picker.querySelectorAll('.local-video-thumb');
         for (var i = 0; i < thumbs.length; i++) {
-            thumbs[i].classList.toggle('selected', thumbs[i].querySelector('.local-video-thumb-name').textContent === filename);
+            var nameEl = thumbs[i].querySelector('.local-video-thumb-name');
+            thumbs[i].classList.toggle('selected', !!(nameEl && nameEl.getAttribute('data-filename') === filename));
         }
     }
     if (state.isLiveSession && state.sessionState === 'setup') {
@@ -2303,6 +2343,18 @@ function selectTensorRTEdgePreset() {
     updateConfig('llm', 'vision_video_encode', false);
     fetchLLMModels(url);
 }
+function selectLLMRouterPreset() {
+    var url = 'http://10.110.51.30:8801/v1';
+    currentConfig.llm.api_base = url;
+    currentConfig.llm.model = 'MoM';
+    var input = document.getElementById('llm-api-base');
+    if (input) input.value = url;
+    document.getElementById('presetsMenu').style.display = 'none';
+    updateConfig('llm', 'api_base', url);
+    updateConfig('llm', 'model', 'MoM');
+    var select = document.getElementById('llm-model-select');
+    if (select) select.innerHTML = '<option value="MoM" selected>MoM</option>';
+}
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;
     const select = document.getElementById('llm-model-select');
@@ -2609,28 +2661,44 @@ function renderChatHistory() {
     const chat = getMergedChatMessages(session);
     const turns = session.turns || [];
 
+    // Extract reasoning from timeline llm_complete events (indexed by order)
+    const timeline = session.timeline || [];
+    const reasoningList = timeline
+        .filter(e => e.event_type === 'llm_complete' && e.data && e.data.reasoning)
+        .map(e => e.data.reasoning);
+
     if (chat.length > 0) {
         // Render: one bubble per message (user / assistant by role)
+        var _reasonIdx = 0;
         chatEl.innerHTML = chat.map(msg => {
             const role = (msg.role || 'user').toLowerCase();
             const isUser = role === 'user';
             const ts = msg.timestamp != null && uiSettings.showTimestamps
                 ? `<span class="chat-meta">${formatTimestamp(msg.timestamp)}</span>`
                 : '';
+            var reasoningHtml = '';
+            if (!isUser) {
+                var r = msg.reasoning || reasoningList[_reasonIdx] || '';
+                _reasonIdx++;
+                if (r) reasoningHtml = `<details class="reasoning-block"><summary>Reasoning</summary><pre class="reasoning-text">${escapeHtml(r)}</pre></details>`;
+            }
             return `
                 <div class="chat-bubble ${isUser ? 'user' : 'ai'}">
                     <div class="chat-avatar">${isUser ? '<i data-lucide="user" class="lucide-inline"></i>' : '<i data-lucide="bot" class="lucide-inline"></i>'}</div>
-                    <div class="chat-content"><div class="chat-text">${escapeHtml(msg.content || '...')}</div>${ts}</div>
+                    <div class="chat-content">${reasoningHtml}<div class="chat-text">${escapeHtml(msg.content || '...')}</div>${ts}</div>
                 </div>
             `;
         }).join('');
     } else if (turns.length > 0) {
         // Legacy: session.turns with user_transcript + ai_response per turn
-        chatEl.innerHTML = turns.map(turn => {
+        chatEl.innerHTML = turns.map((turn, idx) => {
             const userConfidence = turn.user_confidence ?
                 `<span class="chat-meta">Confidence: ${(turn.user_confidence * 100).toFixed(0)}%</span>` : '';
             const turnMetrics = turn.latencies ?
                 `<span class="chat-meta">TTL: ${formatLatency(turn.latencies.ttl)}</span>` : '';
+            var reasoningHtml = '';
+            var r = reasoningList[idx] || '';
+            if (r) reasoningHtml = `<details class="reasoning-block"><summary>Reasoning</summary><pre class="reasoning-text">${escapeHtml(r)}</pre></details>`;
 
             return `
                 <div class="chat-bubble user">
@@ -2639,7 +2707,7 @@ function renderChatHistory() {
                 </div>
                 <div class="chat-bubble ai">
                     <div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div>
-                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${turnMetrics}</div>
+                    <div class="chat-content">${reasoningHtml}<div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${turnMetrics}</div>
                 </div>
             `;
         }).join('');
@@ -4944,11 +5012,7 @@ function updateLiveSessionUI() {
             if (stopBtn) stopBtn.style.display = 'flex';
             if (micMuteBtn) {
                 micMuteBtn.style.display = 'flex';
-                micMuteBtn.classList.toggle('muted', state.micMuted);
-                micMuteBtn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
-                var icon = micMuteBtn.querySelector('.btn-icon i');
-                if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
-                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(micMuteBtn);
+                updateMicMuteButton();
             }
             renderTimeline();
             updateVoiceDebugPanel();
@@ -5091,6 +5155,14 @@ function startNewSession() {
     applyEnvPrefillsToCurrentConfig();
     if (_serverPresetConfig) {
         currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
+    }
+    // Ensure new config fields have defaults even if saved/preset config predates them
+    for (var _dk of Object.keys(defaultConfig)) {
+        if (defaultConfig[_dk] && typeof defaultConfig[_dk] === 'object' && currentConfig[_dk]) {
+            for (var _fk of Object.keys(defaultConfig[_dk])) {
+                if (currentConfig[_dk][_fk] === undefined) currentConfig[_dk][_fk] = defaultConfig[_dk][_fk];
+            }
+        }
     }
 
     // Clear chat history
@@ -5432,8 +5504,8 @@ function vlmStopCapture() {
  */
 function vlmCaptureFrame() {
     const videoFeed = document.getElementById('video-feed');
-    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
-        return; // No video available
+    if (!videoFeed || videoFeed.videoWidth === 0 || (videoFeed.paused && !videoFeed.loop)) {
+        return;
     }
     
     try {
@@ -5557,7 +5629,7 @@ function captureAndSendVideoFrame() {
     
     // Fallback: capture fresh frame
     const videoFeed = document.getElementById('video-feed');
-    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
+    if (!videoFeed || videoFeed.videoWidth === 0 || (videoFeed.paused && !videoFeed.loop)) {
         if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
             state.voiceWs.send(JSON.stringify({
                 type: 'vlm_frames',
@@ -6118,18 +6190,24 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
     }
 }
 
+function updateMicMuteButton() {
+    var btn = document.getElementById('mic-mute-btn');
+    if (!btn) return;
+    btn.classList.toggle('muted', state.micMuted);
+    btn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
+    var iconName = state.micMuted ? 'mic-off' : 'mic';
+    var iconSpan = btn.querySelector('.btn-icon');
+    if (iconSpan) {
+        iconSpan.innerHTML = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
+    }
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+}
+
 function toggleMicMute() {
     if (state.sessionState !== 'live' || !state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN) return;
     state.micMuted = !state.micMuted;
     state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
-    var btn = document.getElementById('mic-mute-btn');
-    if (btn) {
-        btn.classList.toggle('muted', state.micMuted);
-        btn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
-        var icon = btn.querySelector('.btn-icon i');
-        if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
-        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
-    }
+    updateMicMuteButton();
 }
 
 function stopSessionRecording() {

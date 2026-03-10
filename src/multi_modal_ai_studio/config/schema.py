@@ -114,6 +114,11 @@ class LLMConfig:
             "tensorrt_edge" — TensorRT Edge LLM format ({"type": "image", "image": "<base64>"})
         vision_video_encode: If True, encode frames as MP4 video for temporal understanding
             (e.g. Cosmos-Reason models). Must be set explicitly in preset/config.
+        enable_reasoning: If True, append reasoning_prompt to the system prompt so the model
+            uses chain-of-thought (e.g. <think>...</think>). The reasoning text is stripped
+            before TTS playback.
+        reasoning_prompt: The prompt text appended to the system prompt when enable_reasoning
+            is True. Users can customise this to match their model's reasoning format.
         history_turns: Number of previous turns to include as context (0=no history)
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
@@ -144,6 +149,11 @@ class LLMConfig:
     vision_api_format: Literal["openai", "tensorrt_edge"] = "openai"
     vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
     enable_reasoning: bool = False  # True to allow <think> chain-of-thought; filtered from TTS
+    reasoning_prompt: str = (
+        "Answer the question using the following format:\n\n"
+        "<think>\nYour reasoning.\n</think>\n\n"
+        "Write your final answer immediately after the </think> tag."
+    )
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.

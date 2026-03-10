@@ -135,16 +135,24 @@ class FrameBroker:
                 return []
             
             # Find frames in time range
+            buf_oldest = self._buffer[0].timestamp if self._buffer else 0
+            buf_newest = self._buffer[-1].timestamp if self._buffer else 0
             frames_in_range = [
                 f for f in self._buffer
                 if t_start <= f.timestamp <= t_end
             ]
             
             if not frames_in_range:
-                # Fall back to most recent frames
-                logger.info("[FrameBroker] No frames in range [%.2f, %.2f], using recent frames",
-                           t_start, t_end)
+                logger.info(
+                    "[FrameBroker] No frames in range [%.2f, %.2f], buffer=[%.2f, %.2f] (%d frames). Using recent.",
+                    t_start, t_end, buf_oldest, buf_newest, len(self._buffer),
+                )
                 frames_in_range = list(self._buffer)[-n_frames:]
+            else:
+                logger.info(
+                    "[FrameBroker] Found %d frames in range [%.2f, %.2f] (buffer %d total)",
+                    len(frames_in_range), t_start, t_end, len(self._buffer),
+                )
             
             # Evenly sample n_frames
             if len(frames_in_range) <= n_frames:
@@ -156,14 +164,27 @@ class FrameBroker:
             
             self._frames_retrieved += len(selected)
         
-        # Convert to base64 data URLs
+        # Convert to base64 data URLs, resizing if needed
         result = []
         for frame in selected:
             try:
-                b64 = base64.b64encode(frame.jpeg_bytes).decode('ascii')
+                jpeg = frame.jpeg_bytes
+                if max_width and max_width > 0:
+                    import cv2
+                    import numpy as np
+                    arr = cv2.imdecode(
+                        np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR
+                    )
+                    if arr is not None and arr.shape[1] > max_width:
+                        scale = max_width / arr.shape[1]
+                        new_h = int(arr.shape[0] * scale)
+                        arr = cv2.resize(arr, (max_width, new_h), interpolation=cv2.INTER_AREA)
+                        _, jpeg = cv2.imencode('.jpg', arr, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        jpeg = jpeg.tobytes()
+                b64 = base64.b64encode(jpeg).decode('ascii')
                 result.append(f"data:image/jpeg;base64,{b64}")
             except Exception as e:
-                logger.warning("[FrameBroker] Base64 encode error: %s", e)
+                logger.warning("[FrameBroker] Frame encode error: %s", e)
         
         logger.info("[FrameBroker] Retrieved %d frames (requested %d, range %.2f-%.2f)",
                    len(result), n_frames, t_start, t_end)

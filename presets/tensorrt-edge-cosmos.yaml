@@ -13,19 +13,18 @@ asr:
 llm:
   scheme: openai
   api_base: http://localhost:58010/v1
-  model: cosmos-reason2
+  model: qwen3-vl
   temperature: 0.3
-  max_tokens: 256
-  system_prompt: "You are a vision assistant observing the user through a live camera. Describe what you see accurately and concisely. Focus on actions, gestures, objects, and changes. One short sentence only."
+  max_tokens: 512
+  system_prompt: "You are a vision assistant observing the user through a live camera. Answer directly in one short sentence. Do not think step-by-step or explain your reasoning."
   enable_vision: true
-  vision_system_prompt: "You are a vision assistant observing the user through a live camera. Describe what you see accurately and concisely. Focus on actions, gestures, objects, and changes. One short sentence only."
-  vision_frames: 4
+  vision_system_prompt: "You are a vision assistant observing the user through a live camera. Answer directly in one short sentence. Do not think step-by-step or explain your reasoning."
+  vision_frames: 3
   vision_detail: auto
   vision_quality: 0.7
   vision_max_width: 640
   vision_buffer_fps: 3.0
-  vision_api_format: tensorrt_edge
-  vision_video_encode: false      # TRT Edge LLM: images only for now (video support coming)
+  vision_video_encode: false
 
 tts:
   scheme: riva
