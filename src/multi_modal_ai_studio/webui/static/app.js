@@ -1243,13 +1243,13 @@ function renderLLMConfig(config, readonly = false) {
 
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                    <label style="margin: 0;">Cheap Model</label>
+                    <label style="margin: 0;">Utility Model</label>
                     ${!disableApiAndModel ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
                 </div>
                 <select ${disableApiAndModel ? 'disabled' : ''} id="llm-cheap-model-select" onchange="updateConfig('llm', 'cheap_model', this.value)">
                     <option value="${escapeHtml(config.cheap_model || config.model)}">${readonly ? escapeHtml(config.cheap_model || config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
                 </select>
-                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Fetched from API Base URL; use reload icon if you added a model'}</div>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Used for non-conversational app tasks such as session title generation. Not used for the live session conversation.'}</div>
             </div>
 
             <div class="form-group">
