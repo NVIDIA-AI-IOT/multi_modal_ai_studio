@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,23 @@ from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _get_network_ips() -> List[str]:
+    """Return up to 2 non-loopback, non-Docker IPs; prefer 192.168.55.* (USB device)."""
+    ips: List[str] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            addr = (info[4][0] if isinstance(info[4], (list, tuple)) else str(info[4]))
+            if addr.startswith("127.") or (addr.startswith("172.") and 16 <= int(addr.split(".")[1] or 0) <= 31):
+                continue
+            if addr.startswith("192.168.55."):
+                ips.insert(0, addr)
+            else:
+                ips.append(addr)
+    except Exception:
+        pass
+    return ips[:2]
 
 class _QuietAccessLogger(AbstractAccessLogger):
     """Access logger for HTTP requests (can skip high-frequency paths if needed)."""
@@ -860,9 +878,18 @@ class WebUIServer:
         await site.start()
 
         protocol = "https" if self.ssl_context else "http"
+        port = self.port
         logger.info("🚀 Multi-modal AI Studio WebUI")
-        logger.info(f"📡 Server running at {protocol}://{self.host}:{self.port}")
-        logger.info(f"📂 Session directory: {self.session_dir.absolute()}")
+        logger.info("────────────────────────────────────────")
+        logger.info("Access the server at:")
+        logger.info("  🏠 %s://localhost:%s", protocol, port)
+        for ip in _get_network_ips():
+            if ip.startswith("192.168.55."):
+                logger.info("  🚂 %s://%s:%s", protocol, ip, port)
+            else:
+                logger.info("  🌐 %s://%s:%s", protocol, ip, port)
+        logger.info("────────────────────────────────────────")
+        logger.info("📂 Session directory: %s", self.session_dir.absolute())
         if self.ssl_context:
             logger.info("⚠️  Your browser will show a security warning (self-signed certificate)")
             logger.info("    Click 'Advanced' → 'Proceed to localhost' (or 'Accept Risk')")

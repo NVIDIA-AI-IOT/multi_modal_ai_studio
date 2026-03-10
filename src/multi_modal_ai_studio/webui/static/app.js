@@ -424,10 +424,11 @@ function updateConfigPanelState() {
 function setConfigInputsDisabled(disabled) {
     const content = document.getElementById('config-content');
     if (!content) return;
-    content.querySelectorAll('input, select, textarea, button.config-tab').forEach(function (el) {
+    content.querySelectorAll('input, select, textarea').forEach(function (el) {
         if (el.id === 'auto-hide-config-btn') return;
         el.disabled = disabled;
     });
+    /* Do not disable button.config-tab so tabs remain clickable in replay */
 }
 
 var CONFIG_AUTO_HIDE_KEY = 'mmai_config_auto_hide_on_start';
@@ -1574,15 +1575,15 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             <p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded devices for this session (read-only)</p>
             <div class="form-group">
                 <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${camName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${camName}" aria-readonly="true" />
             </div>
             <div class="form-group">
                 <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${micName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${micName}" aria-readonly="true" />
             </div>
             <div class="form-group">
                 <label><i data-lucide="volume-2" class="lucide-inline"></i> Speaker device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${spkName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${spkName}" aria-readonly="true" />
             </div>
         </div>
     `;
@@ -1603,7 +1604,7 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
                     <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
-                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>Local Video File</option>
+                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>📂 Local Video File</option>
                 </select>
                 <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser), USB cameras on the server, or local video files.</div>
                 <div id="local-video-picker" class="local-video-picker" style="display:${camValue === 'local' ? 'flex' : 'none'};">
@@ -1973,7 +1974,7 @@ function populateCameraDeviceDropdown() {
         select.innerHTML = '';
         select.appendChild(newOption('none', '\uD83D\uDEABNone (No vision-modality)'));
         select.appendChild(newOption('', 'Default (Browser)'));
-        select.appendChild(newOption('local', 'Local Video File'));
+        select.appendChild(newOption('local', '📂 Local Video File'));
         browserCams.forEach(function (d) {
             var label = (d.label || 'Camera ' + (select.options.length)) + ' (Browser)';
             select.appendChild(newOption(d.deviceId || '', label));

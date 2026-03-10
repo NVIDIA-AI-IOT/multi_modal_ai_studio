@@ -1056,6 +1056,14 @@ code, pre {
     cursor: not-allowed;
     opacity: 0.8;
 }
+[data-theme="light"] .config-form.readonly input,
+[data-theme="light"] .config-form.readonly select,
+[data-theme="light"] .config-form.readonly textarea,
+[data-theme="light"] .readonly-config-input {
+    background: var(--light-bg-tertiary);
+    border: 1px solid var(--light-border-color);
+    color: var(--light-text-primary);
+}
 
 .config-form.readonly input[type="checkbox"],
 .config-form.readonly input[type="range"] {
@@ -1532,6 +1540,10 @@ code, pre {
     min-height: 0;
     max-height: none;
 }
+.chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container.session-image-container--video-aspect {
+    flex: 0 0 auto;
+    min-height: 0;
+}
 .chat-panel.chat-panel--config-collapsed .chat-panel-right-col {
     grid-row: 3;
     grid-column: 2;
@@ -1579,6 +1591,7 @@ code, pre {
 /* Pipeline config: transparent grid, device slots + connected pipeline bar */
 .pipeline-config-container {
     flex-shrink: 0;
+    min-width: 0;
     padding: var(--space-xs) 0;
     margin-bottom: var(--space-sm);
     background: transparent;
@@ -1614,6 +1627,7 @@ code, pre {
     column-gap: var(--space-sm);
     align-items: center;
     overflow: visible;
+    min-width: 0;
 }
 .pipeline-grid--no-camera {
     grid-template-columns: 1fr 1fr;
@@ -1691,6 +1705,7 @@ code, pre {
     margin: 0 28px;
     display: flex;
     overflow: visible;
+    min-width: 0;
 }
 /* Overlay: corner icons in square containers, vertically centered across 1.5–2.5 row */
 .pipeline-corner {
@@ -1721,6 +1736,7 @@ code, pre {
     align-items: center;
     flex-wrap: nowrap;
     flex: 1;
+    min-width: 0;
     min-height: 28px;
     gap: 0;
     overflow: visible;
