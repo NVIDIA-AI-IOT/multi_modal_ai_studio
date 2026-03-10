@@ -94,6 +94,8 @@ class LLMConfig:
         api_base: API base URL
         api_key: API key for authentication
         model: Model identifier
+        cheap_model: Optional model identifier for non-conversational helper tasks
+            such as session title generation
         temperature: Sampling temperature (0.0-2.0)
         max_tokens: Maximum tokens to generate
         minimal_output: If True, request minimal output only (e.g. single number); no reasoning (for Nemotron-style models)
@@ -125,6 +127,7 @@ class LLMConfig:
     api_base: str = "http://localhost:11434/v1"
     api_key: Optional[str] = None
     model: str = "llama3.2:3b"
+    cheap_model: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 512
     minimal_output: bool = False
@@ -568,6 +571,8 @@ class SessionConfig:
             if self.llm.api_key:
                 args.append(f"--llm-api-key {self.llm.api_key}")
             args.append(f"--llm-model {self.llm.model}")
+            if self.llm.cheap_model:
+                args.append(f"--llm-cheap-model {self.llm.cheap_model}")
             args.append(f"--llm-temperature {self.llm.temperature}")
             args.append(f"--llm-max-tokens {self.llm.max_tokens}")
             if self.llm.minimal_output:

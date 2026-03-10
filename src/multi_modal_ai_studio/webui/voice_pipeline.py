@@ -18,6 +18,7 @@ import queue
 import struct
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1919,18 +1920,21 @@ async def _run_voice_pipeline(
                 "Reply with only the title, no quotes or extra punctuation."
             )
             title_text = ""
-            saved_reasoning = getattr(llm.config, "enable_reasoning", False)
-            llm.config.enable_reasoning = False
-            try:
-                async for token in llm.generate_stream(
-                    prompt=prompt,
-                    history=None,
-                    system_prompt=title_sys,
-                ):
-                    if token.token:
-                        title_text += token.token
-            finally:
-                llm.config.enable_reasoning = saved_reasoning
+            title_model = (getattr(llm.config, "cheap_model", None) or llm.config.model or "").strip()
+            title_llm = OpenAILLMBackend(
+                config=replace(
+                    llm.config,
+                    model=title_model,
+                    enable_reasoning=False,
+                )
+            )
+            async for token in title_llm.generate_stream(
+                prompt=prompt,
+                history=None,
+                system_prompt=title_sys,
+            ):
+                if token.token:
+                    title_text += token.token
             import re as _re
             title_text = _re.sub(r'<think>.*?</think>', '', title_text, flags=_re.DOTALL).strip()
             title_text = title_text.strip().split("\n")[0].strip()[:50]

@@ -102,6 +102,10 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
     llm_group.add_argument("--llm-api-base", help="LLM API base URL")
     llm_group.add_argument("--llm-api-key", help="LLM API key")
     llm_group.add_argument("--llm-model", help="LLM model name")
+    llm_group.add_argument(
+        "--llm-cheap-model",
+        help="LLM model name for non-conversational helper tasks (e.g. session title generation)",
+    )
     llm_group.add_argument("--llm-temperature", type=float, help="Sampling temperature (0.0-2.0)")
     llm_group.add_argument("--llm-max-tokens", type=int, help="Maximum tokens to generate")
     llm_group.add_argument("--llm-minimal-output", action="store_true",

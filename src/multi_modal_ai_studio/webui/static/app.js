@@ -572,6 +572,7 @@ const defaultConfig = {
         ollama_url: 'http://localhost:11434',
         api_key: '',
         model: 'llama3.2:3b',
+        cheap_model: 'llama3.2:3b',
         temperature: 0.7,
         max_tokens: 2048,
         minimal_output: false,
@@ -1238,6 +1239,17 @@ function renderLLMConfig(config, readonly = false) {
                     <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
                 </select>
                 <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Fetched from API Base URL; use reload icon if you added a model'}</div>
+            </div>
+
+            <div class="form-group">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;">Utility Model</label>
+                    ${!disableApiAndModel ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                </div>
+                <select ${disableApiAndModel ? 'disabled' : ''} id="llm-cheap-model-select" onchange="updateConfig('llm', 'cheap_model', this.value)">
+                    <option value="${escapeHtml(config.cheap_model || config.model)}">${readonly ? escapeHtml(config.cheap_model || config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
+                </select>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Used for non-conversational app tasks such as session title generation. Not used for the live session conversation.'}</div>
             </div>
 
             <div class="form-group">
@@ -2278,20 +2290,27 @@ function updateConfig(section, key, value) {
         scheduleWarmup();
     }
 
-    // Re-render the config panel to show/hide conditional fields
     const contentEl = document.getElementById('config-tab-content');
     const configKey = state.activeConfigTab === 'device' ? 'devices' : state.activeConfigTab;
-    contentEl.innerHTML = renderEditableConfigForm(state.activeConfigTab, currentConfig[configKey]);
+    const skipRerender =
+        state.activeConfigTab === 'llm' &&
+        section === 'llm' &&
+        (key === 'model' || key === 'cheap_model');
 
-    // After form is in DOM, fetch models to populate dropdowns
-    if (state.activeConfigTab === 'llm') {
-        setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
-    }
-    if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) {
-        setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
-    }
-    if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) {
-        setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+    // Re-render the config panel only when the change affects conditional UI.
+    if (!skipRerender) {
+        contentEl.innerHTML = renderEditableConfigForm(state.activeConfigTab, currentConfig[configKey]);
+
+        // After form is in DOM, fetch models to populate dropdowns
+        if (state.activeConfigTab === 'llm') {
+            setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+        }
+        if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) {
+            setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
+        }
+        if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) {
+            setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+        }
     }
     if (section === 'devices') {
         updateDeviceIndicators();
@@ -2355,27 +2374,48 @@ function selectLLMRouterPreset() {
     var select = document.getElementById('llm-model-select');
     if (select) select.innerHTML = '<option value="MoM" selected>MoM</option>';
 }
+function setLLMModelSelectOptions(selectId, models, currentValue, fallbackValue, allowCustomCurrent = true) {
+    const select = document.getElementById(selectId);
+    if (!select) return (currentValue || fallbackValue || '').trim();
+    const optionValues = Array.isArray(models) ? models.filter(Boolean) : [];
+    let value = (currentValue || fallbackValue || '').trim();
+    if (value && !optionValues.includes(value) && allowCustomCurrent) optionValues.unshift(value);
+    if (value && !optionValues.includes(value) && !allowCustomCurrent) value = '';
+    if (!value && optionValues.length) value = optionValues[0];
+    select.innerHTML = optionValues.length
+        ? optionValues.map(m => `<option value="${escapeHtml(m)}" ${m === value ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')
+        : '<option value="">No models found</option>';
+    if (value) select.value = value;
+    return value;
+}
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;
     const select = document.getElementById('llm-model-select');
-    if (!select) return;
+    const cheapSelect = document.getElementById('llm-cheap-model-select');
+    if (!select && !cheapSelect) return;
     const apiKey = (document.getElementById('llm-api-key') || {}).value || currentConfig.llm.api_key || '';
-    select.innerHTML = '<option value="">Loading...</option>';
+    if (select) select.innerHTML = '<option value="">Loading...</option>';
+    if (cheapSelect) cheapSelect.innerHTML = '<option value="">Loading...</option>';
     try {
         const q = 'api_base=' + encodeURIComponent(apiBase) + (apiKey ? '&api_key=' + encodeURIComponent(apiKey) : '');
         const r = await fetch('/api/llm/models?' + q);
         const data = await r.json();
         const models = (data && data.models) ? data.models : [];
-        const current = currentConfig.llm.model || '';
-        select.innerHTML = models.length
-            ? models.map(m => `<option value="${escapeHtml(m)}" ${m === current ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')
-            : '<option value="">No models found</option>';
-        if (models.length && !models.includes(current)) {
-            currentConfig.llm.model = models[0];
-            select.value = models[0];
-        }
+        const currentModel = currentConfig.llm.model || '';
+        const currentCheapModel = currentConfig.llm.cheap_model || '';
+        const selectedModel = setLLMModelSelectOptions('llm-model-select', models, currentModel, models[0] || '');
+        const selectedCheapModel = setLLMModelSelectOptions(
+            'llm-cheap-model-select',
+            models,
+            currentCheapModel,
+            selectedModel || models[0] || '',
+            false
+        );
+        currentConfig.llm.model = selectedModel || currentModel || '';
+        currentConfig.llm.cheap_model = selectedCheapModel || currentConfig.llm.model || '';
     } catch (e) {
-        select.innerHTML = '<option value="">Error loading models</option>';
+        if (select) select.innerHTML = '<option value="">Error loading models</option>';
+        if (cheapSelect) cheapSelect.innerHTML = '<option value="">Error loading models</option>';
         console.error('fetchLLMModels failed:', e);
     }
 }
