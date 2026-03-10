@@ -2466,6 +2466,10 @@ code, pre {
     transition: height var(--transition-base), min-height var(--transition-base);
 }
 
+.timeline-panel.timeline-panel--dragging {
+    transition: none;
+}
+
 .timeline-panel.timeline-panel--height-auto {
     /* Inline height cleared by JS; uses CSS default above */
 }

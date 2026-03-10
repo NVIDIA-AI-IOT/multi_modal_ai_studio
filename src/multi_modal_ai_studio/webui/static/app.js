@@ -6502,16 +6502,25 @@ function setupEventHandlers() {
 function initTimelineResize() {
     const handle = document.getElementById('timeline-resize-handle');
     const panel = document.getElementById('timeline-panel');
-    const mainPanel = panel.parentElement; // .main-panel
 
     let isResizing = false;
     let startY = 0;
     let startHeight = 0;
+    let lastAppliedHeight = 0;
+
+    function hasTimelineToRender() {
+        return !!(
+            state.selectedSession ||
+            (state.isLiveSession && state.liveTimelineEvents)
+        );
+    }
 
     handle.addEventListener('mousedown', (e) => {
         isResizing = true;
         startY = e.clientY;
         startHeight = panel.offsetHeight;
+        lastAppliedHeight = startHeight;
+        panel.classList.add('timeline-panel--dragging');
         handle.classList.add('dragging');
         document.body.style.cursor = 'ns-resize';
         document.body.style.userSelect = 'none';
@@ -6524,18 +6533,19 @@ function initTimelineResize() {
         // Calculate new height (drag up = increase height, drag down = decrease height)
         const deltaY = startY - e.clientY; // Inverted because timeline is at bottom
         const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
+        if (newHeight === lastAppliedHeight) return;
 
         panel.style.height = `${newHeight}px`;
-
-        // Re-render timeline to adjust canvas size
-        if (state.selectedSession) {
-            renderTimeline();
-        }
+        lastAppliedHeight = newHeight;
     });
 
     document.addEventListener('mouseup', () => {
         if (isResizing) {
             isResizing = false;
+            panel.classList.remove('timeline-panel--dragging');
+            if (hasTimelineToRender()) {
+                renderTimeline();
+            }
             handle.classList.remove('dragging');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
