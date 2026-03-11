@@ -2745,7 +2745,7 @@ function renderChatHistory() {
             const role = (msg.role || 'user').toLowerCase();
             const isUser = role === 'user';
             const ts = msg.timestamp != null && uiSettings.showTimestamps
-                ? `<span class="chat-meta">${formatTimestamp(msg.timestamp)}</span>`
+                ? `<span class="chat-meta"><i data-lucide="clock" class="lucide-inline"></i> ${formatTimestamp(msg.timestamp)}</span>`
                 : '';
             var reasoningHtml = '';
             if (!isUser) {
@@ -2761,12 +2761,24 @@ function renderChatHistory() {
             `;
         }).join('');
     } else if (turns.length > 0) {
-        // Legacy: session.turns with user_transcript + ai_response per turn
+        // Legacy: session.turns with user_transcript + ai_response per turn. Timestamps from timeline when showTimestamps.
+        const asrFinals = (timeline || []).filter(e => e.event_type === 'asr_final');
+        const ttsCompletes = (timeline || []).filter(e => e.event_type === 'tts_complete');
         chatEl.innerHTML = turns.map((turn, idx) => {
-            const userConfidence = turn.user_confidence ?
-                `<span class="chat-meta">Confidence: ${(turn.user_confidence * 100).toFixed(0)}%</span>` : '';
-            const turnMetrics = turn.latencies ?
-                `<span class="chat-meta">TTL: ${formatLatency(turn.latencies.ttl)}</span>` : '';
+            const userTs = asrFinals[idx] && asrFinals[idx].timestamp != null ? asrFinals[idx].timestamp : turn.timestamp;
+            const aiTs = ttsCompletes[idx] && ttsCompletes[idx].timestamp != null ? ttsCompletes[idx].timestamp : null;
+            const clockIcon = '<i data-lucide="clock" class="lucide-inline"></i>';
+            const userMetaParts = [];
+            if (turn.user_confidence)
+                userMetaParts.push(`Confidence: ${(turn.user_confidence * 100).toFixed(0)}%`);
+            if (uiSettings.showTimestamps && (userTs != null || turn.timestamp != null))
+                userMetaParts.push(clockIcon + ' ' + formatTimestamp(userTs != null ? userTs : turn.timestamp));
+            const userMetaHtml = userMetaParts.length
+                ? `<span class="chat-meta">${userMetaParts.map((p, i) => i > 0 ? `<span class="chat-meta-gap"></span>${p}` : p).join('')}</span>`
+                : '';
+            const aiMetaHtml = (uiSettings.showTimestamps && (aiTs != null || turn.ai_timestamp != null))
+                ? `<span class="chat-meta">${clockIcon} ${formatTimestamp(aiTs != null ? aiTs : turn.ai_timestamp)}</span>`
+                : '';
             var reasoningHtml = '';
             var r = reasoningList[idx] || '';
             if (r) reasoningHtml = `<details class="reasoning-block"><summary>Reasoning</summary><pre class="reasoning-text">${escapeHtml(r)}</pre></details>`;
@@ -2774,11 +2786,11 @@ function renderChatHistory() {
             return `
                 <div class="chat-bubble user">
                     <div class="chat-avatar"><i data-lucide="user" class="lucide-inline"></i></div>
-                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.user_transcript || '...')}</div>${userConfidence}</div>
+                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.user_transcript || '...')}</div>${userMetaHtml}</div>
                 </div>
                 <div class="chat-bubble ai">
                     <div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div>
-                    <div class="chat-content">${reasoningHtml}<div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${turnMetrics}</div>
+                    <div class="chat-content">${reasoningHtml}<div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${aiMetaHtml}</div>
                 </div>
             `;
         }).join('');
@@ -2796,11 +2808,16 @@ function renderChatHistory() {
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
 
+/** Format session time as MM:SS.mmm (e.g. 00:01.234). */
 function formatTimestamp(seconds) {
     if (seconds == null || typeof seconds !== 'number') return '';
     const m = Math.floor(seconds / 60);
-    const s = (seconds % 60).toFixed(1);
-    return m > 0 ? `${m}:${s.padStart(4, '0')}s` : `${s}s`;
+    const s = seconds % 60;
+    const mm = String(m).padStart(2, '0');
+    const secs = Math.floor(s);
+    const ms = Math.round((s - secs) * 1000);
+    const ss = String(secs).padStart(2, '0') + '.' + String(ms).padStart(3, '0');
+    return mm + ':' + ss;
 }
 
 function renderTimelineMetrics() {
@@ -3188,7 +3205,9 @@ function getTtsAmplitudeAtTime(segments, t) {
     return 0;
 }
 
-/** Compute TTL bands from stored amplitude + TTS playback (for recorded session replay). End-of-speech constrained to between first partial and final (before LLM). AI voice start = first TTS segment with amplitude > 0 (any signal). */
+/** Compute TTL bands from stored amplitude + TTS playback (for recorded session replay).
+ * Band start = threshold-based end-of-speech (silence after user voice), not last partial.
+ * Band end = first TTS audio played (tts_first_audio), not tts_start. */
 function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
     if (!ttsSegments || !ttsSegments.length) return [];
     const getT = (s) => (s.timestamp != null ? s.timestamp : s[0]);
@@ -3247,7 +3266,20 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             turnWindows.push({ firstPartialTime: firstPartialTime, asrFinalTime: asrFinalTime });
         }
     }
-    // First TTS sound per turn: prefer timeline's first audio_amplitude (source tts) at 6.69s; else first segment with signal or first chunk
+    // First TTS audio per turn: prefer tts_first_audio (first sound out), then audio_amplitude, then segment (tts_start) fallback
+    const firstTtsFirstAudioByTurn = [];
+    if (timeline && timeline.length && turnWindows.length) {
+        const ttsFirstAudioEvents = timeline.filter(function (e) { return e.event_type === 'tts_first_audio'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        for (var ti = 0; ti < turnWindows.length; ti++) {
+            const win = turnWindows[ti];
+            const nextFinal = turnWindows[ti + 1] ? turnWindows[ti + 1].asrFinalTime : Infinity;
+            const firstInWindow = ttsFirstAudioEvents.find(function (e) {
+                var t = e.timestamp != null ? Number(e.timestamp) : NaN;
+                return !isNaN(t) && t > win.asrFinalTime && t < nextFinal;
+            });
+            firstTtsFirstAudioByTurn.push(firstInWindow ? Number(firstInWindow.timestamp) : null);
+        }
+    }
     const firstTtsAmplitudeByTurn = [];
     if (timeline && timeline.length && turnWindows.length) {
         const ttsAmpEvents = timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
@@ -3261,15 +3293,18 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             firstTtsAmplitudeByTurn.push(firstInWindow ? Number(firstInWindow.timestamp) : null);
         }
     }
-    // Segment-based fallback: first chunk with amplitude > 0 or first chunk
+    // Band end T = first TTS audio (tts_first_audio) when available; else first audio_amplitude (tts); else first segment start (tts_start). Do not min with segmentTime or we pull T back to tts_start.
     const firstPlayPerTurn = responseGroups.map(function (group, k) {
         var firstChunkTime = group[0].startTime;
         const withSignal = group.filter(function (s) { return (s.amplitude != null ? s.amplitude : 0) > 0; });
         var segmentTime = withSignal.length ? Math.min(firstChunkTime, Math.min.apply(null, withSignal.map(function (s) { return s.startTime; }))) : firstChunkTime;
-        var timelineFirst = firstTtsAmplitudeByTurn[k];
-        return (timelineFirst != null && timelineFirst > 0) ? Math.min(timelineFirst, segmentTime) : segmentTime;
+        var timelineFirstAudio = firstTtsFirstAudioByTurn[k];
+        var timelineAmp = firstTtsAmplitudeByTurn[k];
+        if (timelineFirstAudio != null && timelineFirstAudio > 0) return timelineFirstAudio;
+        if (timelineAmp != null && timelineAmp > 0) return timelineAmp;
+        return segmentTime;
     });
-    // One band per turn: S must be in (firstPartialTime, asrFinalTime]; if no timeline, use any S < T
+    // One band per turn: S = threshold-based end-of-speech (silenceStarts) when available; else end-of-speech proxy (asr_final - 150ms), never last partial
     const bands = [];
     const usedSilence = {};
     for (let k = 0; k < firstPlayPerTurn.length; k++) {
@@ -3288,23 +3323,23 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             usedSilence[bestJ] = true;
             bands.push({ start: bestS, end: T, ttlMs: Math.round((T - bestS) * 1000) });
         } else if (win && maxS < T) {
-            // Fallback: place band start between partial and final (e.g. 150ms before final)
-            const fallbackS = Math.max(minS, maxS - 0.15);
+            // Fallback: end-of-speech proxy (150ms before asr_final), not first/last partial
+            const fallbackS = Math.max(0, maxS - 0.15);
             bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         } else {
-            // No turn window for this index (e.g. fewer asr_finals than TTS response groups) or maxS >= T: still show band so 2nd+ turns get a red band
+            // No turn window or maxS >= T: still show band
             const fallbackS = Math.max(0, T - 0.5);
             bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         }
     }
-    // If we have more turns (asr_finals) than TTS segment groups (e.g. first turn's segments were trimmed), add bands for the missing early turns from timeline so every turn gets a red band
-    if (turnWindows.length > bands.length && firstTtsAmplitudeByTurn.length >= turnWindows.length) {
+    // If we have more turns (asr_finals) than TTS segment groups, add bands for the missing early turns
+    if (turnWindows.length > bands.length && (firstTtsFirstAudioByTurn.length >= turnWindows.length || firstTtsAmplitudeByTurn.length >= turnWindows.length)) {
         var missingCount = turnWindows.length - bands.length;
         for (var ti = 0; ti < missingCount; ti++) {
-            const T = firstTtsAmplitudeByTurn[ti];
+            const T = (firstTtsFirstAudioByTurn[ti] != null && firstTtsFirstAudioByTurn[ti] > 0) ? firstTtsFirstAudioByTurn[ti] : firstTtsAmplitudeByTurn[ti];
             const win = turnWindows[ti];
             if (T == null || T <= 0 || !win) continue;
-            const fallbackS = Math.max(win.firstPartialTime, win.asrFinalTime - 0.15);
+            const fallbackS = Math.max(0, win.asrFinalTime - 0.15);
             bands.unshift({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         }
     }
@@ -6701,6 +6736,18 @@ function setupEventHandlers() {
         if (isInput) return;
         e.preventDefault();
         openSettingsModal();
+    });
+
+    // Keyboard shortcut: S starts session (setup) or stops session (live)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 's' && e.key !== 'S') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        if (state.sessionState === 'setup') startSessionRecording();
+        else if (state.sessionState === 'live') stopSessionRecording();
     });
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
