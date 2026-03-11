@@ -1222,8 +1222,8 @@ function renderLLMConfig(config, readonly = false) {
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8000/v1', 'vLLM')"><strong>vLLM</strong><span>http://localhost:8000/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
-                            <div class="api-preset-item" onclick="selectTensorRTEdgePreset()"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
-                            <div class="api-preset-item" onclick="selectLLMRouterPreset()"><strong>LLM Router</strong><span>http://10.110.51.30:8801/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:58010/v1', 'TensorRT Edge LLM')"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMPreset('http://10.110.51.30:8801/v1', 'LLM Router')"><strong>LLM Router</strong><span>http://10.110.51.30:8801/v1</span></div>
                             <div style="border-top: 1px solid var(--border-color);"></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://api.openai.com/v1', 'OpenAI')"><strong>OpenAI</strong><span>https://api.openai.com/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://integrate.api.nvidia.com/v1', 'NVIDIA')"><strong>NVIDIA API Catalog</strong><span>https://integrate.api.nvidia.com/v1</span></div>
@@ -1305,11 +1305,26 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div id="vlm-settings" class="form-group" style="display: ${config.enable_vision ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid var(--border-color);">
-                <label>Frames per Turn</label>
+                <label style="margin-bottom: 6px;">Vision Input Mode</label>
+                <div style="display: flex; gap: 16px; margin-bottom: 8px;">
+                    <label class="checkbox-label" style="margin: 0; cursor: pointer;">
+                        <input type="radio" ${disabled} name="vision-input-mode" value="n-image" ${!config.vision_video_encode ? 'checked' : ''}
+                               onchange="updateConfig('llm', 'vision_video_encode', false);">
+                        N-Image Input
+                    </label>
+                    <label class="checkbox-label" style="margin: 0; cursor: pointer;">
+                        <input type="radio" ${disabled} name="vision-input-mode" value="video" ${config.vision_video_encode ? 'checked' : ''}
+                               onchange="updateConfig('llm', 'vision_video_encode', true);">
+                        Video Input
+                    </label>
+                </div>
+                ${!readonly ? '<span class="input-hint">N-Image sends individual frames; Video encodes frames as MP4</span>' : ''}
+
+                <label style="margin-top: 10px;">Frames per Turn</label>
                 <input type="range" ${disabled} id="llm-vision-frames" min="1" max="10" step="1" value="${config.vision_frames || 4}"
                        oninput="updateConfig('llm', 'vision_frames', parseInt(this.value)); document.getElementById('vision-frames-value').textContent = this.value;">
                 <span id="vision-frames-value" class="range-value">${config.vision_frames || 4}</span>
-                ${!readonly ? '<span class="input-hint">1 = single frame at end, 2-10 = multiple frames during speech</span>' : ''}
+                ${!readonly ? '<span class="input-hint">Number of frames captured and sent per speech turn</span>' : ''}
 
                 <label style="margin-top: 10px;">Frame Quality</label>
                 <input type="range" ${disabled} id="llm-vision-quality" min="0.3" max="1.0" step="0.1" value="${config.vision_quality || 0.7}"
@@ -2380,31 +2395,9 @@ function selectLLMPreset(url, label) {
     if (input) input.value = url;
     document.getElementById('presetsMenu').style.display = 'none';
     updateConfig('llm', 'api_base', url);
-}
-
-function selectTensorRTEdgePreset() {
-    var url = 'http://localhost:58010/v1';
-    currentConfig.llm.api_base = url;
-    currentConfig.llm.vision_video_encode = false;
-    var input = document.getElementById('llm-api-base');
-    if (input) input.value = url;
-    document.getElementById('presetsMenu').style.display = 'none';
-    updateConfig('llm', 'api_base', url);
-    updateConfig('llm', 'vision_video_encode', false);
     fetchLLMModels(url);
 }
-function selectLLMRouterPreset() {
-    var url = 'http://10.110.51.30:8801/v1';
-    currentConfig.llm.api_base = url;
-    currentConfig.llm.model = 'MoM';
-    var input = document.getElementById('llm-api-base');
-    if (input) input.value = url;
-    document.getElementById('presetsMenu').style.display = 'none';
-    updateConfig('llm', 'api_base', url);
-    updateConfig('llm', 'model', 'MoM');
-    var select = document.getElementById('llm-model-select');
-    if (select) select.innerHTML = '<option value="MoM" selected>MoM</option>';
-}
+
 function setLLMModelSelectOptions(selectId, models, currentValue, fallbackValue, allowCustomCurrent = true) {
     const select = document.getElementById(selectId);
     if (!select) return (currentValue || fallbackValue || '').trim();

@@ -409,65 +409,17 @@ class WebUIServer:
             )
 
     async def _detect_vlm_capability(self, api_base: str, api_key: Optional[str], model: str) -> dict:
-        """
-        Detect if a model supports vision (VLM) across different backends.
-        
-        Detection methods (in order of preference):
-        1. Ollama API: Check /api/show for "projector" field
-        2. Name pattern: Check for known VLM patterns (vl, vision, llava, etc.)
-        3. Image probe: Try sending a tiny image (universal fallback)
-        
+        """Detect if a model supports vision by sending a 1x1 image probe.
+
+        Sends a tiny 1x1 white PNG with max_tokens=1.  If the model accepts the
+        image and returns any token, it's a VLM.  If it rejects with an error
+        mentioning "image/vision/multimodal", it's an LLM.
+
         Returns: {"is_vlm": bool, "detection_method": str, "confidence": str}
         """
-        import aiohttp
-        import re
-        
-        result = {"is_vlm": False, "detection_method": "unknown", "confidence": "low"}
-        
-        # -------------------------------------------------------------------------
-        # Method 1: Ollama-specific detection (fast, no inference)
-        # -------------------------------------------------------------------------
-        if "11434" in api_base or "ollama" in api_base.lower():
-            try:
-                # Ollama's /api/show returns model details including vision components
-                ollama_base = api_base.replace("/v1", "").rstrip("/")
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{ollama_base}/api/show",
-                        json={"name": model},
-                        timeout=aiohttp.ClientTimeout(total=5)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("projector"):
-                                result = {"is_vlm": True, "detection_method": "ollama_projector", "confidence": "high"}
-                                logger.info("[VLM Detect] Ollama projector found → VLM")
-                                return result
-                            families = data.get("details", {}).get("families", [])
-                            if any("vl" in f.lower() for f in families):
-                                result = {"is_vlm": True, "detection_method": "ollama_family", "confidence": "high"}
-                                logger.info("[VLM Detect] Ollama family contains 'vl' → VLM")
-                                return result
-                            model_info = data.get("model_info", {})
-                            has_vision = any("vision" in k for k in model_info)
-                            if has_vision:
-                                result = {"is_vlm": True, "detection_method": "ollama_model_info", "confidence": "high"}
-                                logger.info("[VLM Detect] Ollama model_info has vision keys → VLM")
-                                return result
-                            result = {"is_vlm": False, "detection_method": "ollama_api", "confidence": "high"}
-                            logger.info("[VLM Detect] Ollama model has no vision components → LLM")
-                            return result
-            except Exception as e:
-                logger.debug("[VLM Detect] Ollama API check failed: %s", e)
-        
-        # -------------------------------------------------------------------------
-        # Method 3: Image probe (universal, works for any backend)
-        # Send a tiny 1x1 image and see if model accepts it
-        # -------------------------------------------------------------------------
         try:
-            # 1x1 white PNG (smallest possible valid image)
             tiny_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-            
+
             config = LLMConfig(
                 api_base=api_base,
                 api_key=api_key,
@@ -476,8 +428,7 @@ class WebUIServer:
                 temperature=0.0,
             )
             backend = OpenAILLMBackend(config)
-            
-            # Create multimodal message with image
+
             test_messages = [{
                 "role": "user",
                 "content": [
@@ -485,28 +436,20 @@ class WebUIServer:
                     {"type": "image_url", "image_url": {"url": tiny_image}},
                 ]
             }]
-            
-            # Try to generate with image - VLMs will accept, LLMs will error
+
             async for token in backend.generate_stream("", test_messages):
-                # If we get any response, model accepted the image → VLM
-                result = {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
                 logger.info("[VLM Detect] Image probe succeeded → VLM")
-                return result
-                
+                return {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
+
         except Exception as e:
             error_str = str(e).lower()
-            # Check for specific error messages that indicate image rejection
             if any(x in error_str for x in ["image", "vision", "multimodal", "unsupported"]):
-                result = {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
                 logger.info("[VLM Detect] Image probe rejected → LLM")
-                return result
-            # Other errors might be network issues, etc.
+                return {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
             logger.debug("[VLM Detect] Image probe error: %s", e)
-        
-        # Default: unknown, assume LLM for safety
-        result = {"is_vlm": False, "detection_method": "default", "confidence": "low"}
+
         logger.info("[VLM Detect] Could not determine, defaulting to LLM")
-        return result
+        return {"is_vlm": False, "detection_method": "default", "confidence": "low"}
 
     async def handle_llm_warmup(self, request: web.Request) -> web.Response:
         """

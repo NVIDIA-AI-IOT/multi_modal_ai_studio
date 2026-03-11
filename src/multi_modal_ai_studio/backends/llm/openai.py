@@ -149,34 +149,6 @@ def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
     return text
 
 
-def _is_ollama_backend(config) -> bool:
-    """Return True if the configured api_base points to an Ollama server."""
-    api_base = getattr(config, "api_base", "") or ""
-    return "11434" in api_base or "ollama" in api_base.lower()
-
-
-def _is_tensorrt_edge_backend(config) -> bool:
-    """Return True if api_base points to a TensorRT Edge LLM server (image payload format)."""
-    api_base = getattr(config, "api_base", "") or ""
-    base_lower = api_base.lower()
-    return "58010" in api_base or "tensorrt" in base_lower or "edge-llm" in base_lower
-
-
-def _should_use_video(config) -> bool:
-    """Return True when frames should be encoded as MP4 video.
-
-    Controlled by ``vision_video_encode`` config flag, but automatically
-    disabled for backends that don't support video_url (e.g. Ollama, TensorRT Edge).
-    """
-    if not bool(getattr(config, "vision_video_encode", False)):
-        return False
-    if _is_ollama_backend(config):
-        return False
-    if _is_tensorrt_edge_backend(config):
-        return False
-    return True
-
-
 def _strip_data_url_prefix(data_url: str) -> str:
     """Extract raw base64 payload from a data URL.
 
@@ -186,24 +158,6 @@ def _strip_data_url_prefix(data_url: str) -> str:
     if "," in data_url:
         return data_url.split(",", 1)[1]
     return data_url
-
-
-# Cosmos-Reason models always use video encoding (even for few frames)
-# for temporal understanding.  The browser capture FPS is raised
-# dynamically for Cosmos so both browser and USB cameras provide a
-# similar number of frames.
-_MIN_FRAMES_FOR_VIDEO = 2
-
-# When sending individual images (non-Cosmos VLMs), cap the count to
-# limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
-# is a good trade-off between visual context and prefill latency.
-_MAX_VIDEO_FALLBACK_IMAGES = 10
-_MAX_TENSORRT_EDGE_IMAGES = 3
-# Qwen3-VL uses ~170 tokens per video frame.  With max_model_len=8192,
-# system prompt ≈ 300 tokens, user text ≈ 50, max_tokens ≈ 512,
-# budget ≈ 8192 - 300 - 50 - 512 = 7330 → ~43 frames.
-# Use 35 as a safe cap to leave headroom.
-_MAX_COSMOS_VIDEO_FRAMES = 35
 
 
 def _encode_images_to_video_base64(
@@ -341,7 +295,6 @@ class OpenAILLMBackend(LLMBackend):
     Features:
     - Streaming token generation
     - Conversation history management
-    - Automatic model detection (for Ollama)
     - Markdown stripping for voice output
     """
 
@@ -461,26 +414,19 @@ class OpenAILLMBackend(LLMBackend):
     ) -> list:
         """Build the multimodal ``content`` list for a user message.
 
-        All backends (vLLM, Ollama, TensorRT Edge LLM, SGLang, OpenAI) use
-        the standard OpenAI ``image_url`` format.  Cosmos-Reason models
-        additionally support ``video_url`` when video encoding is enabled.
+        Two paths controlled purely by the user's ``vision_video_encode`` config:
+        - True  → encode frames as MP4 video (``video_url``), fall back to images on failure
+        - False → send individual images (``image_url``)
 
-        Returns the ``content`` list ready to be placed inside a user message.
+        No backend detection, no sub-sampling, no hardcoded caps.
         """
         content: list = [{"type": "text", "text": prompt}]
 
-        video_url = None
-        if (
-            _should_use_video(self.config)
-            and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
-        ):
-            imgs_for_video = image_data_urls
-            if len(imgs_for_video) > _MAX_COSMOS_VIDEO_FRAMES:
-                step = len(imgs_for_video) / _MAX_COSMOS_VIDEO_FRAMES
-                imgs_for_video = [imgs_for_video[int(i * step)] for i in range(_MAX_COSMOS_VIDEO_FRAMES)]
-                self.logger.info("VLM: sub-sampled %d → %d frames for video (token budget)", len(image_data_urls), len(imgs_for_video))
+        use_video = bool(getattr(self.config, "vision_video_encode", False))
+
+        if use_video and len(image_data_urls) >= 2:
             video_url = _encode_images_to_video_base64(
-                imgs_for_video,
+                image_data_urls,
                 speech_duration_secs=speech_duration or 0.0,
             )
             if video_url:
@@ -488,28 +434,18 @@ class OpenAILLMBackend(LLMBackend):
                     "type": "video_url",
                     "video_url": {"url": video_url},
                 })
-                self.logger.info("VLM request (Cosmos video): %d frames encoded to MP4", len(image_data_urls))
+                self.logger.info("VLM request (video): %d frames encoded to MP4", len(image_data_urls))
+                return content
             else:
                 self.logger.warning("Video encoding failed, falling back to multi-image")
-                video_url = None
 
-        if not video_url:
-            detail = getattr(self.config, "vision_detail", "auto")
-            imgs = image_data_urls
-            if _is_tensorrt_edge_backend(self.config) and len(imgs) > _MAX_TENSORRT_EDGE_IMAGES:
-                step = len(imgs) / _MAX_TENSORRT_EDGE_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_TENSORRT_EDGE_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images (Edge LLM limit)", len(image_data_urls), len(imgs))
-            elif _should_use_video(self.config) and len(imgs) > _MAX_VIDEO_FALLBACK_IMAGES:
-                step = len(imgs) / _MAX_VIDEO_FALLBACK_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_VIDEO_FALLBACK_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images (Cosmos video fallback)", len(image_data_urls), len(imgs))
-            for img_url in imgs:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": img_url, "detail": detail},
-                })
-            self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
+        detail = getattr(self.config, "vision_detail", "auto")
+        for img_url in image_data_urls:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": img_url, "detail": detail},
+            })
+        self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(image_data_urls))
 
         return content
 
