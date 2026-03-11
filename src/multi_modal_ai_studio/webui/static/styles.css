@@ -12,7 +12,7 @@
     --nvidia-black: #000000;
 
     /* Timeline Colors (Live RIVA WebUI palette) */
-    --timeline-user: #76B900;          /* User/Audio - NVIDIA Green */
+    --timeline-user: #76B900;          /* User/Audio - NVIDIA green (unmuted) */
     --timeline-ai: #9C27B0;            /* AI/System - Purple */
     --timeline-vad: #64B5F6;           /* VAD - Light Blue */
     --timeline-asr: #1976D2;           /* ASR/Speech - Dark Blue */
@@ -23,7 +23,11 @@
 
     /* Semantic aliases for timeline lanes (Live RIVA WebUI style) */
     --timeline-system: #9C27B0;        /* System lane - Purple */
-    --timeline-audio: #76B900;         /* Audio lane - Green */
+    --timeline-audio: #76B900;         /* Audio lane / mic button (unmuted) - NVIDIA green */
+    --timeline-audio-muted: #9ca3af;   /* User waveform (preview bar + timeline) when muted - gray */
+    --mic-button-muted: #006666;      /* Mic button when muted - grayish teal */
+    --mic-preview-bg: rgba(0, 0, 0, 0.4);     /* Preview balloon when unmuted - transparent gray */
+    --mic-preview-bg-muted: rgba(0, 102, 102, 0.8);  /* Preview balloon when muted - grayish #006666 */
     --timeline-speech: #1976D2;        /* Speech/ASR lane - Blue (final transcript dot) */
     --timeline-speech-partial: #64B5F6; /* ASR partial transcript dot - Light blue */
     --timeline-llm: #FF9800;           /* LLM lane - Orange */
@@ -139,7 +143,7 @@
     --text-tertiary: var(--light-text-tertiary);
     --border-color: var(--light-border-color);
     --border-hover: var(--light-border-hover);
-    --config-panel-bg-readonly: #e8eaed;
+    --config-panel-bg-readonly: #f1f3f4; /* lighter gray in light mode for easier reading */
     --config-panel-bg-editable: var(--light-bg-primary);
 
     /* Light mode specific tweaks */
@@ -673,12 +677,18 @@ code, pre {
     background: var(--config-panel-bg-editable);
 }
 
-/* Locked once session has started (live or stopped): grayed, no interaction */
+/* Locked once session has started (live or stopped): gray background, tabs clickable, form read-only */
 .config-panel.config-panel--locked {
     background: var(--config-panel-bg-readonly);
 }
 .config-panel.config-panel--locked .config-content {
-    opacity: 0.75;
+    opacity: 0.9;
+}
+.config-panel.config-panel--locked .config-tabs {
+    pointer-events: auto;
+}
+.config-panel.config-panel--locked .config-content .config-tab-content,
+.config-panel.config-panel--locked .config-content #config-tab-content {
     pointer-events: none;
 }
 
@@ -1055,6 +1065,14 @@ code, pre {
     background: var(--bg-secondary);
     cursor: not-allowed;
     opacity: 0.8;
+}
+[data-theme="light"] .config-form.readonly input,
+[data-theme="light"] .config-form.readonly select,
+[data-theme="light"] .config-form.readonly textarea,
+[data-theme="light"] .readonly-config-input {
+    background: var(--light-bg-tertiary);
+    border: 1px solid var(--light-border-color);
+    color: var(--light-text-primary);
 }
 
 .config-form.readonly input[type="checkbox"],
@@ -1532,6 +1550,10 @@ code, pre {
     min-height: 0;
     max-height: none;
 }
+.chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container.session-image-container--video-aspect {
+    flex: 0 0 auto;
+    min-height: 0;
+}
 .chat-panel.chat-panel--config-collapsed .chat-panel-right-col {
     grid-row: 3;
     grid-column: 2;
@@ -1579,6 +1601,7 @@ code, pre {
 /* Pipeline config: transparent grid, device slots + connected pipeline bar */
 .pipeline-config-container {
     flex-shrink: 0;
+    min-width: 0;
     padding: var(--space-xs) 0;
     margin-bottom: var(--space-sm);
     background: transparent;
@@ -1614,6 +1637,7 @@ code, pre {
     column-gap: var(--space-sm);
     align-items: center;
     overflow: visible;
+    min-width: 0;
 }
 .pipeline-grid--no-camera {
     grid-template-columns: 1fr 1fr;
@@ -1691,6 +1715,7 @@ code, pre {
     margin: 0 28px;
     display: flex;
     overflow: visible;
+    min-width: 0;
 }
 /* Overlay: corner icons in square containers, vertically centered across 1.5–2.5 row */
 .pipeline-corner {
@@ -1721,6 +1746,7 @@ code, pre {
     align-items: center;
     flex-wrap: nowrap;
     flex: 1;
+    min-width: 0;
     min-height: 28px;
     gap: 0;
     overflow: visible;
@@ -1986,8 +2012,7 @@ code, pre {
     transition: top 0.35s ease-out, left 0.35s ease-out, transform 0.35s ease-out;
 }
 .session-control-overlay .start-btn,
-.session-control-overlay .stop-btn,
-.session-control-overlay .mic-mute-btn {
+.session-control-overlay .stop-btn {
     pointer-events: auto;
     flex: none;
 }
@@ -1997,7 +2022,7 @@ code, pre {
     left: 50%;
     transform: translate(-50%, -50%);
 }
-/* Top-left (live): STOP + MIC in a row like Live VLM WebUI */
+/* Top-left (live): STOP only; mute is on the bottom mic strip */
 .session-control-overlay--stop {
     top: var(--space-md);
     left: var(--space-md);
@@ -2008,8 +2033,7 @@ code, pre {
     align-items: flex-start;
     gap: var(--space-sm);
 }
-.session-control-overlay--stop .stop-btn--overlay,
-.session-control-overlay--stop .mic-mute-btn--overlay {
+.session-control-overlay--stop .stop-btn--overlay {
     padding: var(--space-sm) var(--space-lg);
     font-size: 0.9rem;
     box-shadow: var(--shadow-lg);
@@ -2018,9 +2042,6 @@ code, pre {
     justify-content: center;
 }
 .session-control-overlay--stop .stop-btn--overlay:hover {
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
-}
-.session-control-overlay--stop .mic-mute-btn--overlay:hover {
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
 }
 
@@ -2052,14 +2073,108 @@ code, pre {
     display: none;
 }
 
-/* Mic amplitude waveform: bottom of camera preview, raised 20px; inset 60px L/R; timeline-style drawn in canvas */
-.mic-waveform-overlay {
+/* Mic preview strip: when muted, red circle button (left) + waveform balloon (right). Circle flips to green + mic icon on hover. */
+.mic-preview-strip {
     position: absolute;
     left: 60px;
     right: 60px;
     bottom: 20px;
+    min-height: 48px;
+    height: 48px;
+    z-index: 4; /* above session-control-overlay (3) so mute button is clickable in preview */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: auto; /* allow clicks on the mute button in setup and live */
+}
+.mic-preview-strip .mic-mute-preview-btn {
+    pointer-events: auto;
+    flex: 0 0 auto;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    color: #fff;
+    /* Soft glow to avoid sharp edge; single blurred shadow so no expand/contract */
+    box-shadow: 0 0 20px 6px rgba(255, 255, 255, 0.28);
+    transition: box-shadow 0.25s ease, transform 0.2s ease;
+    overflow: hidden;
+    perspective: 220px;
+    display: block;
+}
+.mic-preview-strip .mic-mute-preview-btn:hover {
+    /* Slightly stronger soft glow + subtle ring; no hard edge */
+    box-shadow: 0 0 2px 8px rgba(0, 0, 0, 0.22), 0 0 4px 12px rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+}
+.mic-preview-strip .mic-mute-preview-btn-inner {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.35s ease; /* flip animates on hover and on unhover (unless just clicked) */
+    transform: rotate3d(1, 1, 0, 0deg);
+}
+.mic-preview-strip .mic-mute-preview-btn-inner.flipped {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+/* Hover: flip to show opposite face (mic <-> mic-off); shadow/glow expands on button */
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-inner {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-inner.flipped {
+    transform: rotate3d(1, 1, 0, 0deg);
+}
+/* After click: stay on current face (no flip) while still hovered; on leave only shadow shrinks */
+.mic-preview-strip .mic-mute-preview-btn.mic-mute-preview-btn-just-clicked:hover .mic-mute-preview-btn-inner {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+.mic-preview-strip .mic-mute-preview-btn.mic-mute-preview-btn-just-clicked:hover .mic-mute-preview-btn-inner.flipped {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+.mic-preview-strip .mic-mute-preview-btn.mic-mute-preview-btn-just-clicked:hover .mic-mute-preview-btn-inner:not(.flipped) {
+    transform: rotate3d(1, 1, 0, 0deg);
+}
+.mic-preview-strip .mic-mute-preview-btn-face {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+.mic-preview-strip .mic-mute-preview-btn-face--unmuted {
+    background: var(--timeline-audio, #76B900);
+    transform: rotate3d(1, 1, 0, 0deg);
+    transition: background 0.2s ease;
+}
+/* Hover (flip shows opposite face): unmuted face = mic on green; muted face = mic-off on gray */
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-face--unmuted {
+    background: var(--timeline-audio, #76B900);
+}
+.mic-preview-strip .mic-mute-preview-btn-face--muted {
+    background: var(--mic-button-muted, #006666);
+    transform: rotate3d(1, 1, 0, 180deg);
+    transition: background 0.2s ease;
+}
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-face--muted {
+    background: var(--mic-button-muted, #006666);
+}
+.mic-preview-strip .mic-mute-preview-btn .mic-preview-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.mic-waveform-overlay {
+    flex: 1;
+    min-width: 0;
     height: 28px;
-    z-index: 3;
+    align-self: center;
     pointer-events: none;
 }
 .mic-waveform-overlay canvas {
@@ -2106,44 +2221,10 @@ code, pre {
     box-shadow: var(--shadow-lg);
 }
 
-/* Push-to-talk: Unmute / Mute Mic (shown only when live); same size as STOP */
-.mic-mute-btn,
 .session-control .stop-btn {
     flex: 0 0 auto;
     min-width: 11rem;
     width: 11rem;
-}
-.mic-mute-btn {
-    padding: var(--space-md) var(--space-xl);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-sm);
-    transition: all var(--transition-base);
-    white-space: nowrap;
-}
-.mic-mute-btn.muted {
-    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
-    color: white;
-    box-shadow: var(--shadow-md), var(--glow-nvidia);
-}
-.mic-mute-btn.muted:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
-}
-.mic-mute-btn:not(.muted) {
-    background: linear-gradient(135deg, #6b7280, #4b5563);
-    color: white;
-    box-shadow: var(--shadow-md);
-}
-.mic-mute-btn:not(.muted):hover {
-    background: linear-gradient(135deg, #4b5563, #374151);
-    transform: translateY(-2px);
 }
 
 /* Start button loading state */

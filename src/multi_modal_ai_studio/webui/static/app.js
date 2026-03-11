@@ -64,7 +64,7 @@ const state = {
     /** ScriptProcessor or worklet node for PCM capture; disconnect on stop */
     voicePcmNode: null,
     /** Push-to-talk: when true, server does not feed mic to ASR (waveform still sent and displayed) */
-    micMuted: true,
+    micMuted: false,
     /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
     liveSessionStartTime: 0,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
@@ -424,10 +424,11 @@ function updateConfigPanelState() {
 function setConfigInputsDisabled(disabled) {
     const content = document.getElementById('config-content');
     if (!content) return;
-    content.querySelectorAll('input, select, textarea, button.config-tab').forEach(function (el) {
+    content.querySelectorAll('input, select, textarea').forEach(function (el) {
         if (el.id === 'auto-hide-config-btn') return;
         el.disabled = disabled;
     });
+    /* Do not disable button.config-tab so tabs remain clickable in replay */
 }
 
 var CONFIG_AUTO_HIDE_KEY = 'mmai_config_auto_hide_on_start';
@@ -460,7 +461,7 @@ function applyConfigPanelCollapse() {
 function updateAutoHideConfigLabel() {
     const label = document.getElementById('auto-hide-config-label');
     const btn = document.getElementById('auto-hide-config-btn');
-    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide once session start \u2713' : 'Auto hide once session start <<';
+    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide once session start \u2713' : 'Auto hide once session start';
     if (btn) {
         if (state.autoHideConfigOnStart) btn.classList.add('config-auto-hide-btn--on');
         else btn.classList.remove('config-auto-hide-btn--on');
@@ -525,7 +526,11 @@ function renderConfig() {
         if (tab === 'llm' && !isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
-        if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
+        if (tab === 'device') {
+            setTimeout(populateAllDeviceDropdowns, 0);
+            // Retry camera/mic preview when user opens Devices tab (e.g. after fixing camera device)
+            if (state.sessionState === 'setup') setTimeout(function () { startPreviewStream(); }, 100);
+        }
         // Preload ASR/TTS model names so pipeline shows them even when user hasn't opened those tabs
         setTimeout(function () { preloadASRModelName(); preloadTTSModelName(); }, 0);
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
@@ -612,6 +617,8 @@ const defaultConfig = {
         show_interim_asr: true,
         enable_timeline: true,
         llm_warmup_while_preview: true,
+        /** When true, new sessions and preview start with mic muted (red circle). Default false = start unmuted (green circle). */
+        start_with_microphone_muted: false,
         barge_in_enabled: false,
         barge_in_trigger: 'final',
         barge_in_partial_count: 3,
@@ -764,7 +771,7 @@ let _warmupResult = null;  // Stores last warmup result {is_vlm, model, etc.}
 function updateStartButtonState(state, info = {}) {
     const startBtn = document.getElementById('start-session-btn');
     if (!startBtn) return;
-    
+
     if (state === 'loading') {
         startBtn.disabled = true;
         startBtn.classList.add('loading');
@@ -775,10 +782,10 @@ function updateStartButtonState(state, info = {}) {
         startBtn.classList.remove('loading');
         startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="play" class="lucide-inline"></i></span> START Session`;
     }
-    
+
     // Update pipeline status indicator
     updatePipelineLLMStatus(info);
-    
+
     // Refresh lucide icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
@@ -789,16 +796,16 @@ function updateStartButtonState(state, info = {}) {
 function updatePipelineLLMStatus(info) {
     const pipelineEl = document.getElementById('pipeline-config');
     if (!pipelineEl) return;
-    
+
     // Find the LLM segment (class is pipeline-seg-llm)
     const llmSeg = pipelineEl.querySelector('.pipeline-seg-llm .pipeline-seg-label');
     if (!llmSeg) return;
-    
+
     // Get the model name from config
     const model = info.model || currentConfig?.llm?.model || '';
     const isVlm = info.is_vlm || false;
     const isError = info.error ? true : false;
-    
+
     // Build status indicator
     let statusIcon = '';
     if (info.loading) {
@@ -808,13 +815,13 @@ function updatePipelineLLMStatus(info) {
     } else if (info.success !== false) {
         statusIcon = '<i data-lucide="check-circle" class="lucide-inline pipeline-status pipeline-status--ok"></i>';
     }
-    
+
     // Build badge
     const badge = isVlm ? '<span class="pipeline-badge vlm">VLM</span>' : '';
-    
+
     // Update the label
     llmSeg.innerHTML = `${statusIcon} ${model} ${badge}`;
-    
+
     // Refresh icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
@@ -825,13 +832,13 @@ async function warmupLLM() {
     const config = currentConfig.llm || {};
     const apiBase = (config.api_base || '').trim();
     const model = (config.model || '').trim();
-    
+
     if (!apiBase || !model) {
         console.log('[Warmup] Skipping - no api_base or model configured');
         updateStartButtonState('ready', {});
         return;
     }
-    
+
     // Avoid duplicate warmups for same config
     const warmupKey = `${apiBase}|${model}`;
     if (warmupKey === _lastWarmupKey && _warmupResult) {
@@ -839,18 +846,18 @@ async function warmupLLM() {
         updateStartButtonState('ready', _warmupResult);
         return;
     }
-    
+
     if (_warmupInProgress) {
         console.log('[Warmup] Already in progress, skipping');
         return;
     }
-    
+
     _warmupInProgress = true;
     console.log('[Warmup] Warming up model:', model, '@', apiBase);
-    
+
     // Show loading state on START button and pipeline
     updateStartButtonState('loading', { model: model.split('/').pop(), loading: true });
-    
+
     try {
         const response = await fetch('/api/llm/warmup', {
             method: 'POST',
@@ -862,7 +869,7 @@ async function warmupLLM() {
                 detect_vlm: true,
             }),
         });
-        
+
         const result = await response.json();
         if (result.success) {
             console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s (VLM: ${result.is_vlm})`);
@@ -1374,20 +1381,20 @@ function toggleVlmSettings() {
     const vlmSettings = document.getElementById('vlm-settings');
     const enableVision = document.getElementById('llm-enable-vision');
     const systemPrompt = document.getElementById('llm-system-prompt');
-    
+
     if (vlmSettings && enableVision) {
         vlmSettings.style.display = enableVision.checked ? 'block' : 'none';
     }
-    
+
     // Swap system prompt content based on vision state and update config
     if (systemPrompt && currentConfig.llm) {
         if (enableVision.checked) {
             // Switching to vision mode - use vision system prompt
-            const visionPrompt = currentConfig.llm.vision_system_prompt || 
+            const visionPrompt = currentConfig.llm.vision_system_prompt ||
                 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.';
             systemPrompt.value = visionPrompt;
             currentConfig.llm.system_prompt = visionPrompt;
-            
+
             // Vision ON → Camera cannot be "none", auto-switch to browser
             if (currentConfig.devices.video_source === 'none' || currentConfig.devices.camera === 'none') {
                 currentConfig.devices.video_source = 'browser';
@@ -1602,15 +1609,15 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             <p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded devices for this session (read-only)</p>
             <div class="form-group">
                 <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${camName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${camName}" aria-readonly="true" />
             </div>
             <div class="form-group">
                 <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${micName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${micName}" aria-readonly="true" />
             </div>
             <div class="form-group">
                 <label><i data-lucide="volume-2" class="lucide-inline"></i> Speaker device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${spkName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${spkName}" aria-readonly="true" />
             </div>
         </div>
     `;
@@ -1631,9 +1638,10 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
                     <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
-                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>Local Video File</option>
+                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>📂 Local Video File</option>
                 </select>
                 <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser), USB cameras on the server, or local video files.</div>
+                ${!readonly && camValue !== 'none' ? '<div class="form-group-row" style="margin-top: 0.5rem;"><button type="button" class="btn-secondary" onclick="startPreviewStream()" title="Retry camera preview (e.g. after fixing device)">Retry camera preview</button></div>' : ''}
                 <div id="local-video-picker" class="local-video-picker" style="display:${camValue === 'local' ? 'flex' : 'none'};">
                     <div class="local-video-picker-loading">Loading videos...</div>
                 </div>
@@ -1670,7 +1678,7 @@ function onDeviceListChange(type, value) {
             }
             return;
         }
-        
+
         if (value === 'none') {
             currentConfig.devices.camera = 'none';
             currentConfig.devices.video_source = 'none';
@@ -1827,9 +1835,25 @@ function renderAppConfig(config, readonly = false) {
     const bargeInTrigger = config.barge_in_trigger === 'partial' ? 'partial' : 'final';
     const partialCount = Math.max(1, Math.min(20, parseInt(config.barge_in_partial_count, 10) || 3));
 
+    const startMuted = !!config.start_with_microphone_muted;
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+
+            <div class="form-group">
+                <div class="form-group-row form-group-row--toggle">
+                    <label class="label-text" for="app-start-mic-muted">
+                        <i data-lucide="mic-off" class="lucide-inline" aria-hidden="true"></i>
+                        <span>Start sessions with microphone muted</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${disabled} id="app-start-mic-muted" ${startMuted ? 'checked' : ''}
+                               onchange="updateConfig('app', 'start_with_microphone_muted', this.checked); appConfigRefresh();">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="input-hint">When unchecked (default), mic starts unmuted (green). When checked, new sessions and preview start muted (red).</div>
+            </div>
 
             <div class="form-group form-group--barge-in">
                 <div class="form-group-row form-group-row--toggle">
@@ -2025,7 +2049,7 @@ function populateCameraDeviceDropdown() {
         select.innerHTML = '';
         select.appendChild(newOption('none', '\uD83D\uDEABNone (No vision-modality)'));
         select.appendChild(newOption('', 'Default (Browser)'));
-        select.appendChild(newOption('local', 'Local Video File'));
+        select.appendChild(newOption('local', '📂 Local Video File'));
         browserCams.forEach(function (d) {
             var label = (d.label || 'Camera ' + (select.options.length)) + ' (Browser)';
             select.appendChild(newOption(d.deviceId || '', label));
@@ -2276,8 +2300,8 @@ function updateConfig(section, key, value) {
     }
     updateConfigTabStates();
 
-    // Persist LLM system prompt and extra request body so they survive reload without "Save as default"
-    if (section === 'llm' && (key === 'system_prompt' || key === 'extra_request_body') && state.isLiveSession) {
+    // Persist LLM system prompt, extra request body, and App "start muted" so they survive reload without "Save as default"
+    if (state.isLiveSession && (section === 'llm' && (key === 'system_prompt' || key === 'extra_request_body') || section === 'app' && key === 'start_with_microphone_muted')) {
         try {
             localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(JSON.parse(JSON.stringify(currentConfig))));
         } catch (e) {
@@ -3078,6 +3102,7 @@ function renderTimeline() {
 }
 
 // Single source: build user amplitude list from timeline (server already has every user_amplitude). Fallback to session.audio_amplitude_history for old sessions.
+// Includes muted so replay can draw user waveform in gray when mic was muted.
 function buildUserAmplitudeFromTimeline(timeline) {
     if (!timeline || !timeline.length) return [];
     const userEvents = timeline.filter(function (e) {
@@ -3085,7 +3110,10 @@ function buildUserAmplitudeFromTimeline(timeline) {
     });
     var out = userEvents.map(function (e) {
         var a = e.amplitude != null ? Number(e.amplitude) : 0;
-        return { timestamp: e.timestamp != null ? Number(e.timestamp) : 0, amplitude: a };
+        var t = e.timestamp != null ? Number(e.timestamp) : 0;
+        var entry = { timestamp: t, amplitude: a };
+        if (e.muted === true) entry.muted = true;
+        return entry;
     }).sort(function (a, b) { return a.timestamp - b.timestamp; });
     // Server stores 0–100. Only normalize 0–1 → 0–100 when data looks like 0–1 (max ≤ 1).
     if (out.length) {
@@ -3127,6 +3155,20 @@ function getAmplitudeAtTime(history, t, maxGapSec) {
         }
     }
     return 0;
+}
+
+// Whether the user mic was muted at time t (for replay: draw user waveform gray when true). Uses nearest sample.
+function getMutedAtTime(history, t) {
+    if (!history || !history.length) return false;
+    const getT = (s) => s.timestamp != null ? s.timestamp : s[0];
+    const getMuted = (s) => s.muted === true;
+    if (t <= getT(history[0])) return getMuted(history[0]);
+    if (t >= getT(history[history.length - 1])) return getMuted(history[history.length - 1]);
+    for (let i = 0; i < history.length - 1; i++) {
+        const t0 = getT(history[i]), t1 = getT(history[i + 1]);
+        if (t >= t0 && t <= t1) return getMuted(history[i]);
+    }
+    return false;
 }
 
 // Get TTS (AI) amplitude at time t from segment list { startTime, endTime, amplitude }
@@ -3586,7 +3628,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         } else {
             // Special colors for other event types
             if (event.event_type?.includes('vad')) {
-                fillColor = '#76B900'; // Green for VAD (user speaking)
+                fillColor = '#76B900'; // NVIDIA green for VAD (user speaking)
                 fillAlpha = 0.5;
             } else if (event.event_type?.includes('asr')) {
                 fillColor = '#2196F3'; // Light blue for generic ASR
@@ -3729,10 +3771,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            // Green: mic (user) waveform. One amplitude bar = 25ms (tStep = 0.025). User and AI data match this.
+            // User waveform: gray only for the segment when mic was muted, green when unmuted (per-sample so sections match).
             if (liveAmplitudeHistory && liveAmplitudeHistory.length > 0) {
-                const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
-                ctx.fillStyle = audioColor;
+                const audioColorGreen = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
+                const audioColorMuted = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio-muted') || '').trim() || '#9ca3af';
                 ctx.globalAlpha = 0.85;
                 const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
                 const barWidthPx = 2;
@@ -3742,6 +3784,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                     const rawAmp = (inLive && t > lastUserTs) ? 0 : getAmplitudeAtTime(liveAmplitudeHistory, t);
                     const amp = Math.min(100, rawAmp * userGain);
                     if (amp <= 0) continue;
+                    ctx.fillStyle = getMutedAtTime(liveAmplitudeHistory, t) ? audioColorMuted : audioColorGreen;
                     const x = visibleLeft + (t - timelineOffset) * timeScale;
                     const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
                     const y1 = centerY - halfH;
@@ -3776,7 +3819,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     }
 
-    // 2b1. Replay (saved session): draw persisted user (mic) waveform — only when t in data range and hide during TTS if below threshold (no green over AI when user silent)
+    // 2b1. Replay (saved session): draw persisted user (mic) waveform — gray when muted, green otherwise
     if (!inLive && !hasStoppedLiveData && replayAudioAmplitudeHistory && replayAudioAmplitudeHistory.length > 0) {
         const laneIndex = lanes.indexOf('audio');
         if (laneIndex !== -1) {
@@ -3793,8 +3836,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
-            ctx.fillStyle = audioColor;
+            const audioColorGreen = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
+            const audioColorMuted = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio-muted') || '').trim() || '#9ca3af';
             ctx.globalAlpha = 0.85;
             const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
             const barWidthPx = 2;
@@ -3803,6 +3846,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 if (t < userT0 || t > userT1) continue;
                 const amp = Math.min(100, getAmplitudeAtTime(replayAudioAmplitudeHistory, t) * userGain);
                 if (amp <= 0) continue;
+                ctx.fillStyle = getMutedAtTime(replayAudioAmplitudeHistory, t) ? audioColorMuted : audioColorGreen;
                 const x = visibleLeft + (t - timelineOffset) * timeScale;
                 const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
                 const y1 = centerY - halfH;
@@ -4404,8 +4448,26 @@ function stopMicWaveform() {
     state._micWaveformDrawLogged = false;
     state._micWaveformSizeLogged = false;
     state._micWaveformFirstDrawLogged = false;
-    var overlay = document.getElementById('mic-waveform-overlay');
-    if (overlay) overlay.style.display = 'none';
+    var strip = document.getElementById('mic-preview-strip');
+    if (strip) strip.style.display = 'none';
+}
+
+/** Show/hide and style the circular mic button (green = unmuted, red = muted); visible when strip is shown in setup or live. */
+function updateMicMutePreviewButton() {
+    var strip = document.getElementById('mic-preview-strip');
+    var btn = document.getElementById('mic-mute-preview-btn');
+    if (!strip || !btn) return;
+    var stripVisible = strip.style.display !== 'none';
+    var show = (state.sessionState === 'live' || state.sessionState === 'setup') && stripVisible;
+    btn.style.display = show ? '' : 'none';
+    if (show) {
+        btn.classList.toggle('muted', state.micMuted);
+        var inner = btn.querySelector('.mic-mute-preview-btn-inner');
+        if (inner) inner.classList.toggle('flipped', state.micMuted);
+        btn.setAttribute('aria-label', state.micMuted ? 'Click to unmute mic' : 'Click to mute mic');
+        btn.setAttribute('title', state.micMuted ? 'Click to unmute' : 'Click to mute');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+    }
 }
 
 /** Draw last 2000ms of mic as symmetric dotted waveform (above and below center), timeline-style. */
@@ -4461,7 +4523,7 @@ function drawMicWaveform() {
     var scale = (h / 2) * 0.8 / 128;
     var radius = 6;
 
-    /* Same rounded rect background for both browser-mic and server-mic (empty or with data). */
+    /* Same rounded rect background for both browser-mic and server-mic (empty or with data). Muted = reddish. */
     ctx.save();
     var bgX = margin;
     var bgY = 0;
@@ -4478,7 +4540,10 @@ function drawMicWaveform() {
     ctx.lineTo(bgX, bgY + radius);
     ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    var bgFill = state.micMuted
+        ? (getComputedStyle(document.documentElement).getPropertyValue('--mic-preview-bg-muted') || '').trim() || 'rgba(0, 102, 102, 0.5)'
+        : (getComputedStyle(document.documentElement).getPropertyValue('--mic-preview-bg') || '').trim() || 'rgba(0, 0, 0, 0.25)';
+    ctx.fillStyle = bgFill;
     ctx.fill();
     ctx.restore();
 
@@ -4488,8 +4553,10 @@ function drawMicWaveform() {
         state._micWaveformFirstDrawLogged = true;
         console.log('[MicWaveform] Drawing server waveform (buffer len=' + ring.length + '); if you see this but no green bars, check canvas/overlay.');
     }
-    var green = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
-    ctx.fillStyle = green;
+    var barColor = state.micMuted
+        ? (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio-muted') || '').trim() || '#9ca3af'
+        : (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
+    ctx.fillStyle = barColor;
     var waveformLeft = margin + innerPadding;
     var waveformWidth = Math.max(0, drawW - innerPadding * 2);
     var barWidthPx = 2;
@@ -4522,8 +4589,10 @@ function startMicWaveform(stream) {
         src.connect(analyser);
         state.micAnalyser = analyser;
         state.micAmplitudeBuffer = [];
-        overlay.style.display = 'block';
+        var strip = document.getElementById('mic-preview-strip');
+        if (strip) strip.style.display = 'flex';
         drawMicWaveform();
+        updateMicMutePreviewButton();
     } catch (e) {
         console.warn('Mic waveform failed:', e);
     }
@@ -4604,11 +4673,12 @@ function buildVoiceConfig() {
 /** Start preview waveform for Server USB mic: open /ws/voice and use user_amplitude for the green bar (same connection used for live). */
 function startMicWaveformFromServer() {
     if (state.voiceWs && (state.voiceWs.readyState === WebSocket.OPEN || state.voiceWs.readyState === WebSocket.CONNECTING)) {
-        var overlay = document.getElementById('mic-waveform-overlay');
-        if (overlay) overlay.style.display = 'block';
+        var strip = document.getElementById('mic-preview-strip');
+        if (strip) strip.style.display = 'flex';
         state.micWaveformFromServer = true;
         state.micAmplitudeBuffer = state.micAmplitudeBuffer || [];
         drawMicWaveform();
+        updateMicMutePreviewButton();
         return;
     }
     stopMicWaveform();
@@ -4620,8 +4690,10 @@ function startMicWaveformFromServer() {
     }
     state.micWaveformFromServer = true;
     state.micAmplitudeBuffer = [];
-    overlay.style.display = 'block';
+    var strip = document.getElementById('mic-preview-strip');
+    if (strip) strip.style.display = 'flex';
     drawMicWaveform();
+    updateMicMutePreviewButton();
 
     // Single connection: use /ws/voice for preview (same 50 Hz user_amplitude). On START we send start_session on this WS instead of reopening.
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -4898,6 +4970,7 @@ function startPreviewStream(options) {
                 videoFeed.style.display = 'block';
                 if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             }
+            state.cameraPreviewRetryScheduled = false;
             updateDeviceIndicators();
             if (stream.getAudioTracks().length > 0) {
                 if (isServerMicSelected()) startMicWaveformFromServer();
@@ -4907,12 +4980,36 @@ function startPreviewStream(options) {
             }
         })
         .catch(function (err) {
-            console.error('getUserMedia failed:', err);
+            var isRetryAttempt = state.cameraPreviewRetryScheduled;
+            if (isRetryAttempt) {
+                console.warn('[Preview] Camera still unavailable (' + (err.name || 'Error') + '). Use "Retry camera preview" or set Camera to None.');
+            } else {
+                console.warn('getUserMedia failed:', err.name, err.message);
+            }
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                 showMicrophonePermissionDeniedHint();
             }
+            // When browser video failed, show placeholder so user sees "no camera" instead of blank/broken
+            if (wantBrowserVideo) {
+                var vf = document.getElementById('video-feed');
+                var mjpegEl = document.getElementById('video-feed-mjpeg');
+                var ph = document.getElementById('image-placeholder');
+                if (vf) { vf.src = ''; vf.srcObject = null; vf.style.display = 'none'; }
+                if (mjpegEl) { mjpegEl.src = ''; mjpegEl.style.display = 'none'; }
+                if (ph) { ph.style.display = 'flex'; updateImagePlaceholderContent(); }
+            }
             updateDeviceIndicators();
             if (wantAudio && isServerMicSelected()) startMicWaveformFromServer();
+            // Retry once per session after 3s for device errors (e.g. camera was busy, then user reset it)
+            var retriable = (err.name === 'NotReadableError' || err.name === 'NotFoundError' || err.name === 'OverconstrainedError');
+            if (retriable && wantBrowserVideo && !state.cameraPreviewRetryScheduled) {
+                state.cameraPreviewRetryScheduled = true;
+                setTimeout(function () {
+                    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+                    console.log('[Preview] Retrying camera after previous failure...');
+                    startPreviewStream();
+                }, 3000);
+            }
         });
 }
 
@@ -4945,7 +5042,6 @@ function updateLiveSessionUI() {
     const pipelineConfigEl = document.getElementById('pipeline-config');
     const startBtn = document.getElementById('start-session-btn');
     const stopBtn = document.getElementById('stop-session-btn');
-    const micMuteBtn = document.getElementById('mic-mute-btn');
 
     const sessionImageEl = document.getElementById('session-image');
     if (sessionImageEl && state.isLiveSession) sessionImageEl.style.display = '';
@@ -4988,7 +5084,6 @@ function updateLiveSessionUI() {
             }
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
-            if (micMuteBtn) micMuteBtn.style.display = 'none';
             // Preview (camera + mic waveform slot) is shown in setup so user sees what they’ll get before clicking START
             startPreviewStream();
             if (isServerMicSelected()) startMicWaveformFromServer();
@@ -4999,8 +5094,14 @@ function updateLiveSessionUI() {
                 if (!hasVideo) updateImagePlaceholderContent();
             }
             // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
-            // Only show one to avoid overlap
+            // Only show one to avoid overlap. Re-attach state.previewStream if it exists but video was cleared (e.g. after re-render).
             var mjpegFeedSetup = document.getElementById('video-feed-mjpeg');
+            if (hasVideo && videoFeed && state.previewStream && state.previewStream.getVideoTracks().length > 0 && (!videoFeed.srcObject || videoFeed.srcObject.getVideoTracks().length === 0)) {
+                videoFeed.srcObject = state.previewStream;
+                videoFeed.style.display = 'block';
+                if (imagePlaceholder) imagePlaceholder.style.display = 'none';
+                if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+            }
             var hasWebRTCSetup = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
             var hasMjpegSetup = mjpegFeedSetup && mjpegFeedSetup.src && mjpegFeedSetup.src !== '';
             if (hasVideo) {
@@ -5016,6 +5117,20 @@ function updateLiveSessionUI() {
             } else {
                 if (videoFeed) videoFeed.style.display = 'none';
                 if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+            }
+            // Deferred restore: startPreviewStream is async; re-apply stream once it's set (fixes timing/race where UI ran before getUserMedia resolved)
+            if (hasVideo && (state.previewStream == null || state.previewStream.getVideoTracks().length === 0)) {
+                setTimeout(function () {
+                    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+                    var v = document.getElementById('video-feed');
+                    var ph = document.getElementById('image-placeholder');
+                    if (state.previewStream && state.previewStream.getVideoTracks().length > 0 && v) {
+                        v.srcObject = state.previewStream;
+                        v.style.display = 'block';
+                        if (ph) ph.style.display = 'none';
+                        updateSessionImageContainerAspect();
+                    }
+                }, 300);
             }
         } else if (state.sessionState === 'live') {
             sessionTitle.textContent = 'Session – ' + turnsSuffix + ' – RECORDING';
@@ -5050,10 +5165,6 @@ function updateLiveSessionUI() {
             }
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'flex';
-            if (micMuteBtn) {
-                micMuteBtn.style.display = 'flex';
-                updateMicMuteButton();
-            }
             renderTimeline();
             updateVoiceDebugPanel();
         } else if (state.sessionState === 'stopped') {
@@ -5075,7 +5186,6 @@ function updateLiveSessionUI() {
             if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'none';
-            if (micMuteBtn) micMuteBtn.style.display = 'none';
             renderTimeline();
             if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         }
@@ -5204,6 +5314,8 @@ function startNewSession() {
             }
         }
     }
+    state.micMuted = !!(currentConfig.app && currentConfig.app.start_with_microphone_muted);
+    state.cameraPreviewRetryScheduled = false;
 
     // Clear chat history
     document.getElementById('chat-history').innerHTML = `
@@ -5294,7 +5406,9 @@ function handleVoiceWsMessage(ev) {
             // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
             var ts = serverTs;
             if (state.liveSessionStartTime > 0 && Array.isArray(state.liveAudioAmplitudeHistory)) {
-                state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: amp });
+                var entry = { timestamp: ts, amplitude: amp };
+                if (state.micMuted) entry.muted = true;
+                state.liveAudioAmplitudeHistory.push(entry);
                 // Server USB: end-of-speech from sparse user_amplitude (20 Hz). Use consecutive sample count, not wall-clock,
                 // so we don't need 0.15s of messages (asr_final would win). 3 consecutive below-threshold ≈ 100ms at 20 Hz.
                 var userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
@@ -5353,7 +5467,9 @@ function handleVoiceWsMessage(ev) {
                 // user_amplitude may already be pushing into liveAudioAmplitudeHistory; do not clear it.
                 if (state.pendingServerMicAmplitude && state.pendingServerMicAmplitude.length) {
                     state.liveAudioAmplitudeHistory = state.liveAudioAmplitudeHistory || [];
-                    state.liveAudioAmplitudeHistory.push.apply(state.liveAudioAmplitudeHistory, state.pendingServerMicAmplitude);
+                    state.pendingServerMicAmplitude.forEach(function (s) {
+                        state.liveAudioAmplitudeHistory.push({ timestamp: s.timestamp, amplitude: s.amplitude, muted: false });
+                    });
                     state.pendingServerMicAmplitude = [];
                 }
                 if (state.micWaveformFromServer) state.micAmplitudeBuffer = [];
@@ -5513,16 +5629,16 @@ function vlmStartCapture(fps, quality, maxWidth) {
         console.log('[VLM] Capture already running');
         return;
     }
-    
+
     vlmRingBuffer.fps = fps || 3.0;
     vlmRingBuffer.quality = quality || 0.7;
     vlmRingBuffer.maxWidth = maxWidth || 640;
     vlmRingBuffer.frames = [];
     vlmRingBuffer.isCapturing = true;
-    
+
     const intervalMs = 1000 / vlmRingBuffer.fps;
     vlmRingBuffer.captureInterval = setInterval(vlmCaptureFrame, intervalMs);
-    
+
     console.log('[VLM] Started capture: fps=' + vlmRingBuffer.fps + ', quality=' + vlmRingBuffer.quality + ', maxWidth=' + vlmRingBuffer.maxWidth);
 }
 
@@ -5547,19 +5663,19 @@ function vlmCaptureFrame() {
     if (!videoFeed || videoFeed.videoWidth === 0 || (videoFeed.paused && !videoFeed.loop)) {
         return;
     }
-    
+
     try {
         const canvas = document.createElement('canvas');
         const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
         canvas.width = Math.min(videoFeed.videoWidth, vlmRingBuffer.maxWidth);
         canvas.height = Math.round(canvas.width / aspectRatio);
-        
+
         const ctx = canvas.getContext('2d');
         ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
-        
+
         const dataUrl = canvas.toDataURL('image/jpeg', vlmRingBuffer.quality);
         const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
-        
+
         // Add to ring buffer
         vlmRingBuffer.frames.push({
             data: dataUrl,
@@ -5567,7 +5683,7 @@ function vlmCaptureFrame() {
             width: canvas.width,
             height: canvas.height
         });
-        
+
         // Trim if over max
         while (vlmRingBuffer.frames.length > vlmRingBuffer.maxFrames) {
             vlmRingBuffer.frames.shift();
@@ -5585,7 +5701,7 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
     if (frames.length === 0 || nFrames <= 0) {
         return [];
     }
-    
+
     // Filter frames within time range
     const inRange = frames.filter(f => f.timestamp >= tStart && f.timestamp <= tEnd);
     if (inRange.length === 0) {
@@ -5594,12 +5710,12 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
         const latest = frames.slice(-Math.min(nFrames, frames.length));
         return latest;
     }
-    
+
     // If we have fewer frames than requested, return all
     if (inRange.length <= nFrames) {
         return inRange;
     }
-    
+
     // Select evenly spaced frames
     const result = [];
     const duration = tEnd - tStart;
@@ -5620,7 +5736,7 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
             result.push(closest);
         }
     }
-    
+
     return result;
 }
 
@@ -5629,7 +5745,7 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
  */
 function vlmSendFrames(tStart, tEnd, nFrames) {
     const selectedFrames = vlmGetFrames(tStart, tEnd, nFrames);
-    
+
     if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
         const payload = {
             type: 'vlm_frames',
@@ -5666,7 +5782,7 @@ function captureAndSendVideoFrame() {
         }
         return;
     }
-    
+
     // Fallback: capture fresh frame
     const videoFeed = document.getElementById('video-feed');
     if (!videoFeed || videoFeed.videoWidth === 0 || (videoFeed.paused && !videoFeed.loop)) {
@@ -5681,7 +5797,7 @@ function captureAndSendVideoFrame() {
         }
         return;
     }
-    
+
     try {
         const canvas = document.createElement('canvas');
         const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
@@ -5691,7 +5807,7 @@ function captureAndSendVideoFrame() {
         ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
-        
+
         if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
             state.voiceWs.send(JSON.stringify({
                 type: 'vlm_frames',
@@ -5778,9 +5894,10 @@ function startSessionRecording() {
         startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
-        state.micMuted = true;
+        /* Use current state.micMuted (may have been toggled in preview); do not overwrite from config */
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
-        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: true }));
+        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+        updateMicMutePreviewButton();
         updateVoiceDebugPanel();
         document.getElementById('chat-history').innerHTML = `
         <div class="empty-state">
@@ -5825,6 +5942,7 @@ function startSessionRecording() {
         if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
+        updateMicMutePreviewButton();
 
         // Create TTS AudioContext now (under user gesture) so playback is not blocked by autoplay policy
         if (!state.ttsAudioContext) {
@@ -5847,8 +5965,8 @@ function startSessionRecording() {
         var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
         ws.send(JSON.stringify({ type: 'start_session', config: config }));
-        state.micMuted = true;
-        ws.send(JSON.stringify({ type: 'mic_mute', muted: true }));
+        /* Use current state.micMuted (may have been toggled in preview); do not overwrite from config */
+        ws.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
         console.log('[Voice] Config and start_session sent, starting mic stream');
         startVoiceMicStream();
     };
@@ -6244,10 +6362,15 @@ function updateMicMuteButton() {
 }
 
 function toggleMicMute() {
-    if (state.sessionState !== 'live' || !state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN) return;
+    /* In setup: toggle determines how session will start (muted/unmuted). In live: toggle and send to server. */
+    if (state.sessionState !== 'live' && state.sessionState !== 'setup') return;
+    if (state.sessionState === 'live' && (!state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN)) return;
     state.micMuted = !state.micMuted;
-    state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
-    updateMicMuteButton();
+    if (state.sessionState === 'live') {
+        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+        renderTimeline(); // redraw so user waveform shows gray when muted
+    }
+    updateMicMutePreviewButton();
 }
 
 function stopSessionRecording() {
@@ -6271,7 +6394,7 @@ function stopSessionRecording() {
     stopVoiceMicStream();
     stopPreviewStream();
     state.sessionState = 'stopped';
-    state.micMuted = true; // reset for next session
+    state.micMuted = !!(currentConfig.app && currentConfig.app.start_with_microphone_muted); // reset for next session
     // Keep isLiveSession true so timeline still shows and can be zoomed/panned
     // Keep message history/balloons visible (no "Session saved!" message)
     const chatEl = document.getElementById('chat-history');
@@ -6505,9 +6628,16 @@ function setupEventHandlers() {
     document.getElementById('stop-session-btn').addEventListener('click', () => {
         stopSessionRecording();
     });
-    document.getElementById('mic-mute-btn').addEventListener('click', () => {
-        toggleMicMute();
-    });
+    var micMutePreviewBtn = document.getElementById('mic-mute-preview-btn');
+    if (micMutePreviewBtn) {
+        micMutePreviewBtn.addEventListener('click', function () {
+            toggleMicMute();
+            this.classList.add('mic-mute-preview-btn-just-clicked');
+        });
+        micMutePreviewBtn.addEventListener('mouseleave', function () {
+            this.classList.remove('mic-mute-preview-btn-just-clicked');
+        });
+    }
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
     const chatInput = document.getElementById('chat-input');

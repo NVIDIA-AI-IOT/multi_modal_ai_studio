@@ -10,10 +10,11 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 from dotenv import load_dotenv
 
@@ -38,6 +39,49 @@ from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _get_network_ips() -> List[str]:
+    """Return non-loopback, non-Docker IPv4 addresses; prefer 192.168.55.* (USB). Include LAN (e.g. 10.x)."""
+    seen: Set[str] = set()
+    ordered: List[str] = []
+    max_ips = 8
+
+    def add(addr: str) -> None:
+        if not addr or addr in seen:
+            return
+        if addr.startswith("127.") or (addr.startswith("172.") and 16 <= int((addr.split(".") + ["0"])[1]) <= 31):
+            return
+        seen.add(addr)
+        if addr.startswith("192.168.55."):
+            ordered.insert(0, addr)
+        else:
+            ordered.append(addr)
+
+    # Prefer full list from hostname -I (all interfaces) when available
+    try:
+        r = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if r.returncode == 0 and r.stdout:
+            for addr in r.stdout.strip().split():
+                add(addr)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+
+    # Fallback: hostname resolution (may miss some interfaces)
+    if not ordered:
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                addr = (info[4][0] if isinstance(info[4], (list, tuple)) else str(info[4]))
+                add(addr)
+        except Exception:
+            pass
+
+    return ordered[:max_ips]
 
 class _QuietAccessLogger(AbstractAccessLogger):
     """Access logger for HTTP requests (can skip high-frequency paths if needed)."""
@@ -879,9 +923,18 @@ class WebUIServer:
         await site.start()
 
         protocol = "https" if self.ssl_context else "http"
+        port = self.port
         logger.info("🚀 Multi-modal AI Studio WebUI")
-        logger.info(f"📡 Server running at {protocol}://{self.host}:{self.port}")
-        logger.info(f"📂 Session directory: {self.session_dir.absolute()}")
+        logger.info("────────────────────────────────────────")
+        logger.info("Access the server at:")
+        logger.info("  🏠 %s://localhost:%s", protocol, port)
+        for ip in _get_network_ips():
+            if ip.startswith("192.168.55."):
+                logger.info("  🚂 %s://%s:%s", protocol, ip, port)
+            else:
+                logger.info("  🌐 %s://%s:%s", protocol, ip, port)
+        logger.info("────────────────────────────────────────")
+        logger.info("📂 Session directory: %s", self.session_dir.absolute())
         if self.ssl_context:
             logger.info("⚠️  Your browser will show a security warning (self-signed certificate)")
             logger.info("    Click 'Advanced' → 'Proceed to localhost' (or 'Accept Risk')")
