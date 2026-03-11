@@ -4980,9 +4980,23 @@ function startPreviewStream(options) {
             }
         })
         .catch(function (err) {
-            console.error('getUserMedia failed:', err);
+            var isRetryAttempt = state.cameraPreviewRetryScheduled;
+            if (isRetryAttempt) {
+                console.warn('[Preview] Camera still unavailable (' + (err.name || 'Error') + '). Use "Retry camera preview" or set Camera to None.');
+            } else {
+                console.warn('getUserMedia failed:', err.name, err.message);
+            }
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                 showMicrophonePermissionDeniedHint();
+            }
+            // When browser video failed, show placeholder so user sees "no camera" instead of blank/broken
+            if (wantBrowserVideo) {
+                var vf = document.getElementById('video-feed');
+                var mjpegEl = document.getElementById('video-feed-mjpeg');
+                var ph = document.getElementById('image-placeholder');
+                if (vf) { vf.src = ''; vf.srcObject = null; vf.style.display = 'none'; }
+                if (mjpegEl) { mjpegEl.src = ''; mjpegEl.style.display = 'none'; }
+                if (ph) { ph.style.display = 'flex'; updateImagePlaceholderContent(); }
             }
             updateDeviceIndicators();
             if (wantAudio && isServerMicSelected()) startMicWaveformFromServer();
