@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -363,9 +364,40 @@ class OpenAILLMBackend(LLMBackend):
             raise ConfigError("LLM API base URL is required")
 
         self.api_base = config.api_base.rstrip("/")
-        self.api_key = config.api_key or "EMPTY"
+        self.api_key = config.api_key or ""
 
         self.logger.info(f"Initialized OpenAI-compatible LLM: {config.model} @ {self.api_base}")
+
+    def _is_local_api_base(self, base: str) -> bool:
+        """True if base URL is localhost or private IP (no auth sent to local vLLM/Ollama)."""
+        try:
+            parsed = urlparse(base if base.startswith("http") else f"http://{base}")
+            host = (parsed.hostname or "").lower()
+            if not host or host == "localhost":
+                return True
+            if host == "127.0.0.1":
+                return True
+            # Private IP ranges
+            if host.startswith("10."):
+                return True
+            if host.startswith("192.168."):
+                return True
+            if host.startswith("172."):
+                parts = host.split(".")
+                if len(parts) == 4 and parts[1].isdigit():
+                    b = int(parts[1])
+                    if 16 <= b <= 31:
+                        return True
+            return False
+        except Exception:
+            return False
+
+    def _should_send_auth(self) -> bool:
+        """True if we should send Authorization header (e.g. for OpenAI). Skip for local vLLM/Ollama."""
+        if self._is_local_api_base(self.api_base):
+            return False
+        key = (self.api_key or "").strip()
+        return bool(key and key.upper() != "EMPTY")
 
     async def list_available_models(self) -> List[str]:
         """List available models from the LLM API.
@@ -397,7 +429,9 @@ class OpenAILLMBackend(LLMBackend):
         # Try OpenAI /v1/models endpoint
         try:
             async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Bearer {self.api_key}"}
+                headers = {}
+                if self._should_send_auth():
+                    headers["Authorization"] = f"Bearer {self.api_key}"
                 async with session.get(
                     f"{self.api_base}/models",
                     headers=headers,
@@ -535,10 +569,9 @@ class OpenAILLMBackend(LLMBackend):
 
         # Prepare API request
         url = f"{self.api_base}/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if self._should_send_auth():
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         max_tokens = self.config.max_tokens
         if self.config.minimal_output:
@@ -646,9 +679,13 @@ class OpenAILLMBackend(LLMBackend):
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta") or {}
 
-                                # vLLM reasoning parser puts thinking into
-                                # reasoning_content and answer into content.
-                                rc = delta.get("reasoning_content") or ""
+                                # vLLM/cosmos-reason: thinking in reasoning_content or reasoning;
+                                # answer in content.
+                                rc = (
+                                    delta.get("reasoning_content")
+                                    or delta.get("reasoning")
+                                    or ""
+                                )
                                 if rc:
                                     if not reasoning_started:
                                         reasoning_started = True
