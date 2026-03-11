@@ -101,6 +101,7 @@
 
                         <!-- 2. Session Image (Preview or Video) -->
                         <div class="session-image-container" id="session-image">
+                        <div class="session-image-inner" id="session-image-inner">
                         <!-- Historical: Static preview image -->
                         <img id="preview-image" class="session-preview-image" alt="Session preview" style="display: none;">
                         <div class="image-placeholder" id="image-placeholder">
@@ -118,6 +119,24 @@
                                 <span class="btn-icon"><i data-lucide="square" class="lucide-inline"></i></span>
                                 STOP
                             </button>
+                        </div>
+                        <!-- Top-right controls: Mirror + Fullscreen (like Live VLM WebUI) -->
+                        <div class="fullscreen-controls" id="fullscreen-controls">
+                            <button type="button" class="fullscreen-btn mirror-btn" id="mirror-video-btn" onclick="toggleVideoMirror()" title="Mirror video">
+                                <i data-lucide="flip-horizontal" class="lucide-inline"></i>
+                            </button>
+                            <button type="button" class="fullscreen-btn" id="fullscreen-video-btn" onclick="toggleVideoFullscreen()" title="Toggle fullscreen (F)">
+                                <i data-lucide="maximize" id="fullscreen-video-icon" class="lucide-inline"></i>
+                            </button>
+                        </div>
+                        <!-- Fullscreen-only: conversation overlays (AI at top, user at bottom above mic strip) -->
+                        <div class="fullscreen-ai-bubble" id="fullscreen-ai-bubble" aria-hidden="true">
+                            <div class="fullscreen-bubble-label"><i data-lucide="bot" class="lucide-inline"></i> AI</div>
+                            <div class="fullscreen-bubble-text" id="fullscreen-ai-text"></div>
+                        </div>
+                        <div class="fullscreen-user-bubble" id="fullscreen-user-bubble" aria-hidden="true">
+                            <div class="fullscreen-bubble-label"><i data-lucide="user" class="lucide-inline"></i> You</div>
+                            <div class="fullscreen-bubble-text" id="fullscreen-user-text"></div>
                         </div>
                         <!-- Live: Video feed (browser = video element; server MJPEG = img, since video does not support multipart/x-mixed-replace) -->
                         <video id="video-feed" class="session-video-feed" autoplay muted playsinline style="display: none;"></video>
@@ -137,6 +156,7 @@
                             <div class="mic-waveform-overlay" id="mic-waveform-overlay" aria-hidden="true">
                                 <canvas id="mic-waveform-canvas"></canvas>
                             </div>
+                        </div>
                         </div>
                         </div>
 
@@ -353,6 +373,30 @@
             <div class="modal-footer">
                 <button class="secondary-btn" id="settings-reset-btn">Reset to Defaults</button>
                 <button class="primary-btn" id="settings-save-btn">Save & Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keyboard shortcuts guide modal (toggle with H) -->
+    <div id="shortcuts-modal" class="modal" aria-label="Keyboard shortcuts" role="dialog">
+        <div class="modal-content modal-content--shortcuts">
+            <div class="modal-header">
+                <h2><i data-lucide="keyboard" class="lucide-inline"></i> Keyboard shortcuts</h2>
+                <button type="button" class="modal-close" id="shortcuts-modal-close" title="Close">&times;</button>
+            </div>
+            <div class="modal-body shortcuts-list">
+                <dl class="shortcuts-dl">
+                    <dt><kbd>M</kbd></dt>
+                    <dd>Mute / unmute microphone</dd>
+                    <dt><kbd>F</kbd></dt>
+                    <dd>Toggle fullscreen (session video)</dd>
+                    <dt><kbd>H</kbd></dt>
+                    <dd>Show this shortcuts guide</dd>
+                    <dt><kbd>U</kbd></dt>
+                    <dd>Open UI Settings</dd>
+                    <dt><kbd>Esc</kbd></dt>
+                    <dd>Close modal</dd>
+                </dl>
             </div>
         </div>
     </div>

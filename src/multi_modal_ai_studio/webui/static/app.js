@@ -485,9 +485,13 @@ function updateSessionImageContainerAspect() {
     if (w > 0 && h > 0) {
         container.style.aspectRatio = w + ' / ' + h;
         container.classList.add('session-image-container--video-aspect');
+        container.style.setProperty('--fullscreen-ar-w', String(w));
+        container.style.setProperty('--fullscreen-ar-h', String(h));
     } else {
         container.style.aspectRatio = '';
         container.classList.remove('session-image-container--video-aspect');
+        container.style.setProperty('--fullscreen-ar-w', '16');
+        container.style.setProperty('--fullscreen-ar-h', '9');
     }
 }
 
@@ -4467,8 +4471,8 @@ function updateMicMutePreviewButton() {
         btn.classList.toggle('muted', state.micMuted);
         var inner = btn.querySelector('.mic-mute-preview-btn-inner');
         if (inner) inner.classList.toggle('flipped', state.micMuted);
-        btn.setAttribute('aria-label', state.micMuted ? 'Click to unmute mic' : 'Click to mute mic');
-        btn.setAttribute('title', state.micMuted ? 'Click to unmute' : 'Click to mute');
+        btn.setAttribute('aria-label', state.micMuted ? 'Click to unmute mic (M)' : 'Click to mute mic (M)');
+        btn.setAttribute('title', state.micMuted ? 'Click or press M to unmute' : 'Click or press M to mute');
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
     }
 }
@@ -4524,6 +4528,8 @@ function drawMicWaveform() {
     var drawW = Math.max(0, w - margin * 2);
     var centerY = h / 2;
     var scale = (h / 2) * 0.8 / 128;
+    var container = document.getElementById('session-image');
+    if (container && container.classList.contains('fullscreen')) scale *= 2;
     var radius = 6;
 
     /* Same rounded rect background for both browser-mic and server-mic (empty or with data). Muted = reddish. */
@@ -5022,6 +5028,7 @@ function updateLiveAsrLabel() {
     const textEl = document.getElementById('live-asr-text');
     if (!wrap || !textEl) return;
     textEl.textContent = state.liveAsrInterimText || '';
+    syncFullscreenOverlays();
 }
 
 function updateLiveSessionUI() {
@@ -6027,6 +6034,7 @@ function renderLiveChat() {
     }
     chatEl.scrollTop = chatEl.scrollHeight;
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    syncFullscreenOverlays();
 }
 
 const TARGET_SAMPLE_RATE = 16000;
@@ -6414,6 +6422,15 @@ function stopSessionRecording() {
     renderTimeline(); // One frame so zoom/scroll is available
     // Reload again after server closes and sends session_saved (in case session_saved arrives after first load)
     setTimeout(function () { loadSessions(); }, 1500);
+
+    // Exit fullscreen when session ends so user returns to normal layout
+    var container = document.getElementById('session-image');
+    var iconEl = document.getElementById('fullscreen-video-icon');
+    if (container && container.classList.contains('fullscreen')) {
+        container.classList.remove('fullscreen');
+        if (iconEl) iconEl.setAttribute('data-lucide', 'maximize');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    }
 }
 
 // ===== Event Handlers =====
@@ -6641,6 +6658,50 @@ function setupEventHandlers() {
             this.classList.remove('mic-mute-preview-btn-just-clicked');
         });
     }
+
+    // Keyboard shortcut: M toggles microphone mute/unmute (when not typing in an input)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'm' && e.key !== 'M') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        toggleMicMute();
+    });
+
+    // Keyboard shortcut: F toggles fullscreen on the session video container
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'f' && e.key !== 'F') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        toggleVideoFullscreen();
+    });
+
+    // Keyboard shortcut: H toggles the shortcuts guide modal
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'h' && e.key !== 'H') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        toggleShortcutsModal();
+    });
+
+    // Keyboard shortcut: U opens UI Settings modal
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'u' && e.key !== 'U') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        openSettingsModal();
+    });
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
     const chatInput = document.getElementById('chat-input');
@@ -7084,6 +7145,49 @@ function updatePipelineLabelTrimming(container) {
     });
 }
 
+/** Toggle fullscreen on the session video/preview container (same pattern as Live VLM WebUI). */
+function toggleVideoFullscreen() {
+    var container = document.getElementById('session-image');
+    var iconEl = document.getElementById('fullscreen-video-icon');
+    if (!container || !iconEl) return;
+    container.classList.toggle('fullscreen');
+    if (container.classList.contains('fullscreen')) {
+        iconEl.setAttribute('data-lucide', 'minimize');
+        updateSessionImageContainerAspect();
+        syncFullscreenOverlays();
+    } else {
+        iconEl.setAttribute('data-lucide', 'maximize');
+    }
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
+/** Toggle mirror (flip horizontal) on video/preview feed. */
+function toggleVideoMirror() {
+    var container = document.getElementById('session-image');
+    if (!container) return;
+    container.classList.toggle('video-mirrored');
+}
+
+/** Sync fullscreen overlay bubbles with latest user transcript and AI response. Call when chat or ASR updates and container is fullscreen. */
+function syncFullscreenOverlays() {
+    var container = document.getElementById('session-image');
+    if (!container || !container.classList.contains('fullscreen')) return;
+    var aiEl = document.getElementById('fullscreen-ai-text');
+    var userEl = document.getElementById('fullscreen-user-text');
+    if (!aiEl || !userEl) return;
+    var lastAi = '';
+    var lastUser = '';
+    if (state.liveChatTurns && state.liveChatTurns.length > 0) {
+        var t = state.liveChatTurns[state.liveChatTurns.length - 1];
+        if (t.assistant) lastAi = t.assistant;
+        if (t.user) lastUser = t.user;
+    }
+    if (state.liveAsrInterimText) lastUser = state.liveAsrInterimText;
+    aiEl.textContent = lastAi;
+    userEl.textContent = lastUser;
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
 /** Refresh pipeline display when config or devices change (live session uses currentConfig and real device labels). */
 function refreshPipelineDisplay() {
     const el = document.getElementById('pipeline-config');
@@ -7180,6 +7284,21 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+        // ESC to exit video fullscreen (same as Live VLM WebUI)
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                var container = document.getElementById('session-image');
+                var iconEl = document.getElementById('fullscreen-video-icon');
+                if (container && container.classList.contains('fullscreen')) {
+                    container.classList.remove('fullscreen');
+                    if (iconEl) {
+                        iconEl.setAttribute('data-lucide', 'maximize');
+                        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+                    }
+                }
+            }
+        });
+
         // Close modal on backdrop click
         document.getElementById('settings-modal').addEventListener('click', (e) => {
             if (e.target.id === 'settings-modal') {
@@ -7230,6 +7349,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Close modal on ESC key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                const shortcutsModal = document.getElementById('shortcuts-modal');
+                if (shortcutsModal && shortcutsModal.classList.contains('show')) {
+                    closeShortcutsModal();
+                    return;
+                }
                 const modal = document.getElementById('settings-modal');
                 if (modal.classList.contains('show')) {
                     closeSettingsModal();
@@ -7237,6 +7361,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 closeSessionMenus();
             }
         });
+
+        // Shortcuts modal: close button and click-outside
+        var shortcutsModalEl = document.getElementById('shortcuts-modal');
+        if (shortcutsModalEl) {
+            var shortcutsCloseBtn = document.getElementById('shortcuts-modal-close');
+            if (shortcutsCloseBtn) shortcutsCloseBtn.addEventListener('click', closeShortcutsModal);
+            shortcutsModalEl.addEventListener('click', function (e) {
+                if (e.target.id === 'shortcuts-modal') closeShortcutsModal();
+            });
+        }
 
         // Session list: menu button and dropdown actions (delegation)
         const sessionItems = document.getElementById('session-items');
@@ -7405,6 +7539,28 @@ function openSettingsModal() {
 function closeSettingsModal() {
     const modal = document.getElementById('settings-modal');
     modal.classList.remove('show');
+}
+
+function openShortcutsModal() {
+    var modal = document.getElementById('shortcuts-modal');
+    if (!modal) return;
+    modal.classList.add('show');
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(modal);
+}
+
+function closeShortcutsModal() {
+    var modal = document.getElementById('shortcuts-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+function toggleShortcutsModal() {
+    var modal = document.getElementById('shortcuts-modal');
+    if (!modal) return;
+    if (modal.classList.contains('show')) {
+        closeShortcutsModal();
+    } else {
+        openShortcutsModal();
+    }
 }
 
 /** Apply UI settings that affect layout (New Chat button label, timeline panel height). Call after loadUISettings or after saving. */
