@@ -1634,7 +1634,10 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
             <p class="input-hint" style="margin-bottom: 1rem;">Select the device for your chat session. Select &#128683;None if you don&apos;t plan to use the device or go text based. <strong>Microphone:</strong> (Browser) = mic on this PC; Server USB = mic attached to the server (e.g. EMEET). <strong>Speaker:</strong> Server USB not yet wired; use (Browser) for playback.</p>
             <div class="form-group">
-                <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;"><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
+                    ${!readonly && camValue !== 'none' ? '<button type="button" class="icon-btn" onclick="startPreviewStream()" title="Retry camera preview (e.g. after fixing device)"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                </div>
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
                     <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
