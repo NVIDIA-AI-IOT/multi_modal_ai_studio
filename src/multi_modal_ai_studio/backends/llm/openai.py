@@ -433,7 +433,7 @@ class OpenAILLMBackend(LLMBackend):
 
         Returns the ``content`` list ready to be placed inside a user message.
         """
-        content: list = []
+        content: list = [{"type": "text", "text": prompt}]
 
         video_url = None
         if (
@@ -477,7 +477,6 @@ class OpenAILLMBackend(LLMBackend):
                 })
             self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
 
-        content.append({"type": "text", "text": prompt})
         return content
 
     async def generate_stream(
