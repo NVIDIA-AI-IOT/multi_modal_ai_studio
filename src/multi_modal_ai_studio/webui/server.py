@@ -481,8 +481,8 @@ class WebUIServer:
             test_messages = [{
                 "role": "user",
                 "content": [
+                    {"type": "text", "text": "1"},
                     {"type": "image_url", "image_url": {"url": tiny_image}},
-                    {"type": "text", "text": "1"}
                 ]
             }]
             

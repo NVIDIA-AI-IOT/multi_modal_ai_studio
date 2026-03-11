@@ -433,7 +433,7 @@ class OpenAILLMBackend(LLMBackend):
 
         Returns the ``content`` list ready to be placed inside a user message.
         """
-        content: list = []
+        content: list = [{"type": "text", "text": prompt}]
 
         video_url = None
         if (
@@ -477,7 +477,6 @@ class OpenAILLMBackend(LLMBackend):
                 })
             self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
 
-        content.append({"type": "text", "text": prompt})
         return content
 
     async def generate_stream(
@@ -575,6 +574,7 @@ class OpenAILLMBackend(LLMBackend):
         _post_think_buf = ""  # buffer after </think> to detect <answer> tags
         _post_think_buffering = False
         _POST_THINK_BUF_MAX = 500  # flush if no <answer> found within this many chars
+        _router_model = None  # track which model actually served the request (useful for routers)
 
         try:
             body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -625,6 +625,8 @@ class OpenAILLMBackend(LLMBackend):
                                 "token_count": token_count,
                                 "full_response": full_response,
                             }
+                            if _router_model:
+                                final_meta["router_model"] = _router_model
                             if reasoning_response:
                                 final_meta["reasoning"] = reasoning_response
                             yield LLMToken(
@@ -636,6 +638,10 @@ class OpenAILLMBackend(LLMBackend):
 
                         try:
                             chunk = json.loads(line)
+
+                            if _router_model is None and chunk.get("model"):
+                                _router_model = chunk["model"]
+                                self.logger.info("[LLM] Router model: %s", _router_model)
 
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 delta = chunk["choices"][0].get("delta") or {}
@@ -743,6 +749,8 @@ class OpenAILLMBackend(LLMBackend):
                     "chars": len(full_response),
                     "tokens": token_count,
                 }
+                if _router_model:
+                    response_log["router_model"] = _router_model
                 if reasoning_response:
                     response_log["reasoning"] = reasoning_response
                     self.logger.info(
