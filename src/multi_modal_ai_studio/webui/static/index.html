@@ -108,15 +108,11 @@
                             <p class="placeholder-text">Multi-modal Session</p>
                             <p class="placeholder-subtext">Vision + Voice Analysis</p>
                         </div>
-                        <!-- Session control: one overlay that morphs from center (Start) to top-left (Stop + MIC) like Live VLM WebUI -->
+                        <!-- Session control: one overlay that morphs from center (Start) to top-left (Stop only); mute is on the bottom strip -->
                         <div class="session-control-overlay session-control-overlay--start" id="session-control-overlay" style="display: none;">
                             <button id="start-session-btn" class="start-btn loading" disabled>
                                 <span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span>
                                 Loading Session...
-                            </button>
-                            <button type="button" id="mic-mute-btn" class="mic-mute-btn mic-mute-btn--overlay muted" style="display: none;" aria-label="Unmute mic to speak">
-                                <span class="btn-icon"><i data-lucide="mic-off" class="lucide-inline"></i></span>
-                                MIC
                             </button>
                             <button type="button" id="stop-session-btn" class="stop-btn stop-btn--overlay" title="Stop session" style="display: none;">
                                 <span class="btn-icon"><i data-lucide="square" class="lucide-inline"></i></span>
@@ -126,9 +122,21 @@
                         <!-- Live: Video feed (browser = video element; server MJPEG = img, since video does not support multipart/x-mixed-replace) -->
                         <video id="video-feed" class="session-video-feed" autoplay muted playsinline style="display: none;"></video>
                         <img id="video-feed-mjpeg" class="session-video-feed" alt="Camera stream" style="display: none;">
-                        <!-- Mic amplitude: last 200ms dotted waveform at bottom of preview -->
-                        <div class="mic-waveform-overlay" id="mic-waveform-overlay" style="display: none;" aria-hidden="true">
-                            <canvas id="mic-waveform-canvas"></canvas>
+                        <!-- Mic amplitude: when muted, red circle (flips to green on hover) + reddish waveform balloon -->
+                        <div class="mic-preview-strip" id="mic-preview-strip" style="display: none;">
+                            <button type="button" id="mic-mute-preview-btn" class="mic-mute-preview-btn" style="display: none;" aria-label="Click to unmute mic" title="Click to unmute">
+                                <span class="mic-mute-preview-btn-inner" aria-hidden="true">
+                                    <span class="mic-mute-preview-btn-face mic-mute-preview-btn-face--unmuted">
+                                        <i data-lucide="mic" class="lucide-inline mic-preview-icon"></i>
+                                    </span>
+                                    <span class="mic-mute-preview-btn-face mic-mute-preview-btn-face--muted">
+                                        <i data-lucide="mic-off" class="lucide-inline mic-preview-icon"></i>
+                                    </span>
+                                </span>
+                            </button>
+                            <div class="mic-waveform-overlay" id="mic-waveform-overlay" aria-hidden="true">
+                                <canvas id="mic-waveform-canvas"></canvas>
+                            </div>
                         </div>
                         </div>
 

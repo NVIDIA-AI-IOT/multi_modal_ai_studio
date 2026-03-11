@@ -491,7 +491,7 @@ async def _run_realtime_loop(
                         now = time.time() - session.timeline.start_time
                         if now - last_amplitude_time >= amplitude_interval:
                             amp = _pcm_rms_to_amplitude(msg.data)
-                            session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+                            session.timeline.add_audio_amplitude(amplitude=amp, source="user", muted=mic_muted)
                             last_amplitude_time = now
                             user_amp_buf.append(amp)
                             if len(user_amp_buf) > 3:
@@ -534,7 +534,7 @@ async def _run_realtime_loop(
                     now = time.time() - session.timeline.start_time
                     if now - last_amplitude_time >= amplitude_interval:
                         amp = _pcm_rms_to_amplitude(chunk)
-                        session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+                        session.timeline.add_audio_amplitude(amplitude=amp, source="user", muted=mic_muted)
                         last_amplitude_time = now
                         user_amp_buf.append(amp)
                         if len(user_amp_buf) > 3:
@@ -975,7 +975,7 @@ async def _run_voice_pipeline(
                 last_amplitude_time = t
                 amp = a
                 did_send = True
-                session.timeline.add_audio_amplitude(amplitude=amp, source="user", timestamp=t)
+                session.timeline.add_audio_amplitude(amplitude=amp, source="user", timestamp=t, muted=mic_muted)
                 try:
                     await ws.send_str(
                         json.dumps({"type": "user_amplitude", "timestamp": round(t, 3), "amplitude": round(amp, 2)})
