@@ -111,44 +111,6 @@ def _build_request_debug_log(url: str, headers: Dict[str, str], payload: Dict[st
     return f"{curl}\n\nPayload (preview):\n{preview}"
 
 
-def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
-    """Remove markdown formatting from text.
-
-    Args:
-        text: Text to process
-        preserve_spaces: If True, preserve leading/trailing spaces (for streaming chunks)
-
-    Returns:
-        Text with markdown removed
-    """
-    # Remove code blocks
-    text = re.sub(r'```[\s\S]*?```', '', text)
-    text = re.sub(r'`([^`]+)`', r'\1', text)
-
-    # Remove headers
-    text = re.sub(r'#{1,6}\s+', '', text)
-
-    # Remove bold/italic
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)
-    text = re.sub(r'__([^_]+)__', r'\1', text)
-    text = re.sub(r'_([^_]+)_', r'\1', text)
-
-    # Remove links [text](url) -> text
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-
-    # Remove list markers
-    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
-
-    # Clean up extra whitespace (but preserve spaces in streaming mode)
-    if not preserve_spaces:
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = text.strip()
-
-    return text
-
-
 def _strip_data_url_prefix(data_url: str) -> str:
     """Extract raw base64 payload from a data URL.
 
@@ -540,9 +502,6 @@ class OpenAILLMBackend(LLMBackend):
         token_count = 0
         reasoning_started = False
         in_think_block = False  # fallback tracker if server lacks reasoning parser
-        _post_think_buf = ""  # buffer after </think> to detect <answer> tags
-        _post_think_buffering = False
-        _POST_THINK_BUF_MAX = 500  # flush if no <answer> found within this many chars
         _router_model = None  # track which model actually served the request (useful for routers)
 
         try:
@@ -576,20 +535,18 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Check for end of stream
                         if line == "[DONE]":
-                            # Flush post-think buffer if stream ends while buffering
-                            if _post_think_buffering and _post_think_buf:
-                                leftover = _post_think_buf
-                                if "<answer>" in leftover:
-                                    leftover = leftover.split("<answer>", 1)[1]
-                                leftover = leftover.replace("</answer>", "")
-                                leftover = strip_markdown(leftover, preserve_spaces=True).strip()
-                                if leftover:
-                                    full_response += leftover
-                                    token_count += 1
-                                    yield LLMToken(token=leftover, is_final=False)
-                                _post_think_buffering = False
-                                _post_think_buf = ""
+                            if in_think_block and not full_response:
+                                self.logger.warning(
+                                    "[LLM] Model exhausted max_tokens (%d) inside <think> and never produced an answer. "
+                                    "Increase max_tokens or disable reasoning.",
+                                    self.config.max_tokens,
+                                )
+                                exhaust_msg = "[No answer — the model used all its tokens on reasoning. Try increasing Max Tokens or disabling reasoning.]"
+                                full_response = exhaust_msg
+                                token_count = 1
+                                yield LLMToken(token=exhaust_msg, is_final=False)
 
+                            reasoning_response = reasoning_response.strip()
                             final_meta: Dict[str, Any] = {
                                 "token_count": token_count,
                                 "full_response": full_response,
@@ -637,58 +594,22 @@ class OpenAILLMBackend(LLMBackend):
                                 if not content:
                                     continue
 
-                                # Fallback: strip <think>...</think> if the
-                                # server doesn't have a reasoning parser.
+                                # Fallback: strip <think>...</think> from content
+                                # when the server lacks a reasoning parser (e.g. Ollama).
                                 if "<think>" in content:
                                     in_think_block = True
                                     content = content.split("<think>", 1)[0]
                                 if in_think_block:
                                     if "</think>" in content:
-                                        after = content.split("</think>", 1)[1]
                                         reasoning_response += content.split("</think>", 1)[0]
+                                        content = content.split("</think>", 1)[1]
                                         in_think_block = False
-                                        content = after
-                                        _post_think_buffering = True
-                                        _post_think_buf = ""
                                     else:
                                         reasoning_response += content
                                         continue
 
-                                if not content and not _post_think_buffering:
-                                    continue
-
-                                # After </think>, buffer briefly to detect <answer> tags
-                                # which indicate leaked reasoning before the real answer.
-                                if _post_think_buffering:
-                                    _post_think_buf += content
-                                    if "<answer>" in _post_think_buf:
-                                        content = _post_think_buf.split("<answer>", 1)[1]
-                                        content = content.replace("</answer>", "")
-                                        _post_think_buffering = False
-                                        _post_think_buf = ""
-                                    elif len(_post_think_buf) >= _POST_THINK_BUF_MAX:
-                                        content = _post_think_buf
-                                        content = content.replace("<answer>", "").replace("</answer>", "")
-                                        _post_think_buffering = False
-                                        _post_think_buf = ""
-                                    else:
-                                        continue
-
-                                # Strip any remaining <answer>/<​/answer> tags
-                                if "<answer>" in content:
-                                    content = content.split("<answer>", 1)[1]
-                                content = content.replace("</answer>", "")
-
                                 if not content:
                                     continue
-
-                                content = strip_markdown(content, preserve_spaces=True)
-
-                                # Strip leading whitespace from first answer token after reasoning
-                                if token_count == 0:
-                                    content = content.lstrip()
-                                    if not content:
-                                        continue
 
                                 full_response += content
                                 token_count += 1

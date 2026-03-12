@@ -597,7 +597,7 @@ const defaultConfig = {
         vision_buffer_fps: 3.0,
         vision_video_encode: false,
         enable_reasoning: false,
-        reasoning_prompt: '\n\nThink step-by-step inside <think>...</think> tags, then write your final answer immediately after </think>. The final answer MUST be exactly one descriptive sentence — no lists, no paragraphs, no tags.'
+        reasoning_prompt: '\n\nAnswer the question using the following format:\n\n<think>\nYour reasoning.\n</think>\n\nWrite your final answer immediately after the </think> tag.'
     },
     tts: {
         backend: 'riva',
@@ -1306,25 +1306,25 @@ function renderLLMConfig(config, readonly = false) {
 
             <div id="vlm-settings" class="form-group" style="display: ${config.enable_vision ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid var(--border-color);">
                 <label style="margin-bottom: 6px;">Vision Input Mode</label>
-                <div style="display: flex; gap: 16px; margin-bottom: 8px;">
+                <div style="display: flex; gap: 32px; margin-bottom: 8px;">
                     <label class="checkbox-label" style="margin: 0; cursor: pointer;">
                         <input type="radio" ${disabled} name="vision-input-mode" value="n-image" ${!config.vision_video_encode ? 'checked' : ''}
-                               onchange="updateConfig('llm', 'vision_video_encode', false);">
+                               onchange="updateConfig('llm', 'vision_video_encode', false); updateVisionFramesUI(false);">
                         N-Image Input
                     </label>
                     <label class="checkbox-label" style="margin: 0; cursor: pointer;">
                         <input type="radio" ${disabled} name="vision-input-mode" value="video" ${config.vision_video_encode ? 'checked' : ''}
-                               onchange="updateConfig('llm', 'vision_video_encode', true);">
+                               onchange="updateConfig('llm', 'vision_video_encode', true); updateVisionFramesUI(true);">
                         Video Input
                     </label>
                 </div>
-                ${!readonly ? '<span class="input-hint">N-Image sends individual frames; Video encodes frames as MP4</span>' : ''}
+                ${!readonly ? '<span class="input-hint">N-Image sends individual JPEG frames; Video encodes frames into MP4</span>' : ''}
 
-                <label style="margin-top: 10px;">Frames per Turn</label>
-                <input type="range" ${disabled} id="llm-vision-frames" min="1" max="10" step="1" value="${config.vision_frames || 4}"
+                <label style="margin-top: 10px;" id="vision-frames-label">${config.vision_video_encode ? 'Video Frames' : 'Frames per Turn'}</label>
+                <input type="range" ${disabled} id="llm-vision-frames" min="1" max="${config.vision_video_encode ? 30 : 20}" step="1" value="${config.vision_frames || 4}"
                        oninput="updateConfig('llm', 'vision_frames', parseInt(this.value)); document.getElementById('vision-frames-value').textContent = this.value;">
                 <span id="vision-frames-value" class="range-value">${config.vision_frames || 4}</span>
-                ${!readonly ? '<span class="input-hint">Number of frames captured and sent per speech turn</span>' : ''}
+                ${!readonly ? `<span class="input-hint" id="vision-frames-hint">${config.vision_video_encode ? 'Frames from buffer encoded into the MP4 video' : 'Individual images sent to VLM per speech turn'}</span>` : ''}
 
                 <label style="margin-top: 10px;">Frame Quality</label>
                 <input type="range" ${disabled} id="llm-vision-quality" min="0.3" max="1.0" step="0.1" value="${config.vision_quality || 0.7}"
@@ -1965,8 +1965,25 @@ function renderAppConfig(config, readonly = false) {
                 </select>
                 ${!readonly ? '<span class="input-hint">Timeline and UI display options are in UI Settings (<i data-lucide="settings" class="lucide-inline"></i> in header)</span>' : ''}
             </div>
+
+            ${!readonly ? `
+            <div class="form-group" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                <button type="button" class="btn-secondary" onclick="resetSessionConfigToDefaults()" style="width: 100%;">
+                    <i data-lucide="rotate-ccw" class="lucide-inline"></i> Reset All Configuration to Defaults
+                </button>
+                <div class="input-hint">Clears saved configuration and restores factory defaults (ASR, LLM, TTS, Devices). Page will reload.</div>
+            </div>
+            ` : ''}
         </div>
     `;
+}
+
+function resetSessionConfigToDefaults() {
+    if (!confirm('Reset all configuration (ASR, LLM/VLM, TTS, Devices, App) to factory defaults? This cannot be undone.')) return;
+    try {
+        localStorage.removeItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+    } catch (e) {}
+    location.reload();
 }
 
 function appConfigRefresh() {
@@ -2268,6 +2285,24 @@ function syncRealtimeApiKeyVisibility() {
     group.style.display = url.indexOf('openai.com') !== -1 ? 'block' : 'none';
 }
 
+function updateVisionFramesUI(isVideo) {
+    const label = document.getElementById('vision-frames-label');
+    const slider = document.getElementById('llm-vision-frames');
+    const hint = document.getElementById('vision-frames-hint');
+    const valSpan = document.getElementById('vision-frames-value');
+    if (label) label.textContent = isVideo ? 'Video Frames' : 'Frames per Turn';
+    if (slider) {
+        slider.max = isVideo ? '30' : '20';
+        let val = parseInt(slider.value);
+        if (isVideo && val < 10) val = 10;
+        if (val > parseInt(slider.max)) val = parseInt(slider.max);
+        slider.value = val;
+        updateConfig('llm', 'vision_frames', val);
+        if (valSpan) valSpan.textContent = val;
+    }
+    if (hint) hint.textContent = isVideo ? 'Frames from buffer encoded into the MP4 video' : 'Individual images sent to VLM per speech turn';
+}
+
 // Update configuration value
 function updateConfig(section, key, value) {
     console.log(`Config updated: ${section}.${key} = ${value}`);
@@ -2391,6 +2426,8 @@ function togglePresetsMenu(ev) {
 }
 function selectLLMPreset(url, label) {
     currentConfig.llm.api_base = url;
+    currentConfig.llm.model = '';
+    currentConfig.llm.cheap_model = '';
     const input = document.getElementById('llm-api-base');
     if (input) input.value = url;
     document.getElementById('presetsMenu').style.display = 'none';
@@ -2398,13 +2435,14 @@ function selectLLMPreset(url, label) {
     fetchLLMModels(url);
 }
 
-function setLLMModelSelectOptions(selectId, models, currentValue, fallbackValue, allowCustomCurrent = true) {
+function setLLMModelSelectOptions(selectId, models, currentValue, fallbackValue) {
     const select = document.getElementById(selectId);
     if (!select) return (currentValue || fallbackValue || '').trim();
     const optionValues = Array.isArray(models) ? models.filter(Boolean) : [];
-    let value = (currentValue || fallbackValue || '').trim();
-    if (value && !optionValues.includes(value) && allowCustomCurrent) optionValues.unshift(value);
-    if (value && !optionValues.includes(value) && !allowCustomCurrent) value = '';
+    let value = (currentValue || '').trim();
+    if (value && !optionValues.includes(value)) value = '';
+    if (!value) value = (fallbackValue || '').trim();
+    if (value && !optionValues.includes(value)) value = '';
     if (!value && optionValues.length) value = optionValues[0];
     select.innerHTML = optionValues.length
         ? optionValues.map(m => `<option value="${escapeHtml(m)}" ${m === value ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')
@@ -2432,8 +2470,7 @@ async function fetchLLMModels(apiBase) {
             'llm-cheap-model-select',
             models,
             currentCheapModel,
-            selectedModel || models[0] || '',
-            false
+            selectedModel || models[0] || ''
         );
         currentConfig.llm.model = selectedModel || currentModel || '';
         currentConfig.llm.cheap_model = selectedCheapModel || currentConfig.llm.model || '';
