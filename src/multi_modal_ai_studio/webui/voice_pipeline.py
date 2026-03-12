@@ -72,21 +72,21 @@ class TTSChunkBuffer:
     eagerly at natural break characters when enough words have accumulated.
     """
 
-    FIRST_CHUNK_WORDS = 10
-    MIN_BREAK_WORDS = 6
-    MAX_CHUNK_WORDS = 18
     TTS_BREAKS = frozenset(".!?,;:\n\u2014-")
 
-    def __init__(self) -> None:
+    def __init__(self, first_chunk_words: int = 10) -> None:
         self._buf = ""
         self._first_sent = False
+        self._first_chunk_words = max(3, min(first_chunk_words, 30))
+        self._min_break_words = max(3, self._first_chunk_words // 2)
+        self._max_chunk_words = max(self._first_chunk_words, self._first_chunk_words * 2)
 
     def add(self, token: str) -> Optional[str]:
         """Add a token. Returns a chunk when one is ready to speak."""
         self._buf += token
         words = len(self._buf.split())
-        limit = self.FIRST_CHUNK_WORDS if not self._first_sent else self.MAX_CHUNK_WORDS
-        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self.MIN_BREAK_WORDS
+        limit = self._first_chunk_words if not self._first_sent else self._max_chunk_words
+        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self._min_break_words
         if hit_break or words >= limit:
             chunk = self._buf.strip()
             self._buf = ""
@@ -1517,7 +1517,7 @@ async def _run_voice_pipeline(
                 ts_first = ts_llm_start
                 ts_llm_complete = ts_llm_start
                 tts_started = False
-                chunk_buf = TTSChunkBuffer() if use_stream_tts else None
+                chunk_buf = TTSChunkBuffer(first_chunk_words=getattr(tts_config, "tts_chunk_words", 10)) if use_stream_tts else None
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 

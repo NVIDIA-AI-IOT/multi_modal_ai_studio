@@ -607,7 +607,8 @@ const defaultConfig = {
         sample_rate: 22050,
         quality: 'high',
         realtime_transport: 'websocket',
-        stream_tts: true
+        stream_tts: true,
+        tts_chunk_words: 10
     },
     devices: {
         camera: 'browser',
@@ -1598,10 +1599,17 @@ function renderTTSConfig(config, readonly = false) {
             <div class="form-group" style="margin-top: 12px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">
                 <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                     <input type="checkbox" ${disabled} ${config.stream_tts !== false ? 'checked' : ''}
-                           onchange="updateConfig('tts', 'stream_tts', this.checked)">
+                           onchange="updateConfig('tts', 'stream_tts', this.checked); document.getElementById('tts-chunk-words-group').style.display = this.checked ? 'block' : 'none';">
                     <span>Start speaking before LLM finishes</span>
                 </label>
                 <span class="input-hint">Streams TTS sentence-by-sentence as the LLM generates, reducing time to first audio</span>
+                <div id="tts-chunk-words-group" style="display: ${config.stream_tts !== false ? 'block' : 'none'}; margin-top: 8px;">
+                    <label>Words before first speech</label>
+                    <input type="range" ${disabled} id="tts-chunk-words" min="5" max="20" step="1" value="${config.tts_chunk_words || 10}"
+                           oninput="updateConfig('tts', 'tts_chunk_words', parseInt(this.value)); document.getElementById('tts-chunk-words-value').textContent = this.value;">
+                    <span id="tts-chunk-words-value" class="range-value">${config.tts_chunk_words || 10}</span>
+                    ${!readonly ? '<span class="input-hint">Lower = faster response, higher = smoother speech</span>' : ''}
+                </div>
             </div>
         </div>
     `;
