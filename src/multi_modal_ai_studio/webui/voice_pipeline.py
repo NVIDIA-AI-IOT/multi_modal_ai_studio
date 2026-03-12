@@ -72,21 +72,21 @@ class TTSChunkBuffer:
     eagerly at natural break characters when enough words have accumulated.
     """
 
-    FIRST_CHUNK_WORDS = 10
-    MIN_BREAK_WORDS = 6
-    MAX_CHUNK_WORDS = 18
     TTS_BREAKS = frozenset(".!?,;:\n\u2014-")
 
-    def __init__(self) -> None:
+    def __init__(self, first_chunk_words: int = 10) -> None:
         self._buf = ""
         self._first_sent = False
+        self._first_chunk_words = max(3, min(first_chunk_words, 30))
+        self._min_break_words = max(3, self._first_chunk_words // 2)
+        self._max_chunk_words = max(self._first_chunk_words, self._first_chunk_words * 2)
 
     def add(self, token: str) -> Optional[str]:
         """Add a token. Returns a chunk when one is ready to speak."""
         self._buf += token
         words = len(self._buf.split())
-        limit = self.FIRST_CHUNK_WORDS if not self._first_sent else self.MAX_CHUNK_WORDS
-        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self.MIN_BREAK_WORDS
+        limit = self._first_chunk_words if not self._first_sent else self._max_chunk_words
+        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self._min_break_words
         if hit_break or words >= limit:
             chunk = self._buf.strip()
             self._buf = ""
@@ -761,26 +761,6 @@ async def _run_voice_pipeline(
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
 
-    # Edge LLM crashes with large image payloads (500 Streaming inference failed).
-    # Auto-cap width/quality so any preset works with any backend.
-    _EDGE_LLM_MAX_WIDTH = 640
-    _EDGE_LLM_MAX_QUALITY = 0.7
-    _api_base = getattr(llm_config, "api_base", "") or ""
-    _api_lower = _api_base.lower()
-    if "58010" in _api_base or "tensorrt" in _api_lower or "edge-llm" in _api_lower:
-        if vision_max_width > _EDGE_LLM_MAX_WIDTH:
-            logger.warning(
-                "[VLM] Edge LLM detected — capping vision_max_width %d → %d to avoid payload crash",
-                vision_max_width, _EDGE_LLM_MAX_WIDTH,
-            )
-            vision_max_width = _EDGE_LLM_MAX_WIDTH
-        if vision_quality > _EDGE_LLM_MAX_QUALITY:
-            logger.warning(
-                "[VLM] Edge LLM detected — capping vision_quality %.2f → %.2f",
-                vision_quality, _EDGE_LLM_MAX_QUALITY,
-            )
-            vision_quality = _EDGE_LLM_MAX_QUALITY
-
     _use_video_encode = bool(getattr(llm_config, "vision_video_encode", False))
     if _use_video_encode and vision_buffer_fps < 3.0:
         logger.warning(
@@ -1302,7 +1282,6 @@ async def _run_voice_pipeline(
                 # VLM: Request frames (time-synchronized with speech)
                 image_data_urls: list = []
                 speech_duration_secs: float = 0.0
-                is_cosmos = _use_video_encode
                 if vision_enabled:
                     # Use the ASR final's original timestamp as end-of-speech,
                     # NOT ts_llm_start (which is when the turn is dequeued).
@@ -1335,19 +1314,12 @@ async def _run_voice_pipeline(
                         t_start = t_end - MAX_SPEECH_WINDOW_SECS
                         speech_duration_secs = MAX_SPEECH_WINDOW_SECS
                     
-                    # Cosmos models: request ALL available frames for video encoding.
-                    # Video preserves temporal info (motion, actions, state changes).
-                    # FrameBroker stores at ~10fps → 3s speech ≈ 30 frames, 5s ≈ 50.
-                    # Non-Cosmos: keep few frames (each image ≈ 1000 tokens).
-                    if is_cosmos:
-                        n_frames_request = 100  # large cap; FrameBroker returns what's available
-                    else:
-                        n_frames_request = vision_frames_count  # default 4
+                    n_frames_request = vision_frames_count
                     
                     source = "FrameBroker" if _use_server_camera() else "browser"
                     logger.info(
-                        "[VLM] Requesting %d frames from %s (speech: %.2fs–%.2fs, dur=%.2fs, cosmos=%s)",
-                        n_frames_request, source, t_start, t_end, speech_duration_secs, is_cosmos,
+                        "[VLM] Requesting %d frames from %s (speech: %.2fs–%.2fs, dur=%.2fs, video_encode=%s)",
+                        n_frames_request, source, t_start, t_end, speech_duration_secs, _use_video_encode,
                     )
                     
                     ts_frame_request = time.time()
@@ -1368,7 +1340,7 @@ async def _run_voice_pipeline(
                             "speech_duration": round(speech_duration_secs, 2),
                             "latency_ms": round(frame_latency_ms),
                             "source": source,
-                            "cosmos_video": is_cosmos,
+                            "video_encode": _use_video_encode,
                         })
 
                     else:
@@ -1545,7 +1517,7 @@ async def _run_voice_pipeline(
                 ts_first = ts_llm_start
                 ts_llm_complete = ts_llm_start
                 tts_started = False
-                chunk_buf = TTSChunkBuffer() if use_stream_tts else None
+                chunk_buf = TTSChunkBuffer(first_chunk_words=getattr(tts_config, "tts_chunk_words", 10)) if use_stream_tts else None
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 

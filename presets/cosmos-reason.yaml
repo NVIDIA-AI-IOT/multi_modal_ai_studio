@@ -21,7 +21,7 @@ llm:
   system_prompt: "You analyze live video from the user's camera. Answer based on what you see. Be precise and concise — 1-2 short sentences only."
   enable_vision: true
   vision_system_prompt: "You analyze live video from the user's camera. Answer based on what you see. Be precise and concise — 1-2 short sentences only."
-  vision_frames: 4          # Overridden to ~100 for Cosmos in voice_pipeline (temporal video)
+  vision_frames: 100         # Video mode: request many frames for temporal video encoding
   vision_detail: auto
   vision_quality: 0.8
   vision_max_width: 768

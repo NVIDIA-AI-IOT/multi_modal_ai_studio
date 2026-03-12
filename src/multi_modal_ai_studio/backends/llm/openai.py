@@ -111,72 +111,6 @@ def _build_request_debug_log(url: str, headers: Dict[str, str], payload: Dict[st
     return f"{curl}\n\nPayload (preview):\n{preview}"
 
 
-def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
-    """Remove markdown formatting from text.
-
-    Args:
-        text: Text to process
-        preserve_spaces: If True, preserve leading/trailing spaces (for streaming chunks)
-
-    Returns:
-        Text with markdown removed
-    """
-    # Remove code blocks
-    text = re.sub(r'```[\s\S]*?```', '', text)
-    text = re.sub(r'`([^`]+)`', r'\1', text)
-
-    # Remove headers
-    text = re.sub(r'#{1,6}\s+', '', text)
-
-    # Remove bold/italic
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)
-    text = re.sub(r'__([^_]+)__', r'\1', text)
-    text = re.sub(r'_([^_]+)_', r'\1', text)
-
-    # Remove links [text](url) -> text
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-
-    # Remove list markers
-    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
-
-    # Clean up extra whitespace (but preserve spaces in streaming mode)
-    if not preserve_spaces:
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = text.strip()
-
-    return text
-
-
-def _is_ollama_backend(config) -> bool:
-    """Return True if the configured api_base points to an Ollama server."""
-    api_base = getattr(config, "api_base", "") or ""
-    return "11434" in api_base or "ollama" in api_base.lower()
-
-
-def _is_tensorrt_edge_backend(config) -> bool:
-    """Return True if api_base points to a TensorRT Edge LLM server (image payload format)."""
-    api_base = getattr(config, "api_base", "") or ""
-    base_lower = api_base.lower()
-    return "58010" in api_base or "tensorrt" in base_lower or "edge-llm" in base_lower
-
-
-def _should_use_video(config) -> bool:
-    """Return True when frames should be encoded as MP4 video.
-
-    Controlled by ``vision_video_encode`` config flag, but automatically
-    disabled for backends that don't support video_url (e.g. Ollama, TensorRT Edge).
-    """
-    if not bool(getattr(config, "vision_video_encode", False)):
-        return False
-    if _is_ollama_backend(config):
-        return False
-    if _is_tensorrt_edge_backend(config):
-        return False
-    return True
-
-
 def _strip_data_url_prefix(data_url: str) -> str:
     """Extract raw base64 payload from a data URL.
 
@@ -186,24 +120,6 @@ def _strip_data_url_prefix(data_url: str) -> str:
     if "," in data_url:
         return data_url.split(",", 1)[1]
     return data_url
-
-
-# Cosmos-Reason models always use video encoding (even for few frames)
-# for temporal understanding.  The browser capture FPS is raised
-# dynamically for Cosmos so both browser and USB cameras provide a
-# similar number of frames.
-_MIN_FRAMES_FOR_VIDEO = 2
-
-# When sending individual images (non-Cosmos VLMs), cap the count to
-# limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
-# is a good trade-off between visual context and prefill latency.
-_MAX_VIDEO_FALLBACK_IMAGES = 10
-_MAX_TENSORRT_EDGE_IMAGES = 3
-# Qwen3-VL uses ~170 tokens per video frame.  With max_model_len=8192,
-# system prompt ≈ 300 tokens, user text ≈ 50, max_tokens ≈ 512,
-# budget ≈ 8192 - 300 - 50 - 512 = 7330 → ~43 frames.
-# Use 35 as a safe cap to leave headroom.
-_MAX_COSMOS_VIDEO_FRAMES = 35
 
 
 def _encode_images_to_video_base64(
@@ -341,7 +257,6 @@ class OpenAILLMBackend(LLMBackend):
     Features:
     - Streaming token generation
     - Conversation history management
-    - Automatic model detection (for Ollama)
     - Markdown stripping for voice output
     """
 
@@ -461,26 +376,19 @@ class OpenAILLMBackend(LLMBackend):
     ) -> list:
         """Build the multimodal ``content`` list for a user message.
 
-        All backends (vLLM, Ollama, TensorRT Edge LLM, SGLang, OpenAI) use
-        the standard OpenAI ``image_url`` format.  Cosmos-Reason models
-        additionally support ``video_url`` when video encoding is enabled.
+        Two paths controlled purely by the user's ``vision_video_encode`` config:
+        - True  → encode frames as MP4 video (``video_url``), fall back to images on failure
+        - False → send individual images (``image_url``)
 
-        Returns the ``content`` list ready to be placed inside a user message.
+        No backend detection, no sub-sampling, no hardcoded caps.
         """
         content: list = [{"type": "text", "text": prompt}]
 
-        video_url = None
-        if (
-            _should_use_video(self.config)
-            and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
-        ):
-            imgs_for_video = image_data_urls
-            if len(imgs_for_video) > _MAX_COSMOS_VIDEO_FRAMES:
-                step = len(imgs_for_video) / _MAX_COSMOS_VIDEO_FRAMES
-                imgs_for_video = [imgs_for_video[int(i * step)] for i in range(_MAX_COSMOS_VIDEO_FRAMES)]
-                self.logger.info("VLM: sub-sampled %d → %d frames for video (token budget)", len(image_data_urls), len(imgs_for_video))
+        use_video = bool(getattr(self.config, "vision_video_encode", False))
+
+        if use_video and len(image_data_urls) >= 2:
             video_url = _encode_images_to_video_base64(
-                imgs_for_video,
+                image_data_urls,
                 speech_duration_secs=speech_duration or 0.0,
             )
             if video_url:
@@ -488,28 +396,18 @@ class OpenAILLMBackend(LLMBackend):
                     "type": "video_url",
                     "video_url": {"url": video_url},
                 })
-                self.logger.info("VLM request (Cosmos video): %d frames encoded to MP4", len(image_data_urls))
+                self.logger.info("VLM request (video): %d frames encoded to MP4", len(image_data_urls))
+                return content
             else:
                 self.logger.warning("Video encoding failed, falling back to multi-image")
-                video_url = None
 
-        if not video_url:
-            detail = getattr(self.config, "vision_detail", "auto")
-            imgs = image_data_urls
-            if _is_tensorrt_edge_backend(self.config) and len(imgs) > _MAX_TENSORRT_EDGE_IMAGES:
-                step = len(imgs) / _MAX_TENSORRT_EDGE_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_TENSORRT_EDGE_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images (Edge LLM limit)", len(image_data_urls), len(imgs))
-            elif _should_use_video(self.config) and len(imgs) > _MAX_VIDEO_FALLBACK_IMAGES:
-                step = len(imgs) / _MAX_VIDEO_FALLBACK_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_VIDEO_FALLBACK_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images (Cosmos video fallback)", len(image_data_urls), len(imgs))
-            for img_url in imgs:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": img_url, "detail": detail},
-                })
-            self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
+        detail = getattr(self.config, "vision_detail", "auto")
+        for img_url in image_data_urls:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": img_url, "detail": detail},
+            })
+        self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(image_data_urls))
 
         return content
 
@@ -604,9 +502,6 @@ class OpenAILLMBackend(LLMBackend):
         token_count = 0
         reasoning_started = False
         in_think_block = False  # fallback tracker if server lacks reasoning parser
-        _post_think_buf = ""  # buffer after </think> to detect <answer> tags
-        _post_think_buffering = False
-        _POST_THINK_BUF_MAX = 500  # flush if no <answer> found within this many chars
         _router_model = None  # track which model actually served the request (useful for routers)
 
         try:
@@ -640,20 +535,18 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Check for end of stream
                         if line == "[DONE]":
-                            # Flush post-think buffer if stream ends while buffering
-                            if _post_think_buffering and _post_think_buf:
-                                leftover = _post_think_buf
-                                if "<answer>" in leftover:
-                                    leftover = leftover.split("<answer>", 1)[1]
-                                leftover = leftover.replace("</answer>", "")
-                                leftover = strip_markdown(leftover, preserve_spaces=True).strip()
-                                if leftover:
-                                    full_response += leftover
-                                    token_count += 1
-                                    yield LLMToken(token=leftover, is_final=False)
-                                _post_think_buffering = False
-                                _post_think_buf = ""
+                            if in_think_block and not full_response:
+                                self.logger.warning(
+                                    "[LLM] Model exhausted max_tokens (%d) inside <think> and never produced an answer. "
+                                    "Increase max_tokens or disable reasoning.",
+                                    self.config.max_tokens,
+                                )
+                                exhaust_msg = "[No answer — the model used all its tokens on reasoning. Try increasing Max Tokens or disabling reasoning.]"
+                                full_response = exhaust_msg
+                                token_count = 1
+                                yield LLMToken(token=exhaust_msg, is_final=False)
 
+                            reasoning_response = reasoning_response.strip()
                             final_meta: Dict[str, Any] = {
                                 "token_count": token_count,
                                 "full_response": full_response,
@@ -701,58 +594,22 @@ class OpenAILLMBackend(LLMBackend):
                                 if not content:
                                     continue
 
-                                # Fallback: strip <think>...</think> if the
-                                # server doesn't have a reasoning parser.
+                                # Fallback: strip <think>...</think> from content
+                                # when the server lacks a reasoning parser (e.g. Ollama).
                                 if "<think>" in content:
                                     in_think_block = True
                                     content = content.split("<think>", 1)[0]
                                 if in_think_block:
                                     if "</think>" in content:
-                                        after = content.split("</think>", 1)[1]
                                         reasoning_response += content.split("</think>", 1)[0]
+                                        content = content.split("</think>", 1)[1]
                                         in_think_block = False
-                                        content = after
-                                        _post_think_buffering = True
-                                        _post_think_buf = ""
                                     else:
                                         reasoning_response += content
                                         continue
 
-                                if not content and not _post_think_buffering:
-                                    continue
-
-                                # After </think>, buffer briefly to detect <answer> tags
-                                # which indicate leaked reasoning before the real answer.
-                                if _post_think_buffering:
-                                    _post_think_buf += content
-                                    if "<answer>" in _post_think_buf:
-                                        content = _post_think_buf.split("<answer>", 1)[1]
-                                        content = content.replace("</answer>", "")
-                                        _post_think_buffering = False
-                                        _post_think_buf = ""
-                                    elif len(_post_think_buf) >= _POST_THINK_BUF_MAX:
-                                        content = _post_think_buf
-                                        content = content.replace("<answer>", "").replace("</answer>", "")
-                                        _post_think_buffering = False
-                                        _post_think_buf = ""
-                                    else:
-                                        continue
-
-                                # Strip any remaining <answer>/<​/answer> tags
-                                if "<answer>" in content:
-                                    content = content.split("<answer>", 1)[1]
-                                content = content.replace("</answer>", "")
-
                                 if not content:
                                     continue
-
-                                content = strip_markdown(content, preserve_spaces=True)
-
-                                # Strip leading whitespace from first answer token after reasoning
-                                if token_count == 0:
-                                    content = content.lstrip()
-                                    if not content:
-                                        continue
 
                                 full_response += content
                                 token_count += 1
