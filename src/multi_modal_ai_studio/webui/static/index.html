@@ -121,7 +121,7 @@
                         <div class="session-control-overlay session-control-overlay--start" id="session-control-overlay" style="display: none;">
                             <button id="start-session-btn" class="start-btn loading" disabled>
                                 <span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span>
-                                Loading Session...
+                                Preparing…
                             </button>
                             <button type="button" id="stop-session-btn" class="stop-btn stop-btn--overlay" title="Stop session" style="display: none;">
                                 <span class="btn-icon"><i data-lucide="square" class="lucide-inline"></i></span>
@@ -168,10 +168,6 @@
                         </div>
                         </div>
 
-                        <!-- Live ASR label (updated on every partial; like Live RIVA WebUI) -->
-                        <div class="live-asr-label-wrap" id="live-asr-label-wrap" style="display: none;">
-                            <span class="live-asr-prefix">Listening: </span><span id="live-asr-text"></span>
-                        </div>
                     </div>
                     <!-- Right column when config collapsed: chat history + voice debug at bottom -->
                     <div class="chat-panel-right-col" id="chat-panel-right-col">
@@ -356,6 +352,15 @@
                                     <span class="settings-text">
                                         <div class="settings-title">Show Message Timestamps</div>
                                         <div class="settings-desc">Display timestamps on chat messages</div>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ui-limit-session-image-height">
+                                    <span class="settings-text">
+                                        <div class="settings-title">Limit session video height</div>
+                                        <div class="settings-desc">Cap video/image height so it fits in view without vertical scroll (useful for ultra-wide or 32:9 displays)</div>
                                     </span>
                                 </label>
                             </div>

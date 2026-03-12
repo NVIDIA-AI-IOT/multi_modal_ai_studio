@@ -2012,6 +2012,15 @@ code, pre {
     flex-shrink: 0;
     box-shadow: var(--shadow-md);
 }
+/* While in setup (Start overlay visible) and no video yet, keep container 16:9 so it isn't too tall; once video has dimensions (--video-aspect), allow shrink to avoid padding */
+.session-image-container:has(.session-control-overlay--start):not(.session-image-container--video-aspect) {
+    aspect-ratio: 16 / 7;
+    flex-shrink: 0;
+}
+body[data-limit-session-image-height="true"] .session-image-container:has(.session-control-overlay--start):not(.session-image-container--video-aspect):not(.fullscreen) {
+    aspect-ratio: 16 / 7;
+    flex-shrink: 0;
+}
 /* Inner wrapper: in normal mode fills container; in fullscreen becomes centered video frame so overlays sit on video */
 .session-image-inner {
     position: relative;
@@ -2022,6 +2031,42 @@ code, pre {
 /* When video is active, JS sets aspect-ratio from video dimensions to avoid gray letterboxing */
 .session-image-container.session-image-container--video-aspect {
     max-height: none;
+}
+
+/* UI setting: limit session image height so it fits in view without vertical scroll (e.g. 32:9 displays). Driven by body attribute. Exclude .fullscreen so fullscreen mode is unaffected. */
+body[data-limit-session-image-height="true"] .session-image-container:not(.fullscreen) {
+    max-height: 60vh !important;
+    aspect-ratio: auto; /* allow height to be capped; inner content letterboxes via object-fit: contain */
+}
+body[data-limit-session-image-height="true"] .session-image-container:not(.fullscreen).session-image-container--video-aspect {
+    max-height: 60vh !important;
+    aspect-ratio: auto;
+}
+/* Preview (non-collapsed): allow main-wrap and session-image to shrink so 60vh cap is effective */
+body[data-limit-session-image-height="true"] .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-main-wrap {
+    min-height: 0;
+}
+body[data-limit-session-image-height="true"] .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-main-wrap .session-image-container:not(.fullscreen) {
+    max-height: 60vh !important;
+    min-height: 0;
+    flex-shrink: 1; /* override base flex-shrink: 0 so item can shrink below intrinsic (aspect-ratio) size */
+    aspect-ratio: auto; /* allow height to be capped by max-height; inner video/img will letterbox via object-fit: contain */
+}
+/* In setup (Start overlay visible) and no video yet: keep container 16:9; once video has dimensions, allow shrink to avoid top/bottom padding */
+body[data-limit-session-image-height="true"] .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-main-wrap .session-image-container:not(.fullscreen):has(.session-control-overlay--start):not(.session-image-container--video-aspect) {
+    aspect-ratio: 16 / 9;
+    flex-shrink: 0;
+}
+/* With limit-height: let session-image shrink so main-wrap doesn’t scroll; show video at reduced size */
+body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container:not(.fullscreen) {
+    max-height: 60vh !important;
+    flex: 1 1 0;
+    min-height: 0;
+}
+body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container:not(.fullscreen).session-image-container--video-aspect {
+    max-height: 60vh !important;
+    flex: 1 1 0;
+    min-height: 0;
 }
 
 .session-preview-image,
@@ -2475,26 +2520,6 @@ code, pre {
 .pipeline-badge.vlm {
     background: var(--nvidia-green, #76b900);
     color: white;
-}
-
-/* ===== Live ASR label (updated on every partial; like Live RIVA WebUI) ===== */
-.live-asr-label-wrap {
-    flex-shrink: 0;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    margin-bottom: 4px;
-    min-height: 1.5em;
-}
-.live-asr-prefix {
-    color: var(--text-tertiary);
-    margin-right: 0.25rem;
-}
-#live-asr-text {
-    color: var(--timeline-speech, var(--text-primary));
 }
 
 /* ===== Chat History (compact: more lines visible) ===== */
