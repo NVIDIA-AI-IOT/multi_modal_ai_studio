@@ -3053,6 +3053,14 @@ code, pre {
     transform: scale(0.95);
 }
 
+/* Icon button with text label (e.g. Preset) – allow width to fit content */
+.icon-btn.icon-btn--with-label {
+    width: auto;
+    min-width: 36px;
+    padding: 0 10px;
+    gap: 6px;
+}
+
 /* System prompt preset buttons [1] [2] [3] */
 .system-prompt-preset-btn {
     min-width: 32px;

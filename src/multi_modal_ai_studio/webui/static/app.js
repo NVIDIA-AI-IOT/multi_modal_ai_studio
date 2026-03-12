@@ -1216,7 +1216,7 @@ function renderLLMConfig(config, readonly = false) {
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">API Base URL</label>
                     ${!disableApiAndModel ? `<div style="position: relative;">
-                        <button type="button" class="icon-btn" onclick="togglePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i></button>
+                        <button type="button" class="icon-btn icon-btn--with-label" onclick="togglePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i> Preset</button>
                         <div class="api-presets-menu" id="presetsMenu" style="display: none;">
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:11434/v1', 'Ollama')"><strong>Ollama</strong><span>http://localhost:11434/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8000/v1', 'vLLM')"><strong>vLLM</strong><span>http://localhost:8000/v1</span></div>
