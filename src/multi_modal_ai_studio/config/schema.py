@@ -212,6 +212,7 @@ class TTSConfig:
     speed: float = 1.0
     response_format: str = "pcm"
     stream_tts: bool = True
+    tts_chunk_words: int = 10  # Words to buffer before first TTS chunk (5=fast, 20=smoother)
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.

@@ -2160,6 +2160,11 @@ code, pre {
     display: block;
     top: 80px; /* below STOP, Mirror, Shrink icons (12px + 40px + gap) */
 }
+/* AI bubble: lighter purple for readability on dark fullscreen background (timeline-ai is #9C27B0) */
+.session-image-container.fullscreen .fullscreen-ai-bubble .fullscreen-bubble-label,
+.session-image-container.fullscreen .fullscreen-ai-bubble .fullscreen-bubble-text {
+    color: #d465ff; /* Material Purple 100 - lighter than --timeline-ai */
+}
 /* You (user) bubble: distance from bottom. Micro-adjust: larger = higher, smaller = lower (closer to mic strip). */
 .session-image-container.fullscreen .fullscreen-user-bubble {
     display: block;
@@ -2610,11 +2615,10 @@ code, pre {
 .chat-bubble.user {
     border-left: 1px solid #4a6b28;
     border-right: 3px solid var(--info);
-    flex-direction: row-reverse;
     background: #4a6b28;
     color: rgba(255,255,255,0.95);
     border-color: #4a6b28;
-    margin-left: 20%;
+    margin-left: auto;
 }
 
 .chat-bubble.ai,
@@ -2713,6 +2717,17 @@ code, pre {
     line-height: 1.2;
     text-align: right;
 }
+.chat-meta .lucide-inline {
+    width: 0.9em;
+    height: 0.9em;
+    vertical-align: -0.15em;
+    margin-right: 0.15em;
+}
+.chat-meta-gap {
+    display: inline-block;
+    width: 1em;
+    min-width: 1em;
+}
 
 .chat-placeholder {
     color: var(--text-tertiary);
@@ -2762,6 +2777,10 @@ code, pre {
     padding: var(--space-sm) var(--space-md); /* Reduced padding */
     position: relative;
     transition: height var(--transition-base), min-height var(--transition-base);
+}
+
+.timeline-panel.timeline-panel--dragging {
+    transition: none;
 }
 
 .timeline-panel.timeline-panel--height-auto {
@@ -3088,6 +3107,14 @@ code, pre {
 
 .icon-btn:active {
     transform: scale(0.95);
+}
+
+/* Icon button with text label (e.g. Preset) – allow width to fit content */
+.icon-btn.icon-btn--with-label {
+    width: auto;
+    min-width: 36px;
+    padding: 0 10px;
+    gap: 6px;
 }
 
 /* System prompt preset buttons [1] [2] [3] */
