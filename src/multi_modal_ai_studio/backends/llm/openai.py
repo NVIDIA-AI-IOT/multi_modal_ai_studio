@@ -26,6 +26,33 @@ from multi_modal_ai_studio.config.schema import LLMConfig
 
 logger = logging.getLogger(__name__)
 
+# -----------------------------------------------------------------------------
+# Video encode capability (PyAV + PIL)
+# -----------------------------------------------------------------------------
+
+def video_encode_available() -> bool:
+    """Return True if frames can be encoded to MP4 (PyAV and PIL available)."""
+    try:
+        import av  # noqa: F401
+        from PIL import Image  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _log_video_encode_unavailable() -> None:
+    """Log a prominent error when Video Input is selected but PyAV/PIL are missing."""
+    msg = (
+        "\n"
+        "********************************************************************************\n"
+        "  VIDEO INPUT UNAVAILABLE: PyAV and/or PIL are not installed.\n"
+        "  Vision will use N-Image (multiple JPEGs) instead of MP4.\n"
+        "  To enable Video Input: pip install av Pillow\n"
+        "  Or in the UI select \"N-Image Input\" instead of \"Video Input\".\n"
+        "********************************************************************************\n"
+    )
+    logger.error(msg)
+
 
 def _format_json(obj: Any) -> str:
     """Pretty-format JSON; use jq if available, else json.dumps with indent."""
@@ -157,7 +184,6 @@ def _encode_images_to_video_base64(
         import time as _time
         from PIL import Image
     except ImportError:
-        logger.warning("[Video Encode] PyAV or PIL not available, falling back to multi-image")
         return None
 
     n_frames = len(image_data_urls)
@@ -399,7 +425,7 @@ class OpenAILLMBackend(LLMBackend):
                 self.logger.info("VLM request (video): %d frames encoded to MP4", len(image_data_urls))
                 return content
             else:
-                self.logger.warning("Video encoding failed, falling back to multi-image")
+                _log_video_encode_unavailable()
 
         detail = getattr(self.config, "vision_detail", "auto")
         for img_url in image_data_urls:

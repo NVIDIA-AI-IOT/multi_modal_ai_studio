@@ -122,6 +122,9 @@ class LLMConfig:
         reasoning_prompt: The prompt text appended to the system prompt when enable_reasoning
             is True. Users can customise this to match their model's reasoning format.
         history_turns: Number of previous turns to include as context (0=no history)
+        vision_include_history: When enable_vision is True, if True include text-only conversation
+            history so follow-ups (e.g. "How about this?") get context. If False, no history is sent
+            with vision input to avoid repeated answers when the scene changes.
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
     api_base: str = "http://localhost:11434/v1"
@@ -137,7 +140,8 @@ class LLMConfig:
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     history_turns: int = 3  # Previous turns sent as text-only context (0=disabled)
-    
+    vision_include_history: bool = False  # When vision on: include history for follow-ups (default: no)
+
     # -------------------------------------------------------------------------
     # Vision (VLM) settings - send camera frames with prompts
     # When enable_vision=True, camera frames are captured and sent with each prompt
@@ -153,9 +157,9 @@ class LLMConfig:
     vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
     enable_reasoning: bool = False  # True to allow <think> chain-of-thought; filtered from TTS
     reasoning_prompt: str = (
-        "Answer the question using the following format:\n\n"
-        "<think>\nYour reasoning.\n</think>\n\n"
-        "Write your final answer immediately after the </think> tag."
+        "\n\nThink step-by-step inside <think> tags, then write your final answer "
+        "immediately after </think>. The final answer MUST be exactly one descriptive "
+        "sentence — no lists, no paragraphs, no tags."
     )
 
     def validate(self) -> List[str]:

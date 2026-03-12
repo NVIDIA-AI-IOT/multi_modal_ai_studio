@@ -25,7 +25,7 @@ load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
 from multi_modal_ai_studio.config.schema import LLMConfig
-from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
+from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.riva import list_riva_tts_voices_sync
 from multi_modal_ai_studio.devices.local import (
@@ -226,6 +226,7 @@ class WebUIServer:
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
         self.app.router.add_get('/api/config/prefills', self.handle_config_prefills)
+        self.app.router.add_get('/api/vision/video-encode-available', self.handle_vision_video_encode_available)
         self.app.router.add_get('/ws/voice', handle_voice_ws)
         self.app.router.add_get('/ws/mic-preview', handle_mic_preview_ws)
         self.app.router.add_get('/ws/camera-webrtc', handle_camera_webrtc_ws)
@@ -259,6 +260,10 @@ class WebUIServer:
         if api_key:
             payload["openai_api_key"] = api_key
         return web.json_response(payload)
+
+    async def handle_vision_video_encode_available(self, request: web.Request) -> web.Response:
+        """GET /api/vision/video-encode-available: True if PyAV and PIL are installed for Video Input."""
+        return web.json_response({"available": video_encode_available()})
 
     async def handle_static_file(self, request):
         """Serve static files (CSS, JS)."""
