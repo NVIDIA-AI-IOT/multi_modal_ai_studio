@@ -140,7 +140,9 @@ const uiSettings = {
     /** User (mic) voice threshold 0–100: amplitude >= this = voice, below = silence (TTL end-of-speech, hide low user bars during TTS). Default 5. */
     userVoiceThreshold: 5,
     /** Session directory override: '' = default (sessions), 'mock_sessions' = sample data. Sent to server via PATCH /api/app/session-dir. */
-    sessionDirOverride: ''
+    sessionDirOverride: '',
+    /** When true, cap session video/image height so it fits in view without vertical scroll (e.g. for ultra-wide 32:9 displays). */
+    limitSessionImageHeight: true
 };
 
 // Load UI settings from localStorage
@@ -456,6 +458,8 @@ function applyConfigPanelCollapse() {
     if (expandStrip) expandStrip.style.display = collapsed ? 'flex' : 'none';
     if (collapseBtn) collapseBtn.style.display = (inSession && !collapsed) ? 'inline-flex' : 'none';
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    // Re-apply limit-height so session-image class is in sync when collapse state changes
+    applyUISettingsToLayout();
 }
 
 function updateAutoHideConfigLabel() {
@@ -779,7 +783,7 @@ function updateStartButtonState(state, info = {}) {
     if (state === 'loading') {
         startBtn.disabled = true;
         startBtn.classList.add('loading');
-        startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span> Loading Session...`;
+        startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span> Preparing…`;
     } else {
         // 'ready' or 'error' - both enable the button, pipeline shows status
         startBtn.disabled = false;
@@ -5057,27 +5061,12 @@ function startPreviewStream(options) {
         });
 }
 
-/** Update the live ASR label (Listening: &lt;partial text&gt;) from state.liveAsrInterimText. Call on every asr_partial and on asr_final (to clear). */
-function updateLiveAsrLabel() {
-    const wrap = document.getElementById('live-asr-label-wrap');
-    const textEl = document.getElementById('live-asr-text');
-    if (!wrap || !textEl) return;
-    textEl.textContent = state.liveAsrInterimText || '';
-    syncFullscreenOverlays();
-}
-
 function updateLiveSessionUI() {
     if (!state.isLiveSession) state.configPanelCollapsed = false;
     if (state.isLiveSession && state.sessionState === 'live' && state.autoHideConfigOnStart) state.configPanelCollapsed = true;
     updateConfigPanelState();
     applyConfigPanelCollapse();
-    const liveAsrWrap = document.getElementById('live-asr-label-wrap');
-    if (liveAsrWrap) {
-        const showInterim = (currentConfig.app && currentConfig.app.show_interim_asr !== false);
-        liveAsrWrap.style.display = (state.isLiveSession && state.sessionState === 'live' && showInterim) ? 'block' : 'none';
-        if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
-        if (state.isLiveSession && state.sessionState === 'live' && showInterim) updateLiveAsrLabel();
-    }
+    if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
     const sessionControlOverlay = document.getElementById('session-control-overlay');
     const deviceTags = document.getElementById('device-tags');
     const videoFeed = document.getElementById('video-feed');
@@ -5536,7 +5525,7 @@ function handleVoiceWsMessage(ev) {
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
                         if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
                 state.liveAsrInterimText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
-                        updateLiveAsrLabel();
+                        syncFullscreenOverlays();
             } else if (evt.event_type === 'asr_final') {
                         if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
                     var ft = evt.timestamp != null ? Number(evt.timestamp) : null;
@@ -5544,7 +5533,7 @@ function handleVoiceWsMessage(ev) {
                                 state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
                         }
                         state.liveAsrInterimText = '';
-                        updateLiveAsrLabel();
+                        syncFullscreenOverlays();
                 var userText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                         if (userText) {
                             var last = state.liveChatTurns[state.liveChatTurns.length - 1];
@@ -7572,6 +7561,8 @@ function openSettingsModal() {
     document.getElementById('ui-auto-scroll-chat').checked = uiSettings.autoScrollChat;
     document.getElementById('ui-show-timestamps').checked = uiSettings.showTimestamps;
     document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
+    const limitSessionImageHeightEl = document.getElementById('ui-limit-session-image-height');
+    if (limitSessionImageHeightEl) limitSessionImageHeightEl.checked = !!uiSettings.limitSessionImageHeight;
 
     const timelineAuto = document.getElementById('ui-timeline-height-auto');
     const timelinePx = document.getElementById('ui-timeline-height-px');
@@ -7620,7 +7611,36 @@ function toggleShortcutsModal() {
     }
 }
 
-/** Apply UI settings that affect layout (New Chat button label, timeline panel height). Call after loadUISettings or after saving. */
+/** Debug: run in browser console to inspect why limitSessionImageHeight may not apply. Call: __debugLimitSessionImageHeight() */
+function __debugLimitSessionImageHeight() {
+    const el = document.getElementById('session-image');
+    const mainWrap = document.getElementById('chat-panel-main-wrap');
+    const setting = typeof uiSettings !== 'undefined' ? uiSettings.limitSessionImageHeight : 'N/A';
+    const bodyAttr = document.body ? document.body.getAttribute('data-limit-session-image-height') : 'N/A';
+    const classes = el ? Array.from(el.classList) : [];
+    const computed = el && el.ownerDocument && el.ownerDocument.defaultView
+        ? el.ownerDocument.defaultView.getComputedStyle(el)
+        : null;
+    const maxHeight = computed ? computed.getPropertyValue('max-height') : 'N/A';
+    const flex = computed ? computed.getPropertyValue('flex') : 'N/A';
+    const wrapOverflow = mainWrap && mainWrap.ownerDocument && mainWrap.ownerDocument.defaultView
+        ? mainWrap.ownerDocument.defaultView.getComputedStyle(mainWrap).getPropertyValue('overflow-y')
+        : 'N/A';
+    console.log('[limitSessionImageHeight debug]', {
+        uiSettings_limitSessionImageHeight: setting,
+        body_data_limit_session_image_height: bodyAttr,
+        session_image_exists: !!el,
+        session_image_classList: classes,
+        computed_max_height: maxHeight,
+        computed_flex: flex,
+        chat_panel_main_wrap_overflow_y: wrapOverflow,
+        chat_panel_has_collapsed: document.getElementById('chat-panel')?.classList.contains('chat-panel--config-collapsed'),
+    });
+    return { setting, bodyAttr, el, classes, maxHeight, flex, wrapOverflow };
+}
+if (typeof window !== 'undefined') window.__debugLimitSessionImageHeight = __debugLimitSessionImageHeight;
+
+/** Apply UI settings that affect layout (New Chat button label, timeline panel height, session image height cap). Call after loadUISettings or after saving. */
 function applyUISettingsToLayout() {
     const newBtn = document.getElementById('new-session-btn');
     if (newBtn) {
@@ -7637,6 +7657,10 @@ function applyUISettingsToLayout() {
             panel.style.height = px + 'px';
         }
     }
+    // Use body data attribute so limit applies to .session-image-container even if element is recreated or not yet in DOM
+    if (document.body) {
+        document.body.setAttribute('data-limit-session-image-height', uiSettings.limitSessionImageHeight ? 'true' : 'false');
+    }
     if (state.selectedSession) {
         renderTimeline();
     }
@@ -7652,6 +7676,8 @@ function saveSettingsFromModal() {
     uiSettings.autoScrollChat = document.getElementById('ui-auto-scroll-chat').checked;
     uiSettings.showTimestamps = document.getElementById('ui-show-timestamps').checked;
     uiSettings.showDebugInfo = document.getElementById('ui-show-debug-info').checked;
+    const limitSessionImageHeightEl = document.getElementById('ui-limit-session-image-height');
+    uiSettings.limitSessionImageHeight = limitSessionImageHeightEl ? limitSessionImageHeightEl.checked : false;
 
     const timelineAuto = document.getElementById('ui-timeline-height-auto');
     const timelinePx = document.getElementById('ui-timeline-height-px');
@@ -7692,6 +7718,7 @@ function resetUISettings() {
         uiSettings.userAudioGain = 2;
         uiSettings.aiAudioGain = 2;
         uiSettings.userVoiceThreshold = 5;
+        uiSettings.limitSessionImageHeight = true;
 
         saveUISettings();
 
@@ -7703,6 +7730,8 @@ function resetUISettings() {
         document.getElementById('ui-auto-scroll-chat').checked = uiSettings.autoScrollChat;
         document.getElementById('ui-show-timestamps').checked = uiSettings.showTimestamps;
         document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
+        const limitSessionImageHeightResetEl = document.getElementById('ui-limit-session-image-height');
+        if (limitSessionImageHeightResetEl) limitSessionImageHeightResetEl.checked = uiSettings.limitSessionImageHeight;
         const timelineAuto = document.getElementById('ui-timeline-height-auto');
         const timelinePx = document.getElementById('ui-timeline-height-px');
         const timelinePxValue = document.getElementById('ui-timeline-height-px-value');
