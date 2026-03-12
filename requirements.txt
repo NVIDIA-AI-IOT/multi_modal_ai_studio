@@ -10,6 +10,10 @@ pyaudio>=0.2.13
 numpy>=1.21.0
 websockets>=11.0
 
+# Vision: Video Input (encode frames to MP4 for Cosmos-style VLMs)
+av>=10.0.0
+Pillow>=9.0.0
+
 # Optional: Jetson USB camera preview (pip install -e ".[camera]" or uncomment below)
 # opencv-python-headless>=4.5.0
 

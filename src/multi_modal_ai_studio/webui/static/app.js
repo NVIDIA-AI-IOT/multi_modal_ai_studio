@@ -401,6 +401,7 @@ function updateConfigPanelState() {
     if (!panel) return;
     const autoHideBtn = document.getElementById('auto-hide-config-btn');
     const configContent = document.getElementById('config-content');
+    const configFooter = document.getElementById('config-footer');
     const isSetup = state.sessionState === 'setup';
     const canEditConfig = state.isLiveSession && isSetup;
 
@@ -408,6 +409,7 @@ function updateConfigPanelState() {
         panel.classList.add('config-panel--editable');
         panel.classList.remove('config-panel--locked');
         if (autoHideBtn) autoHideBtn.disabled = false;
+        if (configFooter) configFooter.style.display = '';
         setConfigInputsDisabled(false);
     } else {
         panel.classList.remove('config-panel--editable');
@@ -417,6 +419,7 @@ function updateConfigPanelState() {
             panel.classList.remove('config-panel--locked');
         }
         if (autoHideBtn) autoHideBtn.disabled = !state.isLiveSession;
+        if (configFooter) configFooter.style.display = 'none';
         setConfigInputsDisabled(!canEditConfig);
     }
 }
@@ -527,7 +530,10 @@ function renderConfig() {
     // If in live session setup mode, show editable forms; when live/stopped, form is disabled via updateConfigPanelState
     if (state.isLiveSession) {
         contentEl.innerHTML = renderEditableConfigForm(tab, currentConfig[configKey], false);
-        if (tab === 'llm' && !isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+        if (tab === 'llm') {
+            if (!isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+            if (currentConfig.llm.enable_vision && currentConfig.llm.vision_video_encode) setTimeout(checkVideoEncodeAndShowBanner, 0);
+        }
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
         if (tab === 'device') {
@@ -556,7 +562,12 @@ function renderConfig() {
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
 
-// Default configuration state for new sessions
+// Client-side default config: used when a key is missing from currentConfig (e.g. after merging
+// a preset). Presets are only loaded when the server is started with --preset <name>; then
+// fetchAndApplyInitialConfig() GETs /api/config/initial and deep-merges that preset into
+// currentConfig. Keys not present in the preset are left as-is (or filled from here when
+// rendering the form). So the "reasoning prompt" text you see in the UI comes from here, not
+// from the preset file.
 const defaultConfig = {
     asr: {
         backend: 'riva',
@@ -586,10 +597,11 @@ const defaultConfig = {
         max_tokens: 2048,
         minimal_output: false,
         stream: true,
-        system_prompt: 'You are a helpful AI assistant.',
+        system_prompt: 'You are a helpful AI assistant. Reply in plain text only — no markdown, asterisks, or other formatting.',
         extra_request_body: '',
         enable_vision: false,
-        vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.',
+        vision_include_history: false,
+        vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations. Use plain text only — no markdown or formatting.',
         vision_detail: 'auto',
         vision_frames: 4,
         vision_quality: 0.8,
@@ -597,7 +609,7 @@ const defaultConfig = {
         vision_buffer_fps: 3.0,
         vision_video_encode: false,
         enable_reasoning: false,
-        reasoning_prompt: '\n\nAnswer the question using the following format:\n\n<think>\nYour reasoning.\n</think>\n\nWrite your final answer immediately after the </think> tag.'
+        reasoning_prompt: '\n\nThink step-by-step inside <think> tags, then write your final answer immediately after </think>. The final answer MUST be exactly one descriptive sentence — no lists, no paragraphs, no tags.'
     },
     tts: {
         backend: 'riva',
@@ -640,15 +652,63 @@ let _serverPresetConfig = null;
 // Default config saved by user (for "New Voice Chat with Default Configuration" later)
 const DEFAULT_VOICE_CHAT_CONFIG_KEY = 'defaultVoiceChatConfig';
 
+// Legacy reasoning_prompt string we no longer use as default (migrate away when loading from localStorage)
+var _legacyReasoningPromptSubstring = 'Think step-by-step inside <think>';
+
+/** Run once on load: clear old default reasoning_prompt from localStorage so all users get the new default. */
+function migrateStoredDefaultConfigReasoningPrompt() {
+    try {
+        var saved = localStorage.getItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+        if (!saved) return;
+        var parsed = JSON.parse(saved);
+        if (!parsed.llm || typeof parsed.llm.reasoning_prompt !== 'string') return;
+        if (parsed.llm.reasoning_prompt.indexOf(_legacyReasoningPromptSubstring) === -1) return;
+        parsed.llm.reasoning_prompt = '';
+        localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(parsed));
+    } catch (e) {}
+}
+migrateStoredDefaultConfigReasoningPrompt();
+
 function getDefaultConfig() {
     try {
         const saved = localStorage.getItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
         if (!saved) return null;
         const parsed = JSON.parse(saved);
-        return { ...defaultConfig, ...parsed };
+        var out = { ...defaultConfig, ...parsed };
+        // These LLM strings always come from in-code default, not localStorage (so app updates show up)
+        if (out.llm && defaultConfig.llm) {
+            out.llm.reasoning_prompt = defaultConfig.llm.reasoning_prompt;
+            out.llm.system_prompt = defaultConfig.llm.system_prompt;
+            out.llm.vision_system_prompt = defaultConfig.llm.vision_system_prompt;
+        }
+        return out;
     } catch (e) {
         console.warn('Failed to load saved default config:', e);
         return null;
+    }
+}
+
+/** Clear saved default and set current config to built-in defaultConfig (localStorage cleared; + New Voice Chat will use defaultConfig). */
+function resetDefaultConfig() {
+    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+    try {
+        localStorage.removeItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+        currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+        applyEnvPrefillsToCurrentConfig();
+        renderConfig();
+        const btn = document.getElementById('reset-default-config-btn');
+        if (btn) {
+            var origHTML = btn.innerHTML;
+            btn.innerHTML = 'Reset';
+            btn.disabled = true;
+            setTimeout(function () {
+                btn.innerHTML = origHTML;
+                btn.disabled = false;
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+            }, 1200);
+        }
+    } catch (e) {
+        console.error('Failed to reset default config:', e);
     }
 }
 
@@ -658,10 +718,10 @@ function saveDefaultConfig() {
         localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(currentConfig));
         const btn = document.getElementById('save-default-config-btn');
         if (btn) {
-            const origHTML = btn.innerHTML;
+            var origHTML = btn.innerHTML;
             btn.innerHTML = 'Saved';
             btn.disabled = true;
-            setTimeout(() => {
+            setTimeout(function () {
                 btn.innerHTML = origHTML;
                 btn.disabled = false;
                 if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
@@ -1320,6 +1380,9 @@ function renderLLMConfig(config, readonly = false) {
                     </label>
                 </div>
                 ${!readonly ? '<span class="input-hint">N-Image sends individual JPEG frames; Video encodes frames into MP4</span>' : ''}
+                <div id="vision-video-unavailable-banner" class="vision-video-unavailable-banner" style="display: none; margin-top: 10px;" role="alert">
+                    <strong>Video Input unavailable:</strong> PyAV and PIL are not installed. Install with <code>pip install av Pillow</code> or use N-Image Input instead.
+                </div>
 
                 <label style="margin-top: 10px;" id="vision-frames-label">${config.vision_video_encode ? 'Video Frames' : 'Frames per Turn'}</label>
                 <input type="range" ${disabled} id="llm-vision-frames" min="1" max="${config.vision_video_encode ? 30 : 20}" step="1" value="${config.vision_frames || 4}"
@@ -1339,6 +1402,13 @@ function renderLLMConfig(config, readonly = false) {
                 <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
 
                 <label class="checkbox-label" style="margin-top: 12px;">
+                    <input type="checkbox" ${disabled} id="llm-vision-include-history" ${config.vision_include_history ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'vision_include_history', this.checked)">
+                    Include conversation history (for follow-ups like &quot;How about this?&quot;)
+                </label>
+                ${!readonly ? '<span class="input-hint">When on, previous Q&amp;A is sent as text so the model can answer follow-up questions. May repeat answers if the scene did not change.</span>' : ''}
+
+                <label class="checkbox-label" style="margin-top: 12px;">
                     <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
                            onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
                     Enable Reasoning (chain-of-thought)
@@ -1346,8 +1416,8 @@ function renderLLMConfig(config, readonly = false) {
                 ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to the system prompt. Reasoning text is stripped before TTS.</span>' : ''}
                 <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
                     <label>Reasoning Prompt</label>
-                    <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;"
-                              onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt || defaultConfig.llm.reasoning_prompt || '')}</textarea>
+                    <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;" placeholder="e.g. Think step-by-step in <think>...</think> then your final answer."
+                              onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt ?? defaultConfig.llm.reasoning_prompt ?? '')}</textarea>
                     ${!readonly ? '<span class="input-hint">Appended to system prompt when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
                 </div>
             </div>
@@ -2298,6 +2368,7 @@ function updateVisionFramesUI(isVideo) {
     const slider = document.getElementById('llm-vision-frames');
     const hint = document.getElementById('vision-frames-hint');
     const valSpan = document.getElementById('vision-frames-value');
+    const banner = document.getElementById('vision-video-unavailable-banner');
     if (label) label.textContent = isVideo ? 'Video Frames' : 'Frames per Turn';
     if (slider) {
         slider.max = isVideo ? '30' : '20';
@@ -2309,6 +2380,64 @@ function updateVisionFramesUI(isVideo) {
         if (valSpan) valSpan.textContent = val;
     }
     if (hint) hint.textContent = isVideo ? 'Frames from buffer encoded into the MP4 video' : 'Individual images sent to VLM per speech turn';
+    if (banner && !isVideo) banner.style.display = 'none';
+    if (isVideo) checkVideoEncodeAndShowBanner();
+}
+
+function showVisionVideoUnavailableToast() {
+    var toast = document.getElementById('vision-video-unavailable-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'vision-video-unavailable-toast';
+        toast.setAttribute('role', 'alert');
+        toast.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 12px 20px; background: rgba(239, 68, 68, 0.95); color: #fff; border-radius: 8px; font-size: 14px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = 'Video Input unavailable: PyAV and PIL are not installed. Install with <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:4px;">pip install av Pillow</code> or use N-Image Input instead. Switched to N-Image.';
+    toast.style.display = 'block';
+    setTimeout(function () { toast.style.display = 'none'; }, 6000);
+}
+
+function showVoiceErrorToast(message) {
+    var text = (message && String(message).trim()) || 'An error occurred. Please try again.';
+    var toast = document.getElementById('voice-error-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'voice-error-toast';
+        toast.setAttribute('role', 'alert');
+        toast.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 12px 20px; background: rgba(239, 68, 68, 0.95); color: #fff; border-radius: 8px; font-size: 14px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = text;
+    toast.style.display = 'block';
+    setTimeout(function () { toast.style.display = 'none'; }, 5000);
+}
+
+async function checkVideoEncodeAndShowBanner() {
+    const banner = document.getElementById('vision-video-unavailable-banner');
+    if (!currentConfig.llm || !currentConfig.llm.vision_video_encode) {
+        if (banner) banner.style.display = 'none';
+        return;
+    }
+    try {
+        const r = await fetch(getApiBase() + '/api/vision/video-encode-available');
+        const data = await r.json();
+        if (data.available === true) {
+            if (banner) banner.style.display = 'none';
+            return;
+        }
+        // Video Input selected but deps missing: force fallback to N-Image
+        currentConfig.llm.vision_video_encode = false;
+        const nImageRadio = document.querySelector('input[name="vision-input-mode"][value="n-image"]');
+        const videoRadio = document.querySelector('input[name="vision-input-mode"][value="video"]');
+        if (nImageRadio) nImageRadio.checked = true;
+        if (videoRadio) videoRadio.checked = false;
+        updateVisionFramesUI(false);
+        if (banner) banner.style.display = 'none';
+        showVisionVideoUnavailableToast();
+    } catch (e) {
+        if (banner) banner.style.display = 'none';
+    }
 }
 
 // Update configuration value
@@ -3457,6 +3586,25 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 inferred: true
             });
         }
+        // LLM in progress: we have llm_start but no llm_complete yet — draw orange from start (or first token) to "now" (live) or latest event time (replay)
+        if (!complete) {
+            const progressStart = firstToken ? (firstToken.timestamp || 0) : startTime;
+            const endTimeInProgress = (inLive && liveSessionTime != null)
+                ? Math.max(progressStart + 0.1, liveSessionTime)
+                : Math.max(progressStart + 0.1, timeline.length ? Math.max.apply(null, timeline.map(function (e) { return e.timestamp || 0; })) : progressStart + 0.1);
+            if (endTimeInProgress > progressStart) {
+                inferredRectangles.push({
+                    event_type: 'llm_in_progress',
+                    lane: 'llm',
+                    start_time: progressStart,
+                    end_time: endTimeInProgress,
+                    timestamp: progressStart,
+                    phase: 'in_progress',
+                    inferred: true,
+                    growing: inLive && liveSessionTime != null
+                });
+            }
+        }
     });
 
     // Infer ASR from partials + final when no/few speech starts: blue = first partial to last partial, light blue = last partial to final
@@ -3703,6 +3851,9 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             fillColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-llm-prefill').trim() || '#FF9800';
             fillAlpha = 0.85;
         } else if (event.phase === 'generate' || event.event_type === 'llm_generate') {
+            fillColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-llm-generate').trim() || '#FFB74D';
+            fillAlpha = 0.85;
+        } else if (event.phase === 'in_progress' || event.event_type === 'llm_in_progress') {
             fillColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-llm-generate').trim() || '#FFB74D';
             fillAlpha = 0.85;
         } else {
@@ -5569,6 +5720,9 @@ function handleVoiceWsMessage(ev) {
                     }
             state.liveTimelineEvents.push(evt);
                     renderTimeline();
+            if (evt.event_type === 'error' && evt.data && evt.data.message) {
+                showVoiceErrorToast(evt.data.message);
+            }
             if (evt.event_type === 'asr_partial') {
                 state.voiceTurnActive = true;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;

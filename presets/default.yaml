@@ -1,38 +1,86 @@
-name: "Default"
-description: "General purpose, balanced latency and accuracy"
-
 asr:
-  scheme: riva
+  backend: riva
   server: localhost:50051
-  model: conformer
+  riva_server: localhost:50051
+  model: parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer
   language: en-US
+  enable_vad: true
   vad_start_threshold: 0.5
   vad_stop_threshold: 0.3
+  speech_pad_ms: 500
   speech_timeout_ms: 500
-
+  interim_results: true
+  realtime_transport: websocket
+  realtime_session_type: transcription
+  realtime_url: wss://api.openai.com/v1/realtime
+  api_key: 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
+  scheme: riva
 llm:
-  scheme: openai
-  api_base: http://localhost:11434/v1
-  model: llama3.2:3b
+  backend: openai
+  api_base: http://10.110.50.167:8000/v1
+  ollama_url: http://localhost:11434
+  api_key: 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
+  model: nvidia/cosmos-reason2-8b-fp8
   temperature: 0.7
   max_tokens: 512
-  system_prompt: "You are a helpful voice assistant."
+  minimal_output: false
+  stream: true
+  system_prompt: You are a helpful voice assistant.
+  extra_request_body: ''
+  cheap_model: nvidia/cosmos-reason2-8b-fp8
+  enable_vision: true
+  vision_system_prompt: You are a vision assistant. Give ONE short sentence answers
+    only. Be direct. No explanations. Use plain text only — no markdown or formatting.
+  vision_detail: auto
+  vision_frames: 10
+  vision_quality: 0.8
+  vision_max_width: 640
+  vision_buffer_fps: 3
+  vision_video_encode: true
+  enable_reasoning: true
+  reasoning_prompt: '
 
+
+    Think step-by-step inside <think> tags, then write your final answer immediately
+    after </think>. The final answer MUST be exactly one descriptive sentence — no
+    lists, no paragraphs, no tags.'
+  vision_include_history: true
+  scheme: openai
 tts:
+  backend: riva
+  riva_server: localhost:50051
+  voice: ''
+  language: en-US
+  sample_rate: 22050
+  quality: high
+  riva_model_name: magpie_tts_ensemble-Magpie-Multilingual
+  riva_model_names:
+  - magpie_tts_ensemble-Magpie-Multilingual
+  realtime_transport: websocket
+  stream_tts: true
   scheme: riva
   server: localhost:50051
-  voice: ""  # Empty = use Riva's default voice
-  sample_rate: 22050  # Riva's native rate
-  stream_tts: true
-
 devices:
+  camera: browser
+  microphone: browser
+  speaker: browser
   video_source: browser
+  video_file: null
   audio_input_source: browser
   audio_output_source: browser
-
 app:
+  auto_start_recording: false
+  show_interim_asr: true
+  enable_timeline: true
+  llm_warmup_while_preview: true
   barge_in_enabled: true
-  timeline_position: right  # Timeline collects ALL events (no buffer limit)
+  barge_in_trigger: final
+  barge_in_partial_count: 3
+  log_level: info
+  start_with_microphone_muted: true
+  timeline_position: right
   session_auto_save: true
   session_output_dir: ./sessions
   theme: dark
+name: Default
+description: General purpose, balanced latency and accuracy

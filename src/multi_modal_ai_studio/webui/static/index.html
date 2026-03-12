@@ -68,6 +68,14 @@
                         <div class="config-tab-content" id="config-tab-content">
                             <!-- Config details loaded via JS -->
                         </div>
+                        <div class="config-footer" id="config-footer" style="display: none;">
+                            <button type="button" id="save-default-config-btn" class="btn-secondary" onclick="saveDefaultConfig()" title="Save current configuration so it loads when you click + New Voice Chat">
+                                <i data-lucide="bookmark" class="lucide-inline"></i> Save as default
+                            </button>
+                            <button type="button" id="reset-default-config-btn" class="btn-secondary" onclick="resetDefaultConfig()" title="Clear saved default and reset to built-in defaults (current panel and + New Voice Chat)">
+                                <i data-lucide="rotate-ccw" class="lucide-inline"></i> Reset the default
+                            </button>
+                        </div>
                     </div>
                 </section>
 

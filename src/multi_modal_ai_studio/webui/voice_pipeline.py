@@ -64,6 +64,32 @@ from multi_modal_ai_studio.backends.realtime import (
 logger = logging.getLogger(__name__)
 
 
+def _format_llm_error_for_user(exc: Exception) -> str:
+    """Build a short, user-facing message for LLM errors (e.g. for a toast)."""
+    msg = str(exc).strip()
+    if not msg:
+        return "LLM request failed. Please try again."
+    if "LLM API error:" in msg:
+        # e.g. "LLM API error: 503" -> "LLM request failed: server returned HTTP 503."
+        rest = msg.replace("LLM API error:", "").strip()
+        if rest.isdigit():
+            return f"LLM request failed: server returned HTTP {rest}."
+        return f"LLM request failed: {rest}."
+    if "Failed to connect" in msg or "Connection refused" in msg or "Connection reset" in msg:
+        return f"LLM request failed: {msg}"
+    if "Timeout" in type(exc).__name__ or "timeout" in msg.lower():
+        return "LLM request failed: request timed out. Try again."
+    return f"LLM request failed: {msg}"
+
+
+def _is_punctuation_or_empty(text: str) -> bool:
+    """Return True if text is empty or only whitespace/punctuation (Riva TTS rejects such input)."""
+    s = (text or "").strip()
+    if not s:
+        return True
+    return all(c in " \t\n\r.,!?;:\u2014\u2013-…\"'()[]{}" for c in s)
+
+
 class TTSChunkBuffer:
     """Word-count based buffer that chunks LLM tokens for streamed TTS.
 
@@ -1425,7 +1451,9 @@ async def _run_voice_pipeline(
                     nonlocal tts_consumer_error
 
                     async def _collect_audio(text_chunk: str) -> list:
-                        """Synthesize a text chunk and return all audio as a list."""
+                        """Synthesize a text chunk and return all audio as a list. Skips punctuation-only (Riva rejects)."""
+                        if _is_punctuation_or_empty(text_chunk):
+                            return []
                         result = []
                         async for c in tts.synthesize_stream(text_chunk):
                             result.append(c)
@@ -1521,12 +1549,18 @@ async def _run_voice_pipeline(
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 
-                # Text-only history anchors VLM answers to prior responses,
-                # causing repeated outputs even when the visual scene changes.
-                # Skip history when vision input is present — the video/images
-                # provide all the temporal context the model needs.
-                if image_data_urls:
+                # When vision input is present, by default skip history to avoid repeated answers
+                # when the scene changes. If vision_include_history is True, send text-only history
+                # so follow-ups like "How about this?" get prior Q&A context.
+                vision_include_history = getattr(llm_config, "vision_include_history", False)
+                if image_data_urls and not vision_include_history:
                     history_slice = None
+                elif image_data_urls and vision_include_history and max_history > 0:
+                    history_slice = conversation_history[-(max_history * 2):]
+                    # Omit the last assistant message when sending new images so the model is not
+                    # primed to repeat it (history anchoring). User questions and earlier turns stay.
+                    if history_slice and history_slice[-1].get("role") == "assistant":
+                        history_slice = history_slice[:-1]
                 else:
                     history_slice = conversation_history[-(max_history * 2):] if max_history > 0 else None
 
@@ -1560,7 +1594,7 @@ async def _run_voice_pipeline(
 
                             if use_stream_tts:
                                 ready = chunk_buf.add(token.token)
-                                if ready:
+                                if ready and not _is_punctuation_or_empty(ready):
                                     if not tts_started:
                                         tts_started = True
                                         tts_q = asyncio.Queue()
@@ -1579,8 +1613,16 @@ async def _run_voice_pipeline(
                     session.timeline.add_event("llm_complete", Lane.LLM, data=llm_complete_data)
                 except Exception as e:
                     logger.exception("LLM error: %s", e)
-                    full_response = full_response or "Sorry, I had an error."
+                    full_response = full_response or "An error occurred. Please try again."
                     session.timeline.add_event("llm_complete", Lane.LLM, data={"text": full_response, "error": str(e)})
+                    ts_err = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                    err_message = _format_llm_error_for_user(e)
+                    await send_event({
+                        "event_type": "error",
+                        "lane": "llm",
+                        "data": {"message": err_message},
+                        "timestamp": ts_err,
+                    })
 
                 ts_llm_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 logger.info("[timing] llm_complete @ %.2fs (llm took %.2fs)", ts_llm_complete, ts_llm_complete - ts_llm_start)
@@ -1599,7 +1641,7 @@ async def _run_voice_pipeline(
                 try:
                     if use_stream_tts:
                         remainder = chunk_buf.flush()
-                        if remainder:
+                        if remainder and not _is_punctuation_or_empty(remainder):
                             if not tts_started:
                                 tts_started = True
                                 tts_q = asyncio.Queue()
