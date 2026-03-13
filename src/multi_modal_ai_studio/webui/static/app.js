@@ -6679,6 +6679,20 @@ function toggleMicMute() {
 function toggleBrowserSpeakerMute() {
     state.browserSpeakerMuted = !state.browserSpeakerMuted;
     if (state.ttsGainNode) state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
+    updateSpeakerButton();
+}
+
+/** Update the header speaker button icon and style to match state.browserSpeakerMuted. */
+function updateSpeakerButton() {
+    var btn = document.getElementById('speaker-toggle-btn');
+    if (!btn) return;
+    var icon = btn.querySelector('i[data-lucide]');
+    if (!icon) return;
+    var muted = state.browserSpeakerMuted;
+    icon.setAttribute('data-lucide', muted ? 'volume-x' : 'volume-2');
+    btn.setAttribute('title', muted ? 'Speaker off (TTS muted) — click or press Q to unmute' : 'Speaker on (TTS) — click or press Q to mute');
+    btn.classList.toggle('speaker-btn-muted', muted);
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
 }
 
 function stopSessionRecording() {
@@ -7012,6 +7026,11 @@ function setupEventHandlers() {
         if (state.sessionState === 'setup') startSessionRecording();
         else if (state.sessionState === 'live') stopSessionRecording();
     });
+
+    // Speaker (TTS) toggle: button and keyboard shortcut Q
+    var speakerBtn = document.getElementById('speaker-toggle-btn');
+    if (speakerBtn) speakerBtn.addEventListener('click', toggleBrowserSpeakerMute);
+    updateSpeakerButton();
 
     // Keyboard shortcut: Q toggles browser speaker mute (TTS only; pipeline keeps running)
     document.addEventListener('keydown', function (e) {
