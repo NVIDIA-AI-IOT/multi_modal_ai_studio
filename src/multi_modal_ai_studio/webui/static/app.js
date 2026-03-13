@@ -845,7 +845,7 @@ function pinLlmFieldToDefault(fieldName) {
  */
 let _lastWarmupKey = '';
 let _warmupInProgress = false;
-let _warmupResult = null;  // Stores last warmup result {is_vlm, model, etc.}
+let _warmupResult = null;  // Stores last warmup result {model, warmup_time_seconds, etc.}
 
 /**
  * Update the START button UI based on warmup state
@@ -884,12 +884,9 @@ function updatePipelineLLMStatus(info) {
     const llmSeg = pipelineEl.querySelector('.pipeline-seg-llm .pipeline-seg-label');
     if (!llmSeg) return;
 
-    // Get the model name from config
     const model = info.model || currentConfig?.llm?.model || '';
-    const isVlm = info.is_vlm || false;
     const isError = info.error ? true : false;
 
-    // Build status indicator
     let statusIcon = '';
     if (info.loading) {
         statusIcon = '<i data-lucide="loader-2" class="lucide-inline spin pipeline-status"></i>';
@@ -899,11 +896,7 @@ function updatePipelineLLMStatus(info) {
         statusIcon = '<i data-lucide="check-circle" class="lucide-inline pipeline-status pipeline-status--ok"></i>';
     }
 
-    // Build badge
-    const badge = isVlm ? '<span class="pipeline-badge vlm">VLM</span>' : '';
-
-    // Update the label
-    llmSeg.innerHTML = `${statusIcon} ${model} ${badge}`;
+    llmSeg.innerHTML = `${statusIcon} ${model}`;
 
     // Refresh icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
@@ -949,13 +942,12 @@ async function warmupLLM() {
                 api_base: apiBase,
                 api_key: config.api_key || '',
                 model: model,
-                detect_vlm: true,
             }),
         });
 
         const result = await response.json();
         if (result.success) {
-            console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s (VLM: ${result.is_vlm})`);
+            console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s`);
             _lastWarmupKey = warmupKey;
             _warmupResult = result;
             updateStartButtonState('ready', result);
