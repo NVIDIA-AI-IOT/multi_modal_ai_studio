@@ -1552,6 +1552,13 @@ async def _run_voice_pipeline(
                 chunk_buf = TTSChunkBuffer(first_chunk_words=getattr(tts_config, "tts_chunk_words", 10)) if use_stream_tts else None
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
+                barge_in_aborted = False
+
+                # Barge-in during LLM: if a new final is already in queue (user spoke again), skip this turn.
+                app_config = getattr(config, "app", None)
+                if app_config and getattr(app_config, "barge_in_enabled", False) and not finals_queue.empty():
+                    barge_in_aborted = True
+                    logger.info("[barge_in] New final in queue before LLM start; skipping this turn")
 
                 # One flag for all turns: include_conversation_history (default True).
                 # When False: no history for any turn. When True: send last N turns; for vision turns
@@ -1573,50 +1580,58 @@ async def _run_voice_pipeline(
                 reasoning_text = ""
                 reasoning_start_logged = False
                 try:
-                    async for token in llm.generate_stream(
-                        prompt=text,
-                        history=history_slice or None,
-                        system_prompt=effective_system_prompt,
-                        image_data_urls=image_data_urls if image_data_urls else None,
-                        speech_duration=speech_duration_secs if speech_duration_secs > 0 else None,
-                    ):
-                        if stopped.is_set():
-                            break
-                        if token.metadata and token.metadata.get("reasoning_start") and not reasoning_start_logged:
-                            reasoning_start_logged = True
-                            ts_rs = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                            logger.info("[timing] reasoning_start @ %.2fs (prefill took %.2fs)", ts_rs, ts_rs - ts_llm_start)
-                            await send_event({"event_type": "reasoning_start", "lane": "llm", "data": {}, "timestamp": ts_rs})
-                        if token.is_final and token.metadata:
-                            reasoning_text = token.metadata.get("reasoning", "")
-                        if token.token:
-                            full_response += token.token
-                            if not llm_first_token_sent:
-                                llm_first_token_sent = True
-                                ts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                                logger.info("[timing] llm_first_token @ %.2fs (prefill took %.2fs)", ts_first, ts_first - ts_llm_start)
-                                session.timeline.add_event("llm_first_token", Lane.LLM)
-                                await send_event({"event_type": "llm_first_token", "lane": "llm", "data": {}, "timestamp": ts_first})
+                    if not barge_in_aborted:
+                        async for token in llm.generate_stream(
+                            prompt=text,
+                            history=history_slice or None,
+                            system_prompt=effective_system_prompt,
+                            image_data_urls=image_data_urls if image_data_urls else None,
+                            speech_duration=speech_duration_secs if speech_duration_secs > 0 else None,
+                        ):
+                            if stopped.is_set():
+                                break
+                            if barge_in_aborted:
+                                break
+                            if app_config and getattr(app_config, "barge_in_enabled", False) and not finals_queue.empty():
+                                barge_in_aborted = True
+                                logger.info("[barge_in] New final in queue during LLM; aborting this turn")
+                                break
+                            if token.metadata and token.metadata.get("reasoning_start") and not reasoning_start_logged:
+                                reasoning_start_logged = True
+                                ts_rs = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                                logger.info("[timing] reasoning_start @ %.2fs (prefill took %.2fs)", ts_rs, ts_rs - ts_llm_start)
+                                await send_event({"event_type": "reasoning_start", "lane": "llm", "data": {}, "timestamp": ts_rs})
+                            if token.is_final and token.metadata:
+                                reasoning_text = token.metadata.get("reasoning", "")
+                            if token.token:
+                                full_response += token.token
+                                if not llm_first_token_sent:
+                                    llm_first_token_sent = True
+                                    ts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                                    logger.info("[timing] llm_first_token @ %.2fs (prefill took %.2fs)", ts_first, ts_first - ts_llm_start)
+                                    session.timeline.add_event("llm_first_token", Lane.LLM)
+                                    await send_event({"event_type": "llm_first_token", "lane": "llm", "data": {}, "timestamp": ts_first})
 
-                            if use_stream_tts:
-                                ready = chunk_buf.add(token.token)
-                                if ready and not _is_punctuation_or_empty(ready):
-                                    if not tts_started:
-                                        tts_started = True
-                                        tts_q = asyncio.Queue()
-                                        tts_task = asyncio.create_task(_tts_consumer(tts_q))
-                                        session.timeline.add_event("tts_start", Lane.TTS)
-                                        await send_event({"event_type": "tts_start", "lane": "tts", "data": {"stream_tts": True}, "timestamp": (time.time() - session.timeline.start_time) if session.timeline.start_time else 0})
-                                        await ws.send_str(json.dumps({"type": "tts_start"}))
-                                    await tts_q.put(ready)
+                                if use_stream_tts:
+                                    ready = chunk_buf.add(token.token)
+                                    if ready and not _is_punctuation_or_empty(ready):
+                                        if not tts_started:
+                                            tts_started = True
+                                            tts_q = asyncio.Queue()
+                                            tts_task = asyncio.create_task(_tts_consumer(tts_q))
+                                            session.timeline.add_event("tts_start", Lane.TTS)
+                                            await send_event({"event_type": "tts_start", "lane": "tts", "data": {"stream_tts": True}, "timestamp": (time.time() - session.timeline.start_time) if session.timeline.start_time else 0})
+                                            await ws.send_str(json.dumps({"type": "tts_start"}))
+                                        await tts_q.put(ready)
 
-                    llm_complete_data: dict = {"text": full_response}
-                    if reasoning_text:
-                        llm_complete_data["reasoning"] = reasoning_text
-                        logger.info("[reasoning] %d chars: %.200s%s",
-                                    len(reasoning_text), reasoning_text,
-                                    "..." if len(reasoning_text) > 200 else "")
-                    session.timeline.add_event("llm_complete", Lane.LLM, data=llm_complete_data)
+                    if not barge_in_aborted:
+                        llm_complete_data: dict = {"text": full_response}
+                        if reasoning_text:
+                            llm_complete_data["reasoning"] = reasoning_text
+                            logger.info("[reasoning] %d chars: %.200s%s",
+                                        len(reasoning_text), reasoning_text,
+                                        "..." if len(reasoning_text) > 200 else "")
+                        session.timeline.add_event("llm_complete", Lane.LLM, data=llm_complete_data)
                 except Exception as e:
                     logger.exception("LLM error: %s", e)
                     full_response = full_response or "An error occurred. Please try again."
@@ -1629,6 +1644,17 @@ async def _run_voice_pipeline(
                         "data": {"message": err_message},
                         "timestamp": ts_err,
                     })
+
+                if barge_in_aborted:
+                    logger.info("[barge_in] Turn aborted; skipping LLM complete/TTS/history, processing new final")
+                    if tts_started and tts_q is not None:
+                        await tts_q.put(None)
+                        if tts_task is not None:
+                            await tts_task
+                    if server_speaker_proc is not None:
+                        stop_server_speaker_playback(server_speaker_proc)
+                    session.end_turn()
+                    continue
 
                 ts_llm_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 logger.info("[timing] llm_complete @ %.2fs (llm took %.2fs)", ts_llm_complete, ts_llm_complete - ts_llm_start)
