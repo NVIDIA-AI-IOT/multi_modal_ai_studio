@@ -1,6 +1,6 @@
 # Installation & Setup Guide
 
-This guide covers installing the app, optional NVIDIA Riva setup for voice ASR/TTS, and running the WebUI.
+This guide covers installing the app, setting up LLM/VLM backends, NVIDIA Riva for voice (ASR/TTS), and running the WebUI.
 
 ## Quick Start
 
@@ -330,6 +330,82 @@ Open https://localhost:8092 (accept the self-signed cert).
 
 **Resources**: [NVIDIA Riva User Guide](https://docs.nvidia.com/deeplearning/riva/user-guide/), [Riva Quick Start](https://docs.nvidia.com/deeplearning/riva/user-guide/docs/quick-start-guide/), [NGC CLI](https://docs.nvidia.com/ngc/ngc-cli/index.html).
 
+## LLM / VLM Backend Setup
+
+The application connects to any **OpenAI-compatible** `/v1/chat/completions` endpoint for language and vision inference. You need at least one backend running before starting a conversation.
+
+### Option A: Ollama (Easiest)
+
+[Ollama](https://ollama.com/) runs models locally with no Docker or GPU configuration needed.
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a text-only model
+ollama pull llama3.2:3b        # ~2GB, fast general-purpose
+
+# Or pull a vision model (for camera/video input)
+ollama pull llava-llama3       # ~5GB, image understanding
+ollama pull gemma3:4b          # ~3GB, multimodal
+```
+
+Ollama serves on `http://localhost:11434/v1` by default. In the UI, set:
+
+| Setting | Value |
+|---------|-------|
+| **API Base** | `http://localhost:11434/v1` |
+| **Model** | `llama3.2:3b` (text) or `llava-llama3` (vision) |
+
+### Option B: vLLM (Recommended for VLMs / Production)
+
+vLLM provides high-throughput serving with GPU acceleration. Example with Cosmos-Reason2 for vision:
+
+**[Cosmos-Reason2-8B on Jetson AI Lab](https://www.jetson-ai-lab.com/models/cosmos-reason2-8b/)** — full setup including model download and platform-specific Docker images.
+
+Quick reference for Jetson Thor (after downloading the FP8 model per the link above):
+
+```bash
+export MODEL_PATH="${HOME}/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8"
+
+sudo docker run -it --rm --runtime=nvidia --network host \
+  -v $MODEL_PATH:/models/cosmos-reason2-8b:ro \
+  ghcr.io/nvidia-ai-iot/vllm:0.14.0-r38.3-arm64-sbsa-cu130-24.04 \
+  vllm serve /models/cosmos-reason2-8b \
+    --served-model-name nvidia/cosmos-reason2-8b-fp8 \
+    --max-model-len 8192 \
+    --gpu-memory-utilization 0.7 \
+    --reasoning-parser qwen3 \
+    --media-io-kwargs '{"video": {"num_frames": -1}}' \
+    --enable-prefix-caching \
+    --port 8000
+```
+
+> **Memory tuning**: On shared-memory systems (Jetson), lower `--gpu-memory-utilization` to leave room for the OS, Riva, and the application. On discrete GPUs with dedicated VRAM, `0.8` is safe.
+>
+> **Desktop GPU / x86_64**: Use `vllm/vllm-openai:latest` or `nvcr.io/nvidia/vllm:latest` instead of the Jetson image.
+
+### Option C: OpenAI API
+
+No local setup needed. Set **API Base** to `https://api.openai.com/v1`, provide your API key, and choose a model (`gpt-4o` for vision, `gpt-4o-mini` for text).
+
+### Verify Your Backend
+
+```bash
+# Ollama
+curl -s http://localhost:11434/v1/models | python3 -m json.tool
+
+# vLLM
+curl -s http://localhost:8000/v1/models | python3 -m json.tool
+curl -s http://localhost:8000/health && echo "READY" || echo "NOT READY"
+```
+
+### Using Vision
+
+To use camera/video input, your backend must support image or video content. Enable **"Enable Vision (VLM)"** in the UI config panel. For details on input modes, frame capture, and tuning, see the [VLM Guide](docs/vlm_guide.md).
+
+---
+
 ## Virtual Environment Usage
 
 ### Activate
@@ -480,8 +556,10 @@ pip install new-package
 
 Once installed:
 
-1. **Test backends**: `python3 scripts/test_backends.py`
-2. **Run the app**: See [Run the app](#run-the-app) above; for voice, complete [NVIDIA Riva Setup](#nvidia-riva-setup-for-voice-asrtts).
+1. **Set up a backend**: See [LLM / VLM Backend Setup](#llm--vlm-backend-setup) (Ollama is the fastest way to get started)
+2. **Add voice**: Complete [NVIDIA Riva Setup](#nvidia-riva-setup-for-voice-asrtts)
+3. **Run the app**: See [Run the app](#run-the-app) above
+4. **Add vision**: Enable in the UI and see the [VLM Guide](docs/vlm_guide.md) for details
 
 ## Notes
 

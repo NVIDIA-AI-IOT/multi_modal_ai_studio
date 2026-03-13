@@ -71,10 +71,10 @@ Full steps and troubleshooting: [INSTALL.md](INSTALL.md)
 
 ```bash
 # View sessions and timeline (no backend required)
-multi_modal_ai_studio --port 8092
+python -m multi_modal_ai_studio --port 8092
 
 # With Riva ASR/TTS (use --asr-server and --tts-server)
-multi_modal_ai_studio \
+python -m multi_modal_ai_studio \
   --port 8092 \
   --asr-server localhost:50051 \
   --tts-server localhost:50051 \
@@ -82,14 +82,14 @@ multi_modal_ai_studio \
   --llm-model llama3.2:3b
 
 # With OpenAI Realtime API
-multi_modal_ai_studio \
+python -m multi_modal_ai_studio \
   --port 8092 \
   --asr-scheme openai-realtime \
   --tts-scheme openai-realtime \
   --llm-api-key sk-...
 
 # With preset
-multi_modal_ai_studio --preset low-latency
+python -m multi_modal_ai_studio --preset low-latency
 ```
 
 Open **http://localhost:8092** in your browser.
@@ -114,10 +114,10 @@ By default the app loads and saves sessions in `sessions/`. To view or use the s
 
 ```bash
 # From config file
-multi_modal_ai_studio --mode headless --config my-config.yaml
+python -m multi_modal_ai_studio --mode headless --config my-config.yaml
 
 # From CLI args
-multi_modal_ai_studio \
+python -m multi_modal_ai_studio \
   --mode headless \
   --audio-input alsa:hw:0,0 \
   --audio-output alsa:hw:1,0 \
@@ -127,25 +127,10 @@ multi_modal_ai_studio \
 
 ## 📖 Documentation
 
-- [Setup Guide](docs/setup.md)
-- [Configuration Reference](docs/configuration.md)
-- [API Backends](docs/api-backends.md)
-- [CLI Reference](docs/cli-reference.md)
-- [Presets](docs/presets.md)
-
-## 🏗️ Project Status
-
-**Current Phase**: Foundation (Phase 1)
-
-- [x] Project structure
-- [x] Configuration system design
-- [x] Cursor rules and documentation
-- [ ] Riva backend implementation
-- [ ] Basic WebUI
-- [ ] Session storage
-- [ ] CLI interface
-
-See [docs/cursor/IMPLEMENTATION_PHASES.md](docs/cursor/IMPLEMENTATION_PHASES.md) for roadmap.
+- [VLM Guide](docs/vlm_guide.md) — Vision-Language Model setup, input modes, frame capture, and tuning
+- [Riva Setup](docs/setup_riva.md) — NVIDIA Riva ASR/TTS installation and configuration
+- [Architecture](docs/architecture.md) — System design and component overview
+- [Installation](INSTALL.md) — Full installation steps and troubleshooting
 
 ## 🤝 Contributing
 
