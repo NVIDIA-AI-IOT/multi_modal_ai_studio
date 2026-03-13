@@ -416,67 +416,20 @@ class WebUIServer:
                 status=500
             )
 
-    async def _detect_vlm_capability(self, api_base: str, api_key: Optional[str], model: str) -> dict:
-        """Detect if a model supports vision by sending a 1x1 image probe.
-
-        Sends a tiny 1x1 white PNG with max_tokens=1.  If the model accepts the
-        image and returns any token, it's a VLM.  If it rejects with an error
-        mentioning "image/vision/multimodal", it's an LLM.
-
-        Returns: {"is_vlm": bool, "detection_method": str, "confidence": str}
-        """
-        try:
-            tiny_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-
-            config = LLMConfig(
-                api_base=api_base,
-                api_key=api_key,
-                model=model,
-                max_tokens=1,
-                temperature=0.0,
-            )
-            backend = OpenAILLMBackend(config)
-
-            test_messages = [{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "1"},
-                    {"type": "image_url", "image_url": {"url": tiny_image}},
-                ]
-            }]
-
-            async for token in backend.generate_stream("", test_messages):
-                logger.info("[VLM Detect] Image probe succeeded → VLM")
-                return {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
-
-        except Exception as e:
-            error_str = str(e).lower()
-            if any(x in error_str for x in ["image", "vision", "multimodal", "unsupported"]):
-                logger.info("[VLM Detect] Image probe rejected → LLM")
-                return {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
-            logger.debug("[VLM Detect] Image probe error: %s", e)
-
-        logger.info("[VLM Detect] Could not determine, defaulting to LLM")
-        return {"is_vlm": False, "detection_method": "default", "confidence": "low"}
-
     async def handle_llm_warmup(self, request: web.Request) -> web.Response:
         """
-        Warm up an LLM/VLM model by sending a minimal prompt.
-        Also detects if the model supports vision (VLM).
+        Warm up an LLM model by sending a minimal prompt.
         
         This loads the model into GPU memory before the user starts a session,
         reducing first-response latency. Works with any OpenAI-compatible backend
         (Ollama, vLLM, SGLang, OpenAI, etc.).
         
-        POST body: {"api_base": "...", "api_key": "...", "model": "...", "detect_vlm": true}
+        POST body: {"api_base": "...", "api_key": "...", "model": "..."}
         
         Returns: {
             "success": true,
             "model": "...",
-            "warmup_time_seconds": X.XX,
-            "is_vlm": true/false,
-            "vlm_detection_method": "...",
-            "vlm_confidence": "high/medium/low"
+            "warmup_time_seconds": X.XX
         }
         """
         try:
@@ -487,7 +440,6 @@ class WebUIServer:
         api_base = (body.get("api_base") or "").strip().rstrip("/")
         api_key = body.get("api_key") or None
         model = (body.get("model") or "").strip()
-        detect_vlm = body.get("detect_vlm", True)  # Default: detect VLM capability
         
         if not api_base or not model:
             return web.json_response(
@@ -501,38 +453,25 @@ class WebUIServer:
             import time
             start_time = time.time()
             
-            # Detect VLM capability (if requested)
-            vlm_info = {"is_vlm": False, "detection_method": "skipped", "confidence": "none"}
-            if detect_vlm:
-                vlm_info = await self._detect_vlm_capability(api_base, api_key, model)
-            
-            # Create config and backend for warmup
             config = LLMConfig(
                 api_base=api_base,
                 api_key=api_key,
                 model=model,
-                max_tokens=1,  # Minimal tokens to reduce overhead
+                max_tokens=1,
                 temperature=0.0,
             )
             backend = OpenAILLMBackend(config)
             
-            # Send a minimal prompt to trigger model loading
-            warmup_response = ""
             async for token in backend.generate_stream("Say OK", []):
-                warmup_response += token.token
-                break  # We only need the first token to confirm model is loaded
+                break  # First token confirms model is loaded
             
             elapsed = time.time() - start_time
-            logger.info("[LLM Warmup] Model %s warmed up in %.2fs (VLM: %s)", 
-                       model, elapsed, vlm_info["is_vlm"])
+            logger.info("[LLM Warmup] Model %s warmed up in %.2fs", model, elapsed)
             
             return web.json_response({
                 "success": True,
                 "model": model,
                 "warmup_time_seconds": round(elapsed, 2),
-                "is_vlm": vlm_info["is_vlm"],
-                "vlm_detection_method": vlm_info["detection_method"],
-                "vlm_confidence": vlm_info["confidence"],
             })
         except Exception as e:
             logger.warning("[LLM Warmup] Failed to warm up %s: %s", model, e)

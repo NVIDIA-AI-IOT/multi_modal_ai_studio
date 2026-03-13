@@ -2523,20 +2523,6 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 .pipeline-status--error {
     color: var(--error, #ef4444);
 }
-.pipeline-badge {
-    display: inline-block;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 0.65rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    margin-left: 4px;
-    vertical-align: middle;
-}
-.pipeline-badge.vlm {
-    background: var(--nvidia-green, #76b900);
-    color: white;
-}
 
 /* ===== Chat History (compact: more lines visible) ===== */
 .chat-history {
