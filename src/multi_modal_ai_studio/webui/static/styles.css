@@ -2192,6 +2192,23 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     z-index: 101;
 }
 
+/* Fullscreen speaker (TTS) button: show only in fullscreen, same timeline-ai purple as header */
+.fullscreen-controls .fullscreen-btn.speaker-fullscreen-btn {
+    display: none;
+    border-color: var(--timeline-ai);
+}
+.session-image-container.fullscreen .fullscreen-controls .fullscreen-btn.speaker-fullscreen-btn {
+    display: flex;
+}
+.fullscreen-controls .fullscreen-btn.speaker-fullscreen-btn.speaker-btn-muted {
+    background: var(--timeline-ai);
+    border-color: var(--timeline-ai);
+    color: #ffffff;
+}
+.fullscreen-controls .fullscreen-btn.speaker-fullscreen-btn.speaker-btn-muted svg {
+    stroke: #ffffff;
+}
+
 /* Fullscreen mic-preview-strip: 2× height (96px), lower position; 2x waveform amplitude via JS */
 .session-image-container.fullscreen .mic-preview-strip {
     z-index: 100;
@@ -3125,13 +3142,16 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     font-size: 1rem;
 }
 
-/* Speaker (TTS) mute button: filled reddish background + white icon when muted */
-.icon-btn.speaker-btn-muted {
-    background: #bd0f40;
-    border-color: #bd0f40;
+/* Speaker (TTS) toggle: timeline AI purple — border when on, fill when off */
+/* #speaker-toggle-btn {
+    border-color: var(--timeline-ai);
+} */
+#speaker-toggle-btn.speaker-btn-muted {
+    background: var(--timeline-ai);
+    border-color: var(--timeline-ai);
     color: #ffffff;
 }
-.icon-btn.speaker-btn-muted svg {
+#speaker-toggle-btn.speaker-btn-muted svg {
     stroke: #ffffff;
 }
 

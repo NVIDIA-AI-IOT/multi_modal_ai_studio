@@ -6674,16 +6674,26 @@ function toggleBrowserSpeakerMute() {
     updateSpeakerButton();
 }
 
-/** Update the header speaker button icon and style to match state.browserSpeakerMuted. */
+/** Update the header and fullscreen speaker buttons to match state.browserSpeakerMuted. */
 function updateSpeakerButton() {
-    var btn = document.getElementById('speaker-toggle-btn');
-    if (!btn) return;
     var muted = state.browserSpeakerMuted;
     var iconName = muted ? 'volume-x' : 'volume-2';
-    btn.setAttribute('title', muted ? 'Speaker off (TTS muted) — click or press Q to unmute' : 'Speaker on (TTS) — click or press Q to mute');
-    btn.classList.toggle('speaker-btn-muted', muted);
-    btn.innerHTML = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
-    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+    var title = muted ? 'Speaker off (TTS muted) — click or press Q to unmute' : 'Speaker on (TTS) — click or press Q to mute';
+    var html = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
+    var headerBtn = document.getElementById('speaker-toggle-btn');
+    var fullscreenBtn = document.getElementById('speaker-toggle-fullscreen-btn');
+    if (headerBtn) {
+        headerBtn.setAttribute('title', title);
+        headerBtn.classList.toggle('speaker-btn-muted', muted);
+        headerBtn.innerHTML = html;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(headerBtn);
+    }
+    if (fullscreenBtn) {
+        fullscreenBtn.setAttribute('title', title);
+        fullscreenBtn.classList.toggle('speaker-btn-muted', muted);
+        fullscreenBtn.innerHTML = html;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(fullscreenBtn);
+    }
 }
 
 function stopSessionRecording() {
@@ -7018,9 +7028,11 @@ function setupEventHandlers() {
         else if (state.sessionState === 'live') stopSessionRecording();
     });
 
-    // Speaker (TTS) toggle: button and keyboard shortcut Q
+    // Speaker (TTS) toggle: header button, fullscreen-over-video button, and keyboard shortcut Q
     var speakerBtn = document.getElementById('speaker-toggle-btn');
     if (speakerBtn) speakerBtn.addEventListener('click', toggleBrowserSpeakerMute);
+    var speakerFullscreenBtn = document.getElementById('speaker-toggle-fullscreen-btn');
+    if (speakerFullscreenBtn) speakerFullscreenBtn.addEventListener('click', toggleBrowserSpeakerMute);
     updateSpeakerButton();
 
     // Keyboard shortcut: Q toggles browser speaker mute (TTS only; pipeline keeps running)
