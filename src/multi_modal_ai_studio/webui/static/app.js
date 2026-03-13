@@ -74,6 +74,10 @@ const state = {
     voicePcmNode: null,
     /** Push-to-talk: when true, server does not feed mic to ASR (waveform still sent and displayed) */
     micMuted: false,
+    /** When true, browser TTS output is muted (gain 0). Pipeline keeps running; only speaker is silenced. Toggle with Q. */
+    browserSpeakerMuted: false,
+    /** GainNode for browser TTS; all TTS BufferSources connect through this so Q can mute/unmute without stopping playback. */
+    ttsGainNode: null,
     /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
     liveSessionStartTime: 0,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
@@ -6543,6 +6547,11 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         state.ttsNextStartTime = 0;
     }
     const ctx = state.ttsAudioContext;
+    if (!state.ttsGainNode) {
+        state.ttsGainNode = ctx.createGain();
+        state.ttsGainNode.connect(ctx.destination);
+        state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
+    }
     const numSamples = samples.length;
     const buffer = ctx.createBuffer(1, numSamples, sampleRate);
     const ch = buffer.getChannelData(0);
@@ -6555,7 +6564,7 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         state.ttsNextStartTime = startTime + duration;
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(ctx.destination);
+        source.connect(state.ttsGainNode);
         source.start(startTime);
         if (!state.activeTtsSources) state.activeTtsSources = [];
         state.activeTtsSources.push(source);
@@ -6656,6 +6665,35 @@ function toggleMicMute() {
         renderTimeline(); // redraw so user waveform shows gray when muted
     }
     updateMicMutePreviewButton();
+}
+
+/** Toggle browser speaker mute (TTS). Pipeline keeps running; only the browser output is silenced. For demo: talk over TTS with Q. */
+function toggleBrowserSpeakerMute() {
+    state.browserSpeakerMuted = !state.browserSpeakerMuted;
+    if (state.ttsGainNode) state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
+    updateSpeakerButton();
+}
+
+/** Update the header and fullscreen speaker buttons to match state.browserSpeakerMuted. */
+function updateSpeakerButton() {
+    var muted = state.browserSpeakerMuted;
+    var iconName = muted ? 'volume-x' : 'volume-2';
+    var title = muted ? 'Speaker off (TTS muted) — click or press Q to unmute' : 'Speaker on (TTS) — click or press Q to mute';
+    var html = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
+    var headerBtn = document.getElementById('speaker-toggle-btn');
+    var fullscreenBtn = document.getElementById('speaker-toggle-fullscreen-btn');
+    if (headerBtn) {
+        headerBtn.setAttribute('title', title);
+        headerBtn.classList.toggle('speaker-btn-muted', muted);
+        headerBtn.innerHTML = html;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(headerBtn);
+    }
+    if (fullscreenBtn) {
+        fullscreenBtn.setAttribute('title', title);
+        fullscreenBtn.classList.toggle('speaker-btn-muted', muted);
+        fullscreenBtn.innerHTML = html;
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(fullscreenBtn);
+    }
 }
 
 function stopSessionRecording() {
@@ -6989,6 +7027,25 @@ function setupEventHandlers() {
         if (state.sessionState === 'setup') startSessionRecording();
         else if (state.sessionState === 'live') stopSessionRecording();
     });
+
+    // Speaker (TTS) toggle: header button, fullscreen-over-video button, and keyboard shortcut Q
+    var speakerBtn = document.getElementById('speaker-toggle-btn');
+    if (speakerBtn) speakerBtn.addEventListener('click', toggleBrowserSpeakerMute);
+    var speakerFullscreenBtn = document.getElementById('speaker-toggle-fullscreen-btn');
+    if (speakerFullscreenBtn) speakerFullscreenBtn.addEventListener('click', toggleBrowserSpeakerMute);
+    updateSpeakerButton();
+
+    // Keyboard shortcut: Q toggles browser speaker mute (TTS only; pipeline keeps running)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'q' && e.key !== 'Q') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleBrowserSpeakerMute();
+    }, true);
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
     const chatInput = document.getElementById('chat-input');
