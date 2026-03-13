@@ -1,6 +1,6 @@
-# PCM pipeline trace: Browser mic vs Server USB mic
+# Audio PCM pipeline trace: Browser mic vs Server USB mic
 
-This document traces how microphone PCM flows through the pipeline for **Browser** and **Server USB** input, with file/line references.
+This document traces how microphone PCM flows through the pipeline for **Browser** and **Server USB** input, with file/line references. For high-level flow and system context, see [architecture.md](architecture.md).
 
 **Refactor status (current implementation):** Server-side duplicate logic has been unified. A single **live** path (`_feed_pcm_to_pipeline`) and single **preview** path (`_feed_pcm_preview_only`) are used by both browser and server mic. Sections **§4.1**, **§4.2**, and **§5** describe the refactored flow; line numbers below refer to the current `voice_pipeline.py` (and `devices/capture.py` where noted).
 
@@ -17,7 +17,7 @@ This document traces how microphone PCM flows through the pipeline for **Browser
 | 1 | `app.js` `startVoiceMicStream()` | If mic is Server USB (`alsa:` / `pyaudio:`), returns early; no browser PCM. Otherwise calls `getUserMedia({ audio })` then `connectPcmToWs(stream)`. |
 | 2 | `app.js` `connectPcmToWs(stream)` | Creates `AudioContext` at **16 kHz** (`TARGET_SAMPLE_RATE`), `createMediaStreamSource(stream)`, `createScriptProcessor(2048, 1, 1)`. |
 | 3 | `app.js` `processor.onaudioprocess` | Reads float32 from `e.inputBuffer.getChannelData(0)`, converts to **Int16** (clip to ±1, scale to ±0x7FFF/0x8000), then **`ws.send(pcmData.buffer)`** (binary). Chunk = 2048 samples = 4096 bytes @ 16 kHz (~128 ms). |
-| 4 | (same) | Optional: client computes RMS for debug / `liveTtlBandStartTime`; **does not** push to `liveAudioAmplitudeHistory` for the AUDIO lane (comment: “use only server user_amplitude”). |
+| 4 | (same) | Optional: client computes RMS for debug / `liveTtlBandStartTime`; **does not** push to `liveAudioAmplitudeHistory` for the AUDIO lane (comment: "use only server user_amplitude"). |
 
 **Summary**: Browser mic → getUserMedia → AudioContext 16 kHz → ScriptProcessor → Int16 PCM → **WebSocket binary** to server. No PCM sent when Server USB mic is selected.
 
@@ -42,7 +42,7 @@ This document traces how microphone PCM flows through the pipeline for **Browser
 
 | Step | Location | What happens |
 |------|----------|--------------|
-| 1 | `app.js` `startVoiceMicStream()` | If mic is `alsa:` or `pyaudio:` → **returns early**; no browser PCM stream. Logs “Using Server USB microphone; no browser mic stream”. Calls `startMicWaveformFromServer()` (preview waveform from server’s `user_amplitude`). |
+| 1 | `app.js` `startVoiceMicStream()` | If mic is `alsa:` or `pyaudio:` → **returns early**; no browser PCM stream. Logs "Using Server USB microphone; no browser mic stream". Calls `startMicWaveformFromServer()` (preview waveform from server's `user_amplitude`). |
 | 2 | On START | `app.js`: **`state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }))`**. No binary PCM ever sent for voice. |
 
 **Summary**: No PCM from browser. Client only sends **config**, then **start_session** when user clicks START. Green waveform comes from server `user_amplitude` messages.
@@ -91,7 +91,7 @@ The **only** difference is **who produces the bytes** (browser vs capture thread
 
 ### 4.1 Single feed path — **refactored** (current implementation)
 
-**“Feed PCM to ASR + record amplitude + send user_amplitude to client”** is implemented in **two shared helpers** (no per-mic duplication):
+**"Feed PCM to ASR + record amplitude + send user_amplitude to client"** is implemented in **two shared helpers** (no per-mic duplication):
 
 - **`_feed_pcm_to_pipeline(pcm_bytes, last_amplitude_time, amplitude_interval)`** (~246–276): calls `asr.send_audio(pcm_bytes)`, computes 25 ms amplitude slices, `session.timeline.add_audio_amplitude(..., source="user")`, `ws.send_str(user_amplitude)`.
 - **Preview-only**: **`_feed_pcm_preview_only(...)`** (~220–245): same amplitude logic, no ASR, no timeline; used when session not started.
@@ -112,7 +112,7 @@ No remaining duplication for per-chunk ASR + amplitude + user_amplitude.
 ### 4.3 Amplitude data stored in two places (already in ARCHITECTURE.md)
 
 - **Server**: `session.timeline` gets `audio_amplitude` events (user and tts).
-- **Client**: Builds `liveAudioAmplitudeHistory` from server’s `user_amplitude` messages; on stop sends `audio_amplitude_history` back; server stores it on session and saves to JSON. Replay merges timeline + `session.audio_amplitude_history`. So user amplitude is both in timeline events and in the client-sent list — **data** duplication, not only code.
+- **Client**: Builds `liveAudioAmplitudeHistory` from server's `user_amplitude` messages; on stop sends `audio_amplitude_history` back; server stores it on session and saves to JSON. Replay merges timeline + `session.audio_amplitude_history`. So user amplitude is both in timeline events and in the client-sent list — **data** duplication, not only code.
 
 ---
 
@@ -258,7 +258,7 @@ When ASR is **OpenAI Realtime** (`asr.scheme == "openai-realtime"`, `realtime_se
 | Step | Location | What happens |
 |------|----------|--------------|
 | 1 | `app.js` | Same as classic Browser Mic: client sends **config** then **start_session**; after that it sends **binary PCM** (Int16, 16 kHz) over /ws/voice. No change in client behavior for Realtime. |
-| 2 | `voice_pipeline.py` ~411–430 `receive_loop()` | On **BINARY** message (and `not use_server_mic`): **`await session_ready.wait()`** (do not send until Realtime session is ready). **`pcm_24 = pcm_for_realtime(msg.data)`** (~413): resamples 16 kHz → 24 kHz via **`_resample_pcm_to_24k(msg.data, INPUT_SAMPLE_RATE_FOR_REALTIME)`** (~247–248; `INPUT_SAMPLE_RATE_FOR_REALTIME = 16000` ~162). Optional debug: **`_write_debug_pcm(pcm_24)`**. **`await client.send_audio(pcm_24)`** (~415): pushes base64-encoded PCM to the Realtime client’s input buffer; client sends to OpenAI. |
+| 2 | `voice_pipeline.py` ~411–430 `receive_loop()` | On **BINARY** message (and `not use_server_mic`): **`await session_ready.wait()`** (do not send until Realtime session is ready). **`pcm_24 = pcm_for_realtime(msg.data)`** (~413): resamples 16 kHz → 24 kHz via **`_resample_pcm_to_24k(msg.data, INPUT_SAMPLE_RATE_FOR_REALTIME)`** (~247–248; `INPUT_SAMPLE_RATE_FOR_REALTIME = 16000` ~162). Optional debug: **`_write_debug_pcm(pcm_24)`**. **`await client.send_audio(pcm_24)`** (~415): pushes base64-encoded PCM to the Realtime client's input buffer; client sends to OpenAI. |
 | 3 | `voice_pipeline.py` ~416–429 | User amplitude (green waveform): **`amp = _pcm_rms_to_amplitude(msg.data)`** on the **original 16 kHz** chunk; throttled at **`amplitude_interval = 0.05`** (~219); **`session.timeline.add_audio_amplitude(amplitude=amp, source="user")`**; **`ws.send_str({"type": "user_amplitude", "timestamp": ..., "amplitude": ...})`** to browser. Smoothed with a 3-sample buffer. **Realtime does not use** `_feed_pcm_preview_only` or `_feed_pcm_to_pipeline`; it has its own inline amplitude logic. |
 
 **Summary:** Browser → 16 kHz binary on /ws/voice → server resamples to 24 kHz → Realtime client → OpenAI. User amplitude is computed on the 16 kHz chunk and sent to the browser at 50 Hz; same timeline and message shape as classic for the green waveform.
