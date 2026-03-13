@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Test server mic capture on Jetson: list devices and record a short 16kHz 16-bit mono sample.
 Run from repo root: python scripts/test_mic_capture.py [--device DEV] [--seconds N] [--out FILE]

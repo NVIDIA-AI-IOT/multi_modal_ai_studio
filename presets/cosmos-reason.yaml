@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 name: "Cosmos-Reason2 VLM"
 description: "Optimized for Cosmos-Reason2 vision model with temporal video encoding"
 

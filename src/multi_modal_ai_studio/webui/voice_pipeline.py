@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 """
 Voice WebSocket pipeline: ASR (Riva or OpenAI Realtime) -> LLM (Ollama) -> TTS (Riva).
 

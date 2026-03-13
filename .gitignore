@@ -70,10 +70,6 @@ videos/*
 # Debug videos
 debug_videos/
 
-# Generated for OSRB / nSpect (run scripts/generate_third_party_licenses.sh)
-third_party_licenses.csv
-third_party_licenses.md
-
 # Test outputs
 .pytest_cache/
 .coverage

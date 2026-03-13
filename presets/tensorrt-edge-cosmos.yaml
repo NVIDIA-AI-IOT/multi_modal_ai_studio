@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 name: "Cosmos-Reason2 (TensorRT Edge LLM)"
 description: "Cosmos-Reason2 on TensorRT Edge LLM backend — optimized edge inference with image input"
 
