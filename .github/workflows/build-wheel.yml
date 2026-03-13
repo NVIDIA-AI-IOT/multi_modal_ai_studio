@@ -1,0 +1,64 @@
+# Build Python wheel and run tests.
+# On release publish: optionally attach wheel to GitHub Release; PyPI publish can be added later.
+name: Build and Test
+
+on:
+  push:
+    branches: [main, feat/*]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest tests/unit -v -m "not slow"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build wheel
+        run: python -m build
+
+      - name: Check wheel
+        run: |
+          twine check dist/*
+          ls -la dist/
+
+      - name: Test wheel installation
+        run: |
+          pip install dist/*.whl
+          python -c "import multi_modal_ai_studio; print('Version:', multi_modal_ai_studio.__version__)"
+          multi-modal-ai-studio --version
+          multi-modal-ai-studio --help
+
+      - name: Upload wheel as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel
+          path: dist/*.whl
+          retention-days: 30
+
+      - name: Upload wheel to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl

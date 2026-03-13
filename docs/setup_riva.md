@@ -226,15 +226,7 @@ asr_acoustic_model="parakeet_1.1b"  # Default for ARM64 v2.24.0
 asr_language_code="en-US"           # ASR language
 use_asr_streaming_throughput_mode=false  # false=low latency (recommended)
 
-tts_language_code="en-US"           # TTS language
-
-# USB audio device support (optional for Jetson)
-# Connect USB audio device before running riva_start.sh
-# It will be automatically mounted into the container
-
-# SSL/TLS (optional, for production)
-# ssl_server_cert="/path/to/cert.pem"
-# ssl_server_key="/path/to/key.pem"
+tts_language_code=("multi")           # TTS language
 ```
 
 ### Model Selection Notes for Jetson
@@ -258,6 +250,8 @@ This step downloads Docker images and pre-optimized ASR/TTS models for Jetson (~
 cd riva_quickstart_arm64_v2.24.0
 bash riva_init.sh
 ```
+
+**When you run it**, the script will prompt: `Please enter API key for ngc.nvidia.com:` — use the same NGC API key you configured in Part 2 (from NGC → Setup → Generate API Key).
 
 **What happens on Jetson**:
 1. Pulls ARM64-specific `nvcr.io/nvidia/riva/riva-speech` Docker images
