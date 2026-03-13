@@ -16,6 +16,8 @@ from pathlib import Path
 
 def main():
     """Main entry point for CLI."""
+    from multi_modal_ai_studio import __version__
+
     parser = argparse.ArgumentParser(
         description="Multi-modal AI Studio - Voice/Text/Video AI Interface",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -141,6 +143,13 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
         help="Logging level (default: INFO)"
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show version and exit",
     )
 
     args = parser.parse_args()
