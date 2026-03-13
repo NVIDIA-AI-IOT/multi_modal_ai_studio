@@ -1647,6 +1647,14 @@ async def _run_voice_pipeline(
 
                 if barge_in_aborted:
                     logger.info("[barge_in] Turn aborted; skipping LLM complete/TTS/history, processing new final")
+                    ts_abort = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                    session.timeline.add_event("llm_complete", Lane.LLM, data={"text": full_response or "", "cancelled": True})
+                    await send_event({
+                        "event_type": "llm_complete",
+                        "lane": "llm",
+                        "data": {"text": full_response or "", "cancelled": True},
+                        "timestamp": ts_abort,
+                    })
                     if tts_started and tts_q is not None:
                         await tts_q.put(None)
                         if tts_task is not None:
