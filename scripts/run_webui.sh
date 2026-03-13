@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Launch Multi-modal AI Studio WebUI (default: sessions/). Use --session-dir mock_sessions to load sample data.
 
 cd "$(dirname "$0")/.."

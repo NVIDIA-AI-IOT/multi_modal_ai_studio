@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 """OpenAI-compatible Realtime API WebSocket client."""
 
 from multi_modal_ai_studio.backends.realtime.client import (

@@ -1,0 +1,836 @@
+/* ===== CSS Variables (Theme) ===== */
+:root {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --bg-tertiary: #3a3a3a;
+    --bg-hover: #404040;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --border-color: #404040;
+    --accent-primary: #76b900;  /* NVIDIA green */
+    --accent-secondary: #00a0ff;
+    --timeline-system: #666;
+    --timeline-audio: #4CAF50;
+    --timeline-speech: #2196F3;
+    --timeline-llm: #FF9800;
+    --timeline-tts: #9C27B0;
+    --ttl-highlight: #ff5722;
+}
+
+[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f5;
+    --bg-tertiary: #e8e8e8;
+    --bg-hover: #d5d5d5;
+    --text-primary: #1a1a1a;
+    --text-secondary: #666666;
+    --border-color: #d0d0d0;
+}
+
+/* ===== Reset & Base Styles ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+/* ===== Header ===== */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    height: 64px;
+}
+
+.header h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.header-right {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+/* ===== Buttons ===== */
+.icon-btn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+}
+
+.icon-btn:hover {
+    background: var(--bg-hover);
+}
+
+.primary-btn {
+    background: var(--accent-primary);
+    border: none;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.primary-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+/* ===== Container Layout ===== */
+.container {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    height: calc(100vh - 64px);
+    overflow: hidden;
+}
+
+/* ===== Main Panel (wraps config, chat, timeline) ===== */
+.main-panel {
+    display: grid;
+    grid-template-rows: 1fr auto;
+    overflow: hidden;
+}
+
+/* ===== Content Area (config + chat side by side) ===== */
+.content-area {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    overflow: hidden;
+}
+
+/* ===== Session List Sidebar ===== */
+.session-list {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.session-list-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.new-session-btn {
+    width: 100%;
+    justify-content: center;
+    display: flex;
+    align-items: center;
+}
+
+.session-list-subheader {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.session-list-subheader h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.session-count {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.session-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.session-item {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.session-item:hover {
+    background: var(--bg-hover);
+    transform: translateX(2px);
+}
+
+.session-item.active {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+}
+
+.session-item-name {
+    font-weight: 500;
+    font-size: 0.95rem;
+    margin-bottom: 0.25rem;
+}
+
+.session-item-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+.session-item-metrics {
+    display: flex;
+    gap: 0.75rem;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+.metric-badge {
+    background: var(--bg-primary);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-family: monospace;
+}
+
+/* ===== Config Panel ===== */
+.config-panel {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    position: relative;
+    z-index: 5;
+}
+
+.config-panel.collapsed {
+    display: none; /* Just hide completely instead of transform */
+}
+
+/* Collapsed config panel indicator bar */
+.config-panel-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 12px;
+    background: var(--bg-tertiary);
+    border-right: 2px solid var(--accent-primary);
+    cursor: pointer;
+    display: none; /* Hidden by default */
+    z-index: 50;
+    align-items: center;
+    justify-content: center;
+    writing-mode: vertical-rl;
+    font-size: 0.8rem;
+    color: var(--accent-primary);
+    transition: background 0.2s ease;
+}
+
+.config-panel-bar:hover {
+    background: var(--bg-hover);
+}
+
+/* Show bar when config is collapsed */
+.main-panel.config-collapsed .config-panel-bar {
+    display: flex;
+}
+
+.config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.config-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.config-content {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.config-tabs {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.config-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.config-tab:hover {
+    background: var(--bg-secondary);
+}
+
+.config-tab.active {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.config-tab-content {
+    padding: 1.5rem;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.config-group {
+    margin-bottom: 1.5rem;
+}
+
+.config-group h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.config-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    font-size: 0.9rem;
+}
+
+.config-label {
+    color: var(--text-secondary);
+}
+
+.config-value {
+    font-family: monospace;
+    color: var(--text-primary);
+}
+
+/* ===== Chat Panel ===== */
+.chat-panel {
+    background: var(--bg-primary);
+    overflow-y: auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+/* ===== Session Meta Container ===== */
+.session-meta-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    flex-shrink: 0;
+}
+
+.session-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+}
+
+.session-stats {
+    display: flex;
+    gap: 2rem;
+    font-size: 0.9rem;
+}
+
+.session-stat-item {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.stat-label {
+    color: var(--text-secondary);
+}
+
+.stat-value {
+    color: var(--text-primary);
+    font-family: monospace;
+    font-weight: 600;
+}
+
+/* ===== Session Image Container ===== */
+.session-image-container {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    aspect-ratio: 16 / 9;
+    max-height: 320px;
+    flex-shrink: 0;
+}
+
+.session-preview-image,
+.session-video-feed {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.image-placeholder,
+.video-placeholder {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+}
+
+.placeholder-icon,
+.video-icon {
+    font-size: 3.5rem;
+    margin-bottom: 0.75rem;
+    opacity: 0.5;
+}
+
+.placeholder-text,
+.placeholder-subtext {
+    font-size: 1rem;
+    margin: 0.25rem 0;
+}
+
+.placeholder-subtext {
+    font-size: 0.85rem;
+    opacity: 0.7;
+}
+
+/* Hide placeholder when image/video is loaded */
+.session-preview-image[src]:not([src=""]) + .image-placeholder,
+.session-video-feed.active + .video-placeholder {
+    display: none;
+}
+
+/* ===== Device Controls Container ===== */
+.device-controls-container {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+/* No show config button in chat panel anymore - it moves to video area */
+
+/* ===== Live Session Container ===== */
+/* ===== Device Controls ===== */
+
+.device-group {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.device-item {
+    flex: 1;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.device-item label {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.device-select {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.device-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+/* Audio Level Indicators */
+.audio-level-indicator {
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.audio-level-bar {
+    height: 100%;
+    background: var(--accent-primary);
+    width: 0%;
+    transition: width 0.1s ease;
+}
+
+/* ===== Session Control ===== */
+.session-control {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.start-btn, .stop-btn {
+    flex: 1;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+}
+
+.start-btn {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.start-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.stop-btn {
+    background: #ff5722;
+    color: white;
+}
+
+.stop-btn:hover {
+    opacity: 0.9;
+}
+
+.btn-icon {
+    font-size: 1.1rem;
+}
+
+.session-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+}
+
+.status-setup {
+    background: #888;
+    animation: none;
+}
+
+.status-live {
+    background: #ff5722;
+}
+
+.status-paused {
+    background: #ff9800;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.status-text {
+    font-weight: 500;
+}
+
+.empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+}
+
+.chat-history {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+    overflow-y: auto;
+    background: var(--bg-primary);
+}
+
+.chat-message {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+}
+
+.chat-message.user {
+    flex-direction: row-reverse;
+}
+
+.chat-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.chat-bubble {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    max-width: 70%;
+}
+
+.chat-message.user .chat-bubble {
+    background: var(--accent-primary);
+    color: white;
+    border-color: var(--accent-primary);
+}
+
+.chat-text {
+    line-height: 1.5;
+    font-size: 0.95rem;
+}
+
+.chat-meta {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+/* ===== Timeline Panel ===== */
+.timeline-panel {
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    height: 300px;
+    transition: height 0.3s ease; /* Ready for collapse animation */
+}
+
+/* Future: Timeline collapsed state */
+.timeline-panel.collapsed {
+    height: 40px;
+}
+
+.timeline-panel.collapsed .timeline-content,
+.timeline-panel.collapsed .timeline-metrics {
+    display: none;
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.timeline-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.timeline-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.timeline-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+#timeline-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.timeline-metrics {
+    padding: 0.75rem 1.5rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 2rem;
+    font-size: 0.85rem;
+}
+
+.timeline-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.timeline-metric-label {
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+.timeline-metric-value {
+    font-family: monospace;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+/* ===== Scrollbar Styling ===== */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--bg-hover);
+}
+
+/* ===== Responsive Design ===== */
+
+/* Future: Mobile hamburger menu button */
+.hamburger-btn {
+    display: none;
+}
+
+/* Future: Session list backdrop for mobile overlay */
+.session-list-backdrop {
+    display: none;
+    position: fixed;
+    top: 64px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 999;
+    transition: opacity 0.3s ease;
+}
+
+.session-list-backdrop.visible {
+    display: block;
+}
+
+/* Tablet breakpoint */
+@media (max-width: 1024px) {
+    .container {
+        grid-template-columns: 200px 1fr;
+    }
+    
+    .content-area {
+        grid-template-columns: 1fr;
+    }
+    
+    .chat-panel {
+        display: none;
+    }
+}
+
+/* Mobile breakpoint - hamburger menu */
+@media (max-width: 768px) {
+    .hamburger-btn {
+        display: block;
+    }
+    
+    .container {
+        grid-template-columns: 1fr;
+    }
+    
+    .session-list {
+        position: fixed;
+        left: -280px; /* Hidden off-screen */
+        top: 64px;
+        bottom: 0;
+        width: 280px;
+        z-index: 1000;
+        transition: left 0.3s ease;
+        box-shadow: 2px 0 8px rgba(0,0,0,0.3);
+    }
+    
+    .session-list.open {
+        left: 0; /* Slide in */
+    }
+    
+    /* Collapse timeline by default on mobile */
+    .timeline-panel {
+        height: 40px;
+    }
+    
+    .timeline-panel.expanded {
+        height: 200px; /* Smaller on mobile */
+    }
+}
