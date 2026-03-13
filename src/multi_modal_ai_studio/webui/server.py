@@ -10,10 +10,11 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 
 from dotenv import load_dotenv
 
@@ -24,7 +25,7 @@ load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
 from multi_modal_ai_studio.config.schema import LLMConfig
-from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
+from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.riva import list_riva_tts_voices_sync
 from multi_modal_ai_studio.devices.local import (
@@ -38,6 +39,49 @@ from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _get_network_ips() -> List[str]:
+    """Return non-loopback, non-Docker IPv4 addresses; prefer 192.168.55.* (USB). Include LAN (e.g. 10.x)."""
+    seen: Set[str] = set()
+    ordered: List[str] = []
+    max_ips = 8
+
+    def add(addr: str) -> None:
+        if not addr or addr in seen:
+            return
+        if addr.startswith("127.") or (addr.startswith("172.") and 16 <= int((addr.split(".") + ["0"])[1]) <= 31):
+            return
+        seen.add(addr)
+        if addr.startswith("192.168.55."):
+            ordered.insert(0, addr)
+        else:
+            ordered.append(addr)
+
+    # Prefer full list from hostname -I (all interfaces) when available
+    try:
+        r = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if r.returncode == 0 and r.stdout:
+            for addr in r.stdout.strip().split():
+                add(addr)
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+
+    # Fallback: hostname resolution (may miss some interfaces)
+    if not ordered:
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                addr = (info[4][0] if isinstance(info[4], (list, tuple)) else str(info[4]))
+                add(addr)
+        except Exception:
+            pass
+
+    return ordered[:max_ips]
 
 class _QuietAccessLogger(AbstractAccessLogger):
     """Access logger for HTTP requests (can skip high-frequency paths if needed)."""
@@ -182,6 +226,7 @@ class WebUIServer:
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
         self.app.router.add_patch('/api/app/session-dir', self.handle_patch_session_dir)
         self.app.router.add_get('/api/config/prefills', self.handle_config_prefills)
+        self.app.router.add_get('/api/vision/video-encode-available', self.handle_vision_video_encode_available)
         self.app.router.add_get('/ws/voice', handle_voice_ws)
         self.app.router.add_get('/ws/mic-preview', handle_mic_preview_ws)
         self.app.router.add_get('/ws/camera-webrtc', handle_camera_webrtc_ws)
@@ -215,6 +260,10 @@ class WebUIServer:
         if api_key:
             payload["openai_api_key"] = api_key
         return web.json_response(payload)
+
+    async def handle_vision_video_encode_available(self, request: web.Request) -> web.Response:
+        """GET /api/vision/video-encode-available: True if PyAV and PIL are installed for Video Input."""
+        return web.json_response({"available": video_encode_available()})
 
     async def handle_static_file(self, request):
         """Serve static files (CSS, JS)."""
@@ -365,65 +414,17 @@ class WebUIServer:
             )
 
     async def _detect_vlm_capability(self, api_base: str, api_key: Optional[str], model: str) -> dict:
-        """
-        Detect if a model supports vision (VLM) across different backends.
-        
-        Detection methods (in order of preference):
-        1. Ollama API: Check /api/show for "projector" field
-        2. Name pattern: Check for known VLM patterns (vl, vision, llava, etc.)
-        3. Image probe: Try sending a tiny image (universal fallback)
-        
+        """Detect if a model supports vision by sending a 1x1 image probe.
+
+        Sends a tiny 1x1 white PNG with max_tokens=1.  If the model accepts the
+        image and returns any token, it's a VLM.  If it rejects with an error
+        mentioning "image/vision/multimodal", it's an LLM.
+
         Returns: {"is_vlm": bool, "detection_method": str, "confidence": str}
         """
-        import aiohttp
-        import re
-        
-        result = {"is_vlm": False, "detection_method": "unknown", "confidence": "low"}
-        
-        # -------------------------------------------------------------------------
-        # Method 1: Ollama-specific detection (fast, no inference)
-        # -------------------------------------------------------------------------
-        if "11434" in api_base or "ollama" in api_base.lower():
-            try:
-                # Ollama's /api/show returns model details including vision components
-                ollama_base = api_base.replace("/v1", "").rstrip("/")
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{ollama_base}/api/show",
-                        json={"name": model},
-                        timeout=aiohttp.ClientTimeout(total=5)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("projector"):
-                                result = {"is_vlm": True, "detection_method": "ollama_projector", "confidence": "high"}
-                                logger.info("[VLM Detect] Ollama projector found → VLM")
-                                return result
-                            families = data.get("details", {}).get("families", [])
-                            if any("vl" in f.lower() for f in families):
-                                result = {"is_vlm": True, "detection_method": "ollama_family", "confidence": "high"}
-                                logger.info("[VLM Detect] Ollama family contains 'vl' → VLM")
-                                return result
-                            model_info = data.get("model_info", {})
-                            has_vision = any("vision" in k for k in model_info)
-                            if has_vision:
-                                result = {"is_vlm": True, "detection_method": "ollama_model_info", "confidence": "high"}
-                                logger.info("[VLM Detect] Ollama model_info has vision keys → VLM")
-                                return result
-                            result = {"is_vlm": False, "detection_method": "ollama_api", "confidence": "high"}
-                            logger.info("[VLM Detect] Ollama model has no vision components → LLM")
-                            return result
-            except Exception as e:
-                logger.debug("[VLM Detect] Ollama API check failed: %s", e)
-        
-        # -------------------------------------------------------------------------
-        # Method 3: Image probe (universal, works for any backend)
-        # Send a tiny 1x1 image and see if model accepts it
-        # -------------------------------------------------------------------------
         try:
-            # 1x1 white PNG (smallest possible valid image)
             tiny_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
-            
+
             config = LLMConfig(
                 api_base=api_base,
                 api_key=api_key,
@@ -432,37 +433,28 @@ class WebUIServer:
                 temperature=0.0,
             )
             backend = OpenAILLMBackend(config)
-            
-            # Create multimodal message with image
+
             test_messages = [{
                 "role": "user",
                 "content": [
+                    {"type": "text", "text": "1"},
                     {"type": "image_url", "image_url": {"url": tiny_image}},
-                    {"type": "text", "text": "1"}
                 ]
             }]
-            
-            # Try to generate with image - VLMs will accept, LLMs will error
+
             async for token in backend.generate_stream("", test_messages):
-                # If we get any response, model accepted the image → VLM
-                result = {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
                 logger.info("[VLM Detect] Image probe succeeded → VLM")
-                return result
-                
+                return {"is_vlm": True, "detection_method": "image_probe", "confidence": "high"}
+
         except Exception as e:
             error_str = str(e).lower()
-            # Check for specific error messages that indicate image rejection
             if any(x in error_str for x in ["image", "vision", "multimodal", "unsupported"]):
-                result = {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
                 logger.info("[VLM Detect] Image probe rejected → LLM")
-                return result
-            # Other errors might be network issues, etc.
+                return {"is_vlm": False, "detection_method": "image_probe_rejected", "confidence": "high"}
             logger.debug("[VLM Detect] Image probe error: %s", e)
-        
-        # Default: unknown, assume LLM for safety
-        result = {"is_vlm": False, "detection_method": "default", "confidence": "low"}
+
         logger.info("[VLM Detect] Could not determine, defaulting to LLM")
-        return result
+        return {"is_vlm": False, "detection_method": "default", "confidence": "low"}
 
     async def handle_llm_warmup(self, request: web.Request) -> web.Response:
         """
@@ -679,17 +671,36 @@ class WebUIServer:
         return candidates[0]
 
     async def handle_list_videos(self, request: web.Request) -> web.Response:
-        """GET /api/videos/list — list MP4 files in the videos/ folder."""
+        """GET /api/videos/list — list MP4 files in the videos/ folder.
+
+        If videos/demo_scenarios.json exists, each video entry is enriched with
+        scenario metadata (label, description, llm config overrides) so the UI
+        can auto-apply per-video prompts without a server restart.
+        """
         videos_dir = self._get_videos_dir()
         if not videos_dir.is_dir():
-            return web.json_response({"videos": [], "videos_dir": str(videos_dir)})
+            return web.json_response({"videos": [], "scenarios": {}, "videos_dir": str(videos_dir)})
+
+        scenarios: dict = {}
+        scenarios_file = videos_dir / "demo_scenarios.json"
+        if scenarios_file.is_file():
+            try:
+                import json as _json
+                scenarios = _json.loads(scenarios_file.read_text()).get("scenarios", {})
+            except Exception as exc:
+                logger.warning("Failed to load demo_scenarios.json: %s", exc)
+
         result = []
         for f in sorted(videos_dir.iterdir()):
             if f.suffix.lower() in (".mp4", ".webm", ".mkv", ".avi") and f.is_file():
-                result.append({
+                entry: dict = {
                     "name": f.name,
                     "size_kb": round(f.stat().st_size / 1024, 1),
-                })
+                }
+                sc = scenarios.get(f.name)
+                if sc:
+                    entry["scenario"] = sc
+                result.append(entry)
         return web.json_response({"videos": result, "videos_dir": str(videos_dir)})
 
     async def handle_serve_video(self, request: web.Request) -> web.Response:
@@ -860,9 +871,18 @@ class WebUIServer:
         await site.start()
 
         protocol = "https" if self.ssl_context else "http"
+        port = self.port
         logger.info("🚀 Multi-modal AI Studio WebUI")
-        logger.info(f"📡 Server running at {protocol}://{self.host}:{self.port}")
-        logger.info(f"📂 Session directory: {self.session_dir.absolute()}")
+        logger.info("────────────────────────────────────────")
+        logger.info("Access the server at:")
+        logger.info("  🏠 %s://localhost:%s", protocol, port)
+        for ip in _get_network_ips():
+            if ip.startswith("192.168.55."):
+                logger.info("  🚂 %s://%s:%s", protocol, ip, port)
+            else:
+                logger.info("  🌐 %s://%s:%s", protocol, ip, port)
+        logger.info("────────────────────────────────────────")
+        logger.info("📂 Session directory: %s", self.session_dir.absolute())
         if self.ssl_context:
             logger.info("⚠️  Your browser will show a security warning (self-signed certificate)")
             logger.info("    Click 'Advanced' → 'Proceed to localhost' (or 'Accept Risk')")

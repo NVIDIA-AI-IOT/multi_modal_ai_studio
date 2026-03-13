@@ -94,6 +94,8 @@ class LLMConfig:
         api_base: API base URL
         api_key: API key for authentication
         model: Model identifier
+        cheap_model: Optional model identifier for non-conversational helper tasks
+            such as session title generation
         temperature: Sampling temperature (0.0-2.0)
         max_tokens: Maximum tokens to generate
         minimal_output: If True, request minimal output only (e.g. single number); no reasoning (for Nemotron-style models)
@@ -114,12 +116,21 @@ class LLMConfig:
             "tensorrt_edge" — TensorRT Edge LLM format ({"type": "image", "image": "<base64>"})
         vision_video_encode: If True, encode frames as MP4 video for temporal understanding
             (e.g. Cosmos-Reason models). Must be set explicitly in preset/config.
+        enable_reasoning: If True, append reasoning_prompt to the system prompt so the model
+            uses chain-of-thought (e.g. <think>...</think>). The reasoning text is stripped
+            before TTS playback.
+        reasoning_prompt: The prompt text appended to the system prompt when enable_reasoning
+            is True. Users can customise this to match their model's reasoning format.
         history_turns: Number of previous turns to include as context (0=no history)
+        vision_include_history: When enable_vision is True, if True include text-only conversation
+            history so follow-ups (e.g. "How about this?") get context. If False, no history is sent
+            with vision input to avoid repeated answers when the scene changes.
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
     api_base: str = "http://localhost:11434/v1"
     api_key: Optional[str] = None
     model: str = "llama3.2:3b"
+    cheap_model: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 512
     minimal_output: bool = False
@@ -129,7 +140,8 @@ class LLMConfig:
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     history_turns: int = 3  # Previous turns sent as text-only context (0=disabled)
-    
+    vision_include_history: bool = False  # When vision on: include history for follow-ups (default: no)
+
     # -------------------------------------------------------------------------
     # Vision (VLM) settings - send camera frames with prompts
     # When enable_vision=True, camera frames are captured and sent with each prompt
@@ -144,6 +156,11 @@ class LLMConfig:
     vision_api_format: Literal["openai", "tensorrt_edge"] = "openai"
     vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
     enable_reasoning: bool = False  # True to allow <think> chain-of-thought; filtered from TTS
+    reasoning_prompt: str = (
+        "\n\nThink step-by-step inside <think> tags, then write your final answer "
+        "immediately after </think>. The final answer MUST be exactly one descriptive "
+        "sentence — no lists, no paragraphs, no tags."
+    )
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -195,6 +212,7 @@ class TTSConfig:
     speed: float = 1.0
     response_format: str = "pcm"
     stream_tts: bool = True
+    tts_chunk_words: int = 10  # Words to buffer before first TTS chunk (5=fast, 20=smoother)
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -558,6 +576,8 @@ class SessionConfig:
             if self.llm.api_key:
                 args.append(f"--llm-api-key {self.llm.api_key}")
             args.append(f"--llm-model {self.llm.model}")
+            if self.llm.cheap_model:
+                args.append(f"--llm-cheap-model {self.llm.cheap_model}")
             args.append(f"--llm-temperature {self.llm.temperature}")
             args.append(f"--llm-max-tokens {self.llm.max_tokens}")
             if self.llm.minimal_output:

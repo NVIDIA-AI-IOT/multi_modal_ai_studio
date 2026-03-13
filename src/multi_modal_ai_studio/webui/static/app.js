@@ -64,7 +64,7 @@ const state = {
     /** ScriptProcessor or worklet node for PCM capture; disconnect on stop */
     voicePcmNode: null,
     /** Push-to-talk: when true, server does not feed mic to ASR (waveform still sent and displayed) */
-    micMuted: true,
+    micMuted: false,
     /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
     liveSessionStartTime: 0,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
@@ -140,7 +140,9 @@ const uiSettings = {
     /** User (mic) voice threshold 0–100: amplitude >= this = voice, below = silence (TTL end-of-speech, hide low user bars during TTS). Default 5. */
     userVoiceThreshold: 5,
     /** Session directory override: '' = default (sessions), 'mock_sessions' = sample data. Sent to server via PATCH /api/app/session-dir. */
-    sessionDirOverride: ''
+    sessionDirOverride: '',
+    /** When true, cap session video/image height so it fits in view without vertical scroll (e.g. for ultra-wide 32:9 displays). */
+    limitSessionImageHeight: true
 };
 
 // Load UI settings from localStorage
@@ -401,6 +403,7 @@ function updateConfigPanelState() {
     if (!panel) return;
     const autoHideBtn = document.getElementById('auto-hide-config-btn');
     const configContent = document.getElementById('config-content');
+    const configFooter = document.getElementById('config-footer');
     const isSetup = state.sessionState === 'setup';
     const canEditConfig = state.isLiveSession && isSetup;
 
@@ -408,6 +411,7 @@ function updateConfigPanelState() {
         panel.classList.add('config-panel--editable');
         panel.classList.remove('config-panel--locked');
         if (autoHideBtn) autoHideBtn.disabled = false;
+        if (configFooter) configFooter.style.display = '';
         setConfigInputsDisabled(false);
     } else {
         panel.classList.remove('config-panel--editable');
@@ -417,6 +421,7 @@ function updateConfigPanelState() {
             panel.classList.remove('config-panel--locked');
         }
         if (autoHideBtn) autoHideBtn.disabled = !state.isLiveSession;
+        if (configFooter) configFooter.style.display = 'none';
         setConfigInputsDisabled(!canEditConfig);
     }
 }
@@ -424,10 +429,11 @@ function updateConfigPanelState() {
 function setConfigInputsDisabled(disabled) {
     const content = document.getElementById('config-content');
     if (!content) return;
-    content.querySelectorAll('input, select, textarea, button.config-tab').forEach(function (el) {
+    content.querySelectorAll('input, select, textarea').forEach(function (el) {
         if (el.id === 'auto-hide-config-btn') return;
         el.disabled = disabled;
     });
+    /* Do not disable button.config-tab so tabs remain clickable in replay */
 }
 
 var CONFIG_AUTO_HIDE_KEY = 'mmai_config_auto_hide_on_start';
@@ -455,12 +461,14 @@ function applyConfigPanelCollapse() {
     if (expandStrip) expandStrip.style.display = collapsed ? 'flex' : 'none';
     if (collapseBtn) collapseBtn.style.display = (inSession && !collapsed) ? 'inline-flex' : 'none';
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    // Re-apply limit-height so session-image class is in sync when collapse state changes
+    applyUISettingsToLayout();
 }
 
 function updateAutoHideConfigLabel() {
     const label = document.getElementById('auto-hide-config-label');
     const btn = document.getElementById('auto-hide-config-btn');
-    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide once session start \u2713' : 'Auto hide once session start <<';
+    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide once session start \u2713' : 'Auto hide once session start';
     if (btn) {
         if (state.autoHideConfigOnStart) btn.classList.add('config-auto-hide-btn--on');
         else btn.classList.remove('config-auto-hide-btn--on');
@@ -484,9 +492,13 @@ function updateSessionImageContainerAspect() {
     if (w > 0 && h > 0) {
         container.style.aspectRatio = w + ' / ' + h;
         container.classList.add('session-image-container--video-aspect');
+        container.style.setProperty('--fullscreen-ar-w', String(w));
+        container.style.setProperty('--fullscreen-ar-h', String(h));
     } else {
         container.style.aspectRatio = '';
         container.classList.remove('session-image-container--video-aspect');
+        container.style.setProperty('--fullscreen-ar-w', '16');
+        container.style.setProperty('--fullscreen-ar-h', '9');
     }
 }
 
@@ -522,10 +534,17 @@ function renderConfig() {
     // If in live session setup mode, show editable forms; when live/stopped, form is disabled via updateConfigPanelState
     if (state.isLiveSession) {
         contentEl.innerHTML = renderEditableConfigForm(tab, currentConfig[configKey], false);
-        if (tab === 'llm' && !isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+        if (tab === 'llm') {
+            if (!isRealtimeFullVoiceLock()) setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+            if (currentConfig.llm.enable_vision && currentConfig.llm.vision_video_encode) setTimeout(checkVideoEncodeAndShowBanner, 0);
+        }
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
-        if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
+        if (tab === 'device') {
+            setTimeout(populateAllDeviceDropdowns, 0);
+            // Retry camera/mic preview when user opens Devices tab (e.g. after fixing camera device)
+            if (state.sessionState === 'setup') setTimeout(function () { startPreviewStream(); }, 100);
+        }
         // Preload ASR/TTS model names so pipeline shows them even when user hasn't opened those tabs
         setTimeout(function () { preloadASRModelName(); preloadTTSModelName(); }, 0);
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
@@ -547,7 +566,12 @@ function renderConfig() {
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
 
-// Default configuration state for new sessions
+// Client-side default config: used when a key is missing from currentConfig (e.g. after merging
+// a preset). Presets are only loaded when the server is started with --preset <name>; then
+// fetchAndApplyInitialConfig() GETs /api/config/initial and deep-merges that preset into
+// currentConfig. Keys not present in the preset are left as-is (or filled from here when
+// rendering the form). So the "reasoning prompt" text you see in the UI comes from here, not
+// from the preset file.
 const defaultConfig = {
     asr: {
         backend: 'riva',
@@ -572,21 +596,24 @@ const defaultConfig = {
         ollama_url: 'http://localhost:11434',
         api_key: '',
         model: 'llama3.2:3b',
+        cheap_model: 'llama3.2:3b',
         temperature: 0.7,
         max_tokens: 2048,
         minimal_output: false,
         stream: true,
-        system_prompt: 'You are a helpful AI assistant.',
+        system_prompt: 'You are a helpful AI assistant. Reply in plain text only — no markdown, asterisks, or other formatting.',
         extra_request_body: '',
         enable_vision: false,
-        vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.',
+        vision_include_history: false,
+        vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations. Use plain text only — no markdown or formatting.',
         vision_detail: 'auto',
         vision_frames: 4,
         vision_quality: 0.8,
         vision_max_width: 640,
         vision_buffer_fps: 3.0,
         vision_video_encode: false,
-        enable_reasoning: false
+        enable_reasoning: false,
+        reasoning_prompt: '\n\nThink step-by-step inside <think> tags, then write your final answer immediately after </think>. The final answer MUST be exactly one descriptive sentence — no lists, no paragraphs, no tags.'
     },
     tts: {
         backend: 'riva',
@@ -596,7 +623,8 @@ const defaultConfig = {
         sample_rate: 22050,
         quality: 'high',
         realtime_transport: 'websocket',
-        stream_tts: true
+        stream_tts: true,
+        tts_chunk_words: 10
     },
     devices: {
         camera: 'browser',
@@ -610,6 +638,8 @@ const defaultConfig = {
         show_interim_asr: true,
         enable_timeline: true,
         llm_warmup_while_preview: true,
+        /** When true, new sessions and preview start with mic muted (red circle). Default false = start unmuted (green circle). */
+        start_with_microphone_muted: false,
         barge_in_enabled: false,
         barge_in_trigger: 'final',
         barge_in_partial_count: 3,
@@ -626,15 +656,63 @@ let _serverPresetConfig = null;
 // Default config saved by user (for "New Voice Chat with Default Configuration" later)
 const DEFAULT_VOICE_CHAT_CONFIG_KEY = 'defaultVoiceChatConfig';
 
+// Legacy reasoning_prompt string we no longer use as default (migrate away when loading from localStorage)
+var _legacyReasoningPromptSubstring = 'Think step-by-step inside <think>';
+
+/** Run once on load: clear old default reasoning_prompt from localStorage so all users get the new default. */
+function migrateStoredDefaultConfigReasoningPrompt() {
+    try {
+        var saved = localStorage.getItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+        if (!saved) return;
+        var parsed = JSON.parse(saved);
+        if (!parsed.llm || typeof parsed.llm.reasoning_prompt !== 'string') return;
+        if (parsed.llm.reasoning_prompt.indexOf(_legacyReasoningPromptSubstring) === -1) return;
+        parsed.llm.reasoning_prompt = '';
+        localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(parsed));
+    } catch (e) {}
+}
+migrateStoredDefaultConfigReasoningPrompt();
+
 function getDefaultConfig() {
     try {
         const saved = localStorage.getItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
         if (!saved) return null;
         const parsed = JSON.parse(saved);
-        return { ...defaultConfig, ...parsed };
+        var out = { ...defaultConfig, ...parsed };
+        // These LLM strings always come from in-code default, not localStorage (so app updates show up)
+        if (out.llm && defaultConfig.llm) {
+            out.llm.reasoning_prompt = defaultConfig.llm.reasoning_prompt;
+            out.llm.system_prompt = defaultConfig.llm.system_prompt;
+            out.llm.vision_system_prompt = defaultConfig.llm.vision_system_prompt;
+        }
+        return out;
     } catch (e) {
         console.warn('Failed to load saved default config:', e);
         return null;
+    }
+}
+
+/** Clear saved default and set current config to built-in defaultConfig (localStorage cleared; + New Voice Chat will use defaultConfig). */
+function resetDefaultConfig() {
+    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+    try {
+        localStorage.removeItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+        currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+        applyEnvPrefillsToCurrentConfig();
+        renderConfig();
+        const btn = document.getElementById('reset-default-config-btn');
+        if (btn) {
+            var origHTML = btn.innerHTML;
+            btn.innerHTML = 'Reset';
+            btn.disabled = true;
+            setTimeout(function () {
+                btn.innerHTML = origHTML;
+                btn.disabled = false;
+                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+            }, 1200);
+        }
+    } catch (e) {
+        console.error('Failed to reset default config:', e);
     }
 }
 
@@ -644,10 +722,10 @@ function saveDefaultConfig() {
         localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(currentConfig));
         const btn = document.getElementById('save-default-config-btn');
         if (btn) {
-            const origHTML = btn.innerHTML;
+            var origHTML = btn.innerHTML;
             btn.innerHTML = 'Saved';
             btn.disabled = true;
-            setTimeout(() => {
+            setTimeout(function () {
                 btn.innerHTML = origHTML;
                 btn.disabled = false;
                 if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
@@ -711,6 +789,14 @@ async function fetchAndApplyInitialConfig() {
         console.log('[Preset] Server preset loaded:', _serverPresetConfig.name || '(unnamed)');
 
         currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
+        // Fill in defaults for any fields missing from the preset
+        for (var _dk of Object.keys(defaultConfig)) {
+            if (defaultConfig[_dk] && typeof defaultConfig[_dk] === 'object' && currentConfig[_dk]) {
+                for (var _fk of Object.keys(defaultConfig[_dk])) {
+                    if (currentConfig[_dk][_fk] === undefined) currentConfig[_dk][_fk] = defaultConfig[_dk][_fk];
+                }
+            }
+        }
 
         if (state.isLiveSession) {
             renderConfig();
@@ -754,21 +840,21 @@ let _warmupResult = null;  // Stores last warmup result {is_vlm, model, etc.}
 function updateStartButtonState(state, info = {}) {
     const startBtn = document.getElementById('start-session-btn');
     if (!startBtn) return;
-    
+
     if (state === 'loading') {
         startBtn.disabled = true;
         startBtn.classList.add('loading');
-        startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span> Loading Session...`;
+        startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="loader-2" class="lucide-inline spin"></i></span> Preparing…`;
     } else {
         // 'ready' or 'error' - both enable the button, pipeline shows status
         startBtn.disabled = false;
         startBtn.classList.remove('loading');
         startBtn.innerHTML = `<span class="btn-icon"><i data-lucide="play" class="lucide-inline"></i></span> START Session`;
     }
-    
+
     // Update pipeline status indicator
     updatePipelineLLMStatus(info);
-    
+
     // Refresh lucide icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
@@ -779,16 +865,16 @@ function updateStartButtonState(state, info = {}) {
 function updatePipelineLLMStatus(info) {
     const pipelineEl = document.getElementById('pipeline-config');
     if (!pipelineEl) return;
-    
+
     // Find the LLM segment (class is pipeline-seg-llm)
     const llmSeg = pipelineEl.querySelector('.pipeline-seg-llm .pipeline-seg-label');
     if (!llmSeg) return;
-    
+
     // Get the model name from config
     const model = info.model || currentConfig?.llm?.model || '';
     const isVlm = info.is_vlm || false;
     const isError = info.error ? true : false;
-    
+
     // Build status indicator
     let statusIcon = '';
     if (info.loading) {
@@ -798,13 +884,13 @@ function updatePipelineLLMStatus(info) {
     } else if (info.success !== false) {
         statusIcon = '<i data-lucide="check-circle" class="lucide-inline pipeline-status pipeline-status--ok"></i>';
     }
-    
+
     // Build badge
     const badge = isVlm ? '<span class="pipeline-badge vlm">VLM</span>' : '';
-    
+
     // Update the label
     llmSeg.innerHTML = `${statusIcon} ${model} ${badge}`;
-    
+
     // Refresh icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
@@ -815,13 +901,13 @@ async function warmupLLM() {
     const config = currentConfig.llm || {};
     const apiBase = (config.api_base || '').trim();
     const model = (config.model || '').trim();
-    
+
     if (!apiBase || !model) {
         console.log('[Warmup] Skipping - no api_base or model configured');
         updateStartButtonState('ready', {});
         return;
     }
-    
+
     // Avoid duplicate warmups for same config
     const warmupKey = `${apiBase}|${model}`;
     if (warmupKey === _lastWarmupKey && _warmupResult) {
@@ -829,18 +915,18 @@ async function warmupLLM() {
         updateStartButtonState('ready', _warmupResult);
         return;
     }
-    
+
     if (_warmupInProgress) {
         console.log('[Warmup] Already in progress, skipping');
         return;
     }
-    
+
     _warmupInProgress = true;
     console.log('[Warmup] Warming up model:', model, '@', apiBase);
-    
+
     // Show loading state on START button and pipeline
     updateStartButtonState('loading', { model: model.split('/').pop(), loading: true });
-    
+
     try {
         const response = await fetch('/api/llm/warmup', {
             method: 'POST',
@@ -852,7 +938,7 @@ async function warmupLLM() {
                 detect_vlm: true,
             }),
         });
-        
+
         const result = await response.json();
         if (result.success) {
             console.log(`[Warmup] Model ${model} ready in ${result.warmup_time_seconds}s (VLM: ${result.is_vlm})`);
@@ -1195,13 +1281,14 @@ function renderLLMConfig(config, readonly = false) {
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;">API Base URL</label>
                     ${!disableApiAndModel ? `<div style="position: relative;">
-                        <button type="button" class="icon-btn" onclick="togglePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i></button>
+                        <button type="button" class="icon-btn icon-btn--with-label" onclick="togglePresetsMenu(event)" title="Select preset"><i data-lucide="list" class="lucide-inline"></i> Preset</button>
                         <div class="api-presets-menu" id="presetsMenu" style="display: none;">
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:11434/v1', 'Ollama')"><strong>Ollama</strong><span>http://localhost:11434/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8000/v1', 'vLLM')"><strong>vLLM</strong><span>http://localhost:8000/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
-                            <div class="api-preset-item" onclick="selectTensorRTEdgePreset()"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:58010/v1', 'TensorRT Edge LLM')"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMPreset('http://10.110.51.30:8801/v1', 'LLM Router')"><strong>LLM Router</strong><span>http://10.110.51.30:8801/v1</span></div>
                             <div style="border-top: 1px solid var(--border-color);"></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://api.openai.com/v1', 'OpenAI')"><strong>OpenAI</strong><span>https://api.openai.com/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('https://integrate.api.nvidia.com/v1', 'NVIDIA')"><strong>NVIDIA API Catalog</strong><span>https://integrate.api.nvidia.com/v1</span></div>
@@ -1228,6 +1315,17 @@ function renderLLMConfig(config, readonly = false) {
                     <option value="${escapeHtml(config.model)}">${readonly ? escapeHtml(config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
                 </select>
                 <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Fetched from API Base URL; use reload icon if you added a model'}</div>
+            </div>
+
+            <div class="form-group">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;">Utility Model</label>
+                    ${!disableApiAndModel ? '<button type="button" class="icon-btn" onclick="refreshLLMModels()" title="Refresh models"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                </div>
+                <select ${disableApiAndModel ? 'disabled' : ''} id="llm-cheap-model-select" onchange="updateConfig('llm', 'cheap_model', this.value)">
+                    <option value="${escapeHtml(config.cheap_model || config.model)}">${readonly ? escapeHtml(config.cheap_model || config.model) : (realtimeFullVoice ? 'gpt-realtime (fixed)' : 'Loading...')}</option>
+                </select>
+                <div class="input-hint">${realtimeFullVoice ? 'Fixed when using Realtime full-voice.' : 'Used for non-conversational app tasks such as session title generation. Not used for the live session conversation.'}</div>
             </div>
 
             <div class="form-group">
@@ -1272,11 +1370,29 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div id="vlm-settings" class="form-group" style="display: ${config.enable_vision ? 'block' : 'none'}; padding-left: 20px; border-left: 2px solid var(--border-color);">
-                <label>Frames per Turn</label>
-                <input type="range" ${disabled} id="llm-vision-frames" min="1" max="10" step="1" value="${config.vision_frames || 4}"
+                <label style="margin-bottom: 6px;">Vision Input Mode</label>
+                <div style="display: flex; gap: 32px; margin-bottom: 8px;">
+                    <label class="checkbox-label" style="margin: 0; cursor: pointer;">
+                        <input type="radio" ${disabled} name="vision-input-mode" value="n-image" ${!config.vision_video_encode ? 'checked' : ''}
+                               onchange="updateConfig('llm', 'vision_video_encode', false); updateVisionFramesUI(false);">
+                        N-Image Input
+                    </label>
+                    <label class="checkbox-label" style="margin: 0; cursor: pointer;">
+                        <input type="radio" ${disabled} name="vision-input-mode" value="video" ${config.vision_video_encode ? 'checked' : ''}
+                               onchange="updateConfig('llm', 'vision_video_encode', true); updateVisionFramesUI(true);">
+                        Video Input
+                    </label>
+                </div>
+                ${!readonly ? '<span class="input-hint">N-Image sends individual JPEG frames; Video encodes frames into MP4</span>' : ''}
+                <div id="vision-video-unavailable-banner" class="vision-video-unavailable-banner" style="display: none; margin-top: 10px;" role="alert">
+                    <strong>Video Input unavailable:</strong> PyAV and PIL are not installed. Install with <code>pip install av Pillow</code> or use N-Image Input instead.
+                </div>
+
+                <label style="margin-top: 10px;" id="vision-frames-label">${config.vision_video_encode ? 'Video Frames' : 'Frames per Turn'}</label>
+                <input type="range" ${disabled} id="llm-vision-frames" min="1" max="${config.vision_video_encode ? 30 : 20}" step="1" value="${config.vision_frames || 4}"
                        oninput="updateConfig('llm', 'vision_frames', parseInt(this.value)); document.getElementById('vision-frames-value').textContent = this.value;">
                 <span id="vision-frames-value" class="range-value">${config.vision_frames || 4}</span>
-                ${!readonly ? '<span class="input-hint">1 = single frame at end, 2-10 = multiple frames during speech</span>' : ''}
+                ${!readonly ? `<span class="input-hint" id="vision-frames-hint">${config.vision_video_encode ? 'Frames from buffer encoded into the MP4 video' : 'Individual images sent to VLM per speech turn'}</span>` : ''}
 
                 <label style="margin-top: 10px;">Frame Quality</label>
                 <input type="range" ${disabled} id="llm-vision-quality" min="0.3" max="1.0" step="0.1" value="${config.vision_quality || 0.7}"
@@ -1290,11 +1406,24 @@ function renderLLMConfig(config, readonly = false) {
                 <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
 
                 <label class="checkbox-label" style="margin-top: 12px;">
+                    <input type="checkbox" ${disabled} id="llm-vision-include-history" ${config.vision_include_history ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'vision_include_history', this.checked)">
+                    Include conversation history (for follow-ups like &quot;How about this?&quot;)
+                </label>
+                ${!readonly ? '<span class="input-hint">When on, previous Q&amp;A is sent as text so the model can answer follow-up questions. May repeat answers if the scene did not change.</span>' : ''}
+
+                <label class="checkbox-label" style="margin-top: 12px;">
                     <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
-                           onchange="updateConfig('llm', 'enable_reasoning', this.checked)">
+                           onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
                     Enable Reasoning (chain-of-thought)
                 </label>
-                ${!readonly ? '<span class="input-hint">Model thinks in &lt;think&gt; tags before answering. Improves accuracy but increases latency.</span>' : ''}
+                ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to the system prompt. Reasoning text is stripped before TTS.</span>' : ''}
+                <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
+                    <label>Reasoning Prompt</label>
+                    <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;" placeholder="e.g. Think step-by-step in <think>...</think> then your final answer."
+                              onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt ?? defaultConfig.llm.reasoning_prompt ?? '')}</textarea>
+                    ${!readonly ? '<span class="input-hint">Appended to system prompt when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
+                </div>
             </div>
 
             <div class="form-group">
@@ -1346,20 +1475,20 @@ function toggleVlmSettings() {
     const vlmSettings = document.getElementById('vlm-settings');
     const enableVision = document.getElementById('llm-enable-vision');
     const systemPrompt = document.getElementById('llm-system-prompt');
-    
+
     if (vlmSettings && enableVision) {
         vlmSettings.style.display = enableVision.checked ? 'block' : 'none';
     }
-    
+
     // Swap system prompt content based on vision state and update config
     if (systemPrompt && currentConfig.llm) {
         if (enableVision.checked) {
             // Switching to vision mode - use vision system prompt
-            const visionPrompt = currentConfig.llm.vision_system_prompt || 
+            const visionPrompt = currentConfig.llm.vision_system_prompt ||
                 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.';
             systemPrompt.value = visionPrompt;
             currentConfig.llm.system_prompt = visionPrompt;
-            
+
             // Vision ON → Camera cannot be "none", auto-switch to browser
             if (currentConfig.devices.video_source === 'none' || currentConfig.devices.camera === 'none') {
                 currentConfig.devices.video_source = 'browser';
@@ -1544,10 +1673,17 @@ function renderTTSConfig(config, readonly = false) {
             <div class="form-group" style="margin-top: 12px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">
                 <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                     <input type="checkbox" ${disabled} ${config.stream_tts !== false ? 'checked' : ''}
-                           onchange="updateConfig('tts', 'stream_tts', this.checked)">
+                           onchange="updateConfig('tts', 'stream_tts', this.checked); document.getElementById('tts-chunk-words-group').style.display = this.checked ? 'block' : 'none';">
                     <span>Start speaking before LLM finishes</span>
                 </label>
                 <span class="input-hint">Streams TTS sentence-by-sentence as the LLM generates, reducing time to first audio</span>
+                <div id="tts-chunk-words-group" style="display: ${config.stream_tts !== false ? 'block' : 'none'}; margin-top: 8px;">
+                    <label>Words before first speech</label>
+                    <input type="range" ${disabled} id="tts-chunk-words" min="5" max="20" step="1" value="${config.tts_chunk_words || 10}"
+                           oninput="updateConfig('tts', 'tts_chunk_words', parseInt(this.value)); document.getElementById('tts-chunk-words-value').textContent = this.value;">
+                    <span id="tts-chunk-words-value" class="range-value">${config.tts_chunk_words || 10}</span>
+                    ${!readonly ? '<span class="input-hint">Lower = faster response, higher = smoother speech</span>' : ''}
+                </div>
             </div>
         </div>
     `;
@@ -1574,15 +1710,15 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             <p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded devices for this session (read-only)</p>
             <div class="form-group">
                 <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${camName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${camName}" aria-readonly="true" />
             </div>
             <div class="form-group">
                 <label><i data-lucide="mic" class="lucide-inline"></i> Microphone device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${micName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${micName}" aria-readonly="true" />
             </div>
             <div class="form-group">
                 <label><i data-lucide="volume-2" class="lucide-inline"></i> Speaker device</label>
-                <div class="config-value config-value--device" aria-readonly="true">${spkName}</div>
+                <input type="text" class="config-value config-value--device" readonly disabled value="${spkName}" aria-readonly="true" />
             </div>
         </div>
     `;
@@ -1599,13 +1735,17 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
             <p class="input-hint" style="margin-bottom: 1rem;">Select the device for your chat session. Select &#128683;None if you don&apos;t plan to use the device or go text based. <strong>Microphone:</strong> (Browser) = mic on this PC; Server USB = mic attached to the server (e.g. EMEET). <strong>Speaker:</strong> Server USB not yet wired; use (Browser) for playback.</p>
             <div class="form-group">
-                <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="margin: 0;"><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
+                    ${!readonly && camValue !== 'none' ? '<button type="button" class="icon-btn" onclick="startPreviewStream()" title="Retry camera preview (e.g. after fixing device)"><i data-lucide="refresh-cw" class="lucide-inline"></i></button>' : ''}
+                </div>
                 <select id="device-camera-list" ${disabled} data-device-type="camera" onchange="onDeviceListChange('camera', this.value)">
                     <option value="none" ${camValue === 'none' ? 'selected' : ''} ${currentConfig.llm && currentConfig.llm.enable_vision ? 'disabled style="color:#999;"' : ''}>&#128683;None (No vision-modality)${currentConfig.llm && currentConfig.llm.enable_vision ? ' - VLM requires camera' : ''}</option>
                     <option value="" ${camValue === '' || camValue === 'browser' ? 'selected' : ''}>Default (Browser)</option>
-                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>Local Video File</option>
+                    <option value="local" ${camValue === 'local' ? 'selected' : ''}>📂 Local Video File</option>
                 </select>
                 <div class="input-hint input-hint-camera">${currentConfig.llm && currentConfig.llm.enable_vision ? '<strong>VLM enabled:</strong> Camera required for vision. ' : ''}Lists cameras on this PC (Browser), USB cameras on the server, or local video files.</div>
+                ${!readonly && camValue !== 'none' ? '<div class="form-group-row" style="margin-top: 0.5rem;"><button type="button" class="btn-secondary" onclick="startPreviewStream()" title="Retry camera preview (e.g. after fixing device)">Retry camera preview</button></div>' : ''}
                 <div id="local-video-picker" class="local-video-picker" style="display:${camValue === 'local' ? 'flex' : 'none'};">
                     <div class="local-video-picker-loading">Loading videos...</div>
                 </div>
@@ -1642,7 +1782,7 @@ function onDeviceListChange(type, value) {
             }
             return;
         }
-        
+
         if (value === 'none') {
             currentConfig.devices.camera = 'none';
             currentConfig.devices.video_source = 'none';
@@ -1718,6 +1858,8 @@ function onDeviceListChange(type, value) {
     }
 }
 
+var _videoScenarios = {};
+
 function loadLocalVideoPicker() {
     var picker = document.getElementById('local-video-picker');
     if (!picker) return;
@@ -1730,17 +1872,27 @@ function loadLocalVideoPicker() {
                 picker.innerHTML = '<div class="local-video-picker-empty">No video files found. Place .mp4 files in the <code>videos/</code> folder.</div>';
                 return;
             }
+            _videoScenarios = {};
+            for (var i = 0; i < videos.length; i++) {
+                if (videos[i].scenario) _videoScenarios[videos[i].name] = videos[i].scenario;
+            }
             var selectedFile = (currentConfig.devices && currentConfig.devices.video_file) || '';
             var html = '';
             for (var i = 0; i < videos.length; i++) {
                 var v = videos[i];
+                var sc = v.scenario;
                 var isSelected = v.name === selectedFile;
-                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + '" '
+                var label = sc ? sc.label : v.name;
+                var tooltip = sc ? (sc.label + ': ' + sc.description) : (v.name + ' (' + v.size_kb + ' KB)');
+                html += '<div class="local-video-thumb' + (isSelected ? ' selected' : '') + (sc ? ' has-scenario' : '') + '" '
                     + 'onclick="selectLocalVideo(\'' + v.name.replace(/'/g, "\\'") + '\')" '
-                    + 'title="' + v.name + ' (' + v.size_kb + ' KB)">'
+                    + 'title="' + escapeHtml(tooltip) + '">'
                     + '<video src="' + getApiBase() + '/api/videos/file?name=' + encodeURIComponent(v.name) + '" '
-                    + 'muted autoplay loop playsinline preload="metadata"></video>'
-                    + '<div class="local-video-thumb-name">' + v.name + '</div>'
+                    + 'muted autoplay loop playsinline preload="metadata"></video>';
+                if (sc) {
+                    html += '<div class="local-video-scenario-badge">' + escapeHtml(sc.label) + '</div>';
+                }
+                html += '<div class="local-video-thumb-name" data-filename="' + escapeHtml(v.name) + '">' + escapeHtml(label) + '</div>'
                     + '</div>';
             }
             picker.innerHTML = html;
@@ -1754,12 +1906,24 @@ function selectLocalVideo(filename) {
     currentConfig.devices.video_file = filename;
     currentConfig.devices.video_source = 'local';
     currentConfig.devices.camera = 'local';
-    // Highlight selected thumbnail
+
+    var sc = _videoScenarios[filename];
+    if (sc && sc.llm) {
+        var overrides = sc.llm;
+        for (var key in overrides) {
+            if (overrides.hasOwnProperty(key)) {
+                currentConfig.llm[key] = overrides[key];
+            }
+        }
+        console.log('[DemoScenario] Applied "' + (sc.label || filename) + '" config overrides:', Object.keys(overrides).join(', '));
+    }
+
     var picker = document.getElementById('local-video-picker');
     if (picker) {
         var thumbs = picker.querySelectorAll('.local-video-thumb');
         for (var i = 0; i < thumbs.length; i++) {
-            thumbs[i].classList.toggle('selected', thumbs[i].querySelector('.local-video-thumb-name').textContent === filename);
+            var nameEl = thumbs[i].querySelector('.local-video-thumb-name');
+            thumbs[i].classList.toggle('selected', !!(nameEl && nameEl.getAttribute('data-filename') === filename));
         }
     }
     if (state.isLiveSession && state.sessionState === 'setup') {
@@ -1775,9 +1939,25 @@ function renderAppConfig(config, readonly = false) {
     const bargeInTrigger = config.barge_in_trigger === 'partial' ? 'partial' : 'final';
     const partialCount = Math.max(1, Math.min(20, parseInt(config.barge_in_partial_count, 10) || 3));
 
+    const startMuted = !!config.start_with_microphone_muted;
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+
+            <div class="form-group">
+                <div class="form-group-row form-group-row--toggle">
+                    <label class="label-text" for="app-start-mic-muted">
+                        <i data-lucide="mic-off" class="lucide-inline" aria-hidden="true"></i>
+                        <span>Start sessions with microphone muted</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${disabled} id="app-start-mic-muted" ${startMuted ? 'checked' : ''}
+                               onchange="updateConfig('app', 'start_with_microphone_muted', this.checked); appConfigRefresh();">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="input-hint">When unchecked (default), mic starts unmuted (green). When checked, new sessions and preview start muted (red).</div>
+            </div>
 
             <div class="form-group form-group--barge-in">
                 <div class="form-group-row form-group-row--toggle">
@@ -1867,8 +2047,25 @@ function renderAppConfig(config, readonly = false) {
                 </select>
                 ${!readonly ? '<span class="input-hint">Timeline and UI display options are in UI Settings (<i data-lucide="settings" class="lucide-inline"></i> in header)</span>' : ''}
             </div>
+
+            ${!readonly ? `
+            <div class="form-group" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                <button type="button" class="btn-secondary" onclick="resetSessionConfigToDefaults()" style="width: 100%;">
+                    <i data-lucide="rotate-ccw" class="lucide-inline"></i> Reset All Configuration to Defaults
+                </button>
+                <div class="input-hint">Clears saved configuration and restores factory defaults (ASR, LLM, TTS, Devices). Page will reload.</div>
+            </div>
+            ` : ''}
         </div>
     `;
+}
+
+function resetSessionConfigToDefaults() {
+    if (!confirm('Reset all configuration (ASR, LLM/VLM, TTS, Devices, App) to factory defaults? This cannot be undone.')) return;
+    try {
+        localStorage.removeItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
+    } catch (e) {}
+    location.reload();
 }
 
 function appConfigRefresh() {
@@ -1973,7 +2170,7 @@ function populateCameraDeviceDropdown() {
         select.innerHTML = '';
         select.appendChild(newOption('none', '\uD83D\uDEABNone (No vision-modality)'));
         select.appendChild(newOption('', 'Default (Browser)'));
-        select.appendChild(newOption('local', 'Local Video File'));
+        select.appendChild(newOption('local', '📂 Local Video File'));
         browserCams.forEach(function (d) {
             var label = (d.label || 'Camera ' + (select.options.length)) + ' (Browser)';
             select.appendChild(newOption(d.deviceId || '', label));
@@ -2170,6 +2367,83 @@ function syncRealtimeApiKeyVisibility() {
     group.style.display = url.indexOf('openai.com') !== -1 ? 'block' : 'none';
 }
 
+function updateVisionFramesUI(isVideo) {
+    const label = document.getElementById('vision-frames-label');
+    const slider = document.getElementById('llm-vision-frames');
+    const hint = document.getElementById('vision-frames-hint');
+    const valSpan = document.getElementById('vision-frames-value');
+    const banner = document.getElementById('vision-video-unavailable-banner');
+    if (label) label.textContent = isVideo ? 'Video Frames' : 'Frames per Turn';
+    if (slider) {
+        slider.max = isVideo ? '30' : '20';
+        let val = parseInt(slider.value);
+        if (isVideo && val < 10) val = 10;
+        if (val > parseInt(slider.max)) val = parseInt(slider.max);
+        slider.value = val;
+        updateConfig('llm', 'vision_frames', val);
+        if (valSpan) valSpan.textContent = val;
+    }
+    if (hint) hint.textContent = isVideo ? 'Frames from buffer encoded into the MP4 video' : 'Individual images sent to VLM per speech turn';
+    if (banner && !isVideo) banner.style.display = 'none';
+    if (isVideo) checkVideoEncodeAndShowBanner();
+}
+
+function showVisionVideoUnavailableToast() {
+    var toast = document.getElementById('vision-video-unavailable-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'vision-video-unavailable-toast';
+        toast.setAttribute('role', 'alert');
+        toast.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 12px 20px; background: rgba(239, 68, 68, 0.95); color: #fff; border-radius: 8px; font-size: 14px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = 'Video Input unavailable: PyAV and PIL are not installed. Install with <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:4px;">pip install av Pillow</code> or use N-Image Input instead. Switched to N-Image.';
+    toast.style.display = 'block';
+    setTimeout(function () { toast.style.display = 'none'; }, 6000);
+}
+
+function showVoiceErrorToast(message) {
+    var text = (message && String(message).trim()) || 'An error occurred. Please try again.';
+    var toast = document.getElementById('voice-error-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'voice-error-toast';
+        toast.setAttribute('role', 'alert');
+        toast.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 12px 20px; background: rgba(239, 68, 68, 0.95); color: #fff; border-radius: 8px; font-size: 14px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = text;
+    toast.style.display = 'block';
+    setTimeout(function () { toast.style.display = 'none'; }, 5000);
+}
+
+async function checkVideoEncodeAndShowBanner() {
+    const banner = document.getElementById('vision-video-unavailable-banner');
+    if (!currentConfig.llm || !currentConfig.llm.vision_video_encode) {
+        if (banner) banner.style.display = 'none';
+        return;
+    }
+    try {
+        const r = await fetch(getApiBase() + '/api/vision/video-encode-available');
+        const data = await r.json();
+        if (data.available === true) {
+            if (banner) banner.style.display = 'none';
+            return;
+        }
+        // Video Input selected but deps missing: force fallback to N-Image
+        currentConfig.llm.vision_video_encode = false;
+        const nImageRadio = document.querySelector('input[name="vision-input-mode"][value="n-image"]');
+        const videoRadio = document.querySelector('input[name="vision-input-mode"][value="video"]');
+        if (nImageRadio) nImageRadio.checked = true;
+        if (videoRadio) videoRadio.checked = false;
+        updateVisionFramesUI(false);
+        if (banner) banner.style.display = 'none';
+        showVisionVideoUnavailableToast();
+    } catch (e) {
+        if (banner) banner.style.display = 'none';
+    }
+}
+
 // Update configuration value
 function updateConfig(section, key, value) {
     console.log(`Config updated: ${section}.${key} = ${value}`);
@@ -2224,8 +2498,8 @@ function updateConfig(section, key, value) {
     }
     updateConfigTabStates();
 
-    // Persist LLM system prompt and extra request body so they survive reload without "Save as default"
-    if (section === 'llm' && (key === 'system_prompt' || key === 'extra_request_body') && state.isLiveSession) {
+    // Persist LLM system prompt, extra request body, and App "start muted" so they survive reload without "Save as default"
+    if (state.isLiveSession && (section === 'llm' && (key === 'system_prompt' || key === 'extra_request_body') || section === 'app' && key === 'start_with_microphone_muted')) {
         try {
             localStorage.setItem(DEFAULT_VOICE_CHAT_CONFIG_KEY, JSON.stringify(JSON.parse(JSON.stringify(currentConfig))));
         } catch (e) {
@@ -2238,20 +2512,27 @@ function updateConfig(section, key, value) {
         scheduleWarmup();
     }
 
-    // Re-render the config panel to show/hide conditional fields
     const contentEl = document.getElementById('config-tab-content');
     const configKey = state.activeConfigTab === 'device' ? 'devices' : state.activeConfigTab;
-    contentEl.innerHTML = renderEditableConfigForm(state.activeConfigTab, currentConfig[configKey]);
+    const skipRerender =
+        state.activeConfigTab === 'llm' &&
+        section === 'llm' &&
+        (key === 'model' || key === 'cheap_model');
 
-    // After form is in DOM, fetch models to populate dropdowns
-    if (state.activeConfigTab === 'llm') {
-        setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
-    }
-    if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) {
-        setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
-    }
-    if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) {
-        setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+    // Re-render the config panel only when the change affects conditional UI.
+    if (!skipRerender) {
+        contentEl.innerHTML = renderEditableConfigForm(state.activeConfigTab, currentConfig[configKey]);
+
+        // After form is in DOM, fetch models to populate dropdowns
+        if (state.activeConfigTab === 'llm') {
+            setTimeout(() => fetchLLMModels(currentConfig.llm.api_base || (currentConfig.llm.ollama_url && currentConfig.llm.ollama_url.replace(/\/v1$/, '') + '/v1')), 0);
+        }
+        if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) {
+            setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
+        }
+        if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) {
+            setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+        }
     }
     if (section === 'devices') {
         updateDeviceIndicators();
@@ -2286,44 +2567,57 @@ function togglePresetsMenu(ev) {
 }
 function selectLLMPreset(url, label) {
     currentConfig.llm.api_base = url;
+    currentConfig.llm.model = '';
+    currentConfig.llm.cheap_model = '';
     const input = document.getElementById('llm-api-base');
     if (input) input.value = url;
     document.getElementById('presetsMenu').style.display = 'none';
     updateConfig('llm', 'api_base', url);
+    fetchLLMModels(url);
 }
 
-function selectTensorRTEdgePreset() {
-    var url = 'http://localhost:58010/v1';
-    currentConfig.llm.api_base = url;
-    currentConfig.llm.vision_video_encode = false;
-    var input = document.getElementById('llm-api-base');
-    if (input) input.value = url;
-    document.getElementById('presetsMenu').style.display = 'none';
-    updateConfig('llm', 'api_base', url);
-    updateConfig('llm', 'vision_video_encode', false);
-    fetchLLMModels(url);
+function setLLMModelSelectOptions(selectId, models, currentValue, fallbackValue) {
+    const select = document.getElementById(selectId);
+    if (!select) return (currentValue || fallbackValue || '').trim();
+    const optionValues = Array.isArray(models) ? models.filter(Boolean) : [];
+    let value = (currentValue || '').trim();
+    if (value && !optionValues.includes(value)) value = '';
+    if (!value) value = (fallbackValue || '').trim();
+    if (value && !optionValues.includes(value)) value = '';
+    if (!value && optionValues.length) value = optionValues[0];
+    select.innerHTML = optionValues.length
+        ? optionValues.map(m => `<option value="${escapeHtml(m)}" ${m === value ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')
+        : '<option value="">No models found</option>';
+    if (value) select.value = value;
+    return value;
 }
 async function fetchLLMModels(apiBase) {
     if (!apiBase) return;
     const select = document.getElementById('llm-model-select');
-    if (!select) return;
+    const cheapSelect = document.getElementById('llm-cheap-model-select');
+    if (!select && !cheapSelect) return;
     const apiKey = (document.getElementById('llm-api-key') || {}).value || currentConfig.llm.api_key || '';
-    select.innerHTML = '<option value="">Loading...</option>';
+    if (select) select.innerHTML = '<option value="">Loading...</option>';
+    if (cheapSelect) cheapSelect.innerHTML = '<option value="">Loading...</option>';
     try {
         const q = 'api_base=' + encodeURIComponent(apiBase) + (apiKey ? '&api_key=' + encodeURIComponent(apiKey) : '');
         const r = await fetch('/api/llm/models?' + q);
         const data = await r.json();
         const models = (data && data.models) ? data.models : [];
-        const current = currentConfig.llm.model || '';
-        select.innerHTML = models.length
-            ? models.map(m => `<option value="${escapeHtml(m)}" ${m === current ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')
-            : '<option value="">No models found</option>';
-        if (models.length && !models.includes(current)) {
-            currentConfig.llm.model = models[0];
-            select.value = models[0];
-        }
+        const currentModel = currentConfig.llm.model || '';
+        const currentCheapModel = currentConfig.llm.cheap_model || '';
+        const selectedModel = setLLMModelSelectOptions('llm-model-select', models, currentModel, models[0] || '');
+        const selectedCheapModel = setLLMModelSelectOptions(
+            'llm-cheap-model-select',
+            models,
+            currentCheapModel,
+            selectedModel || models[0] || ''
+        );
+        currentConfig.llm.model = selectedModel || currentModel || '';
+        currentConfig.llm.cheap_model = selectedCheapModel || currentConfig.llm.model || '';
     } catch (e) {
-        select.innerHTML = '<option value="">Error loading models</option>';
+        if (select) select.innerHTML = '<option value="">Error loading models</option>';
+        if (cheapSelect) cheapSelect.innerHTML = '<option value="">Error loading models</option>';
         console.error('fetchLLMModels failed:', e);
     }
 }
@@ -2609,37 +2903,65 @@ function renderChatHistory() {
     const chat = getMergedChatMessages(session);
     const turns = session.turns || [];
 
+    // Extract reasoning from timeline llm_complete events (indexed by order)
+    const timeline = session.timeline || [];
+    const reasoningList = timeline
+        .filter(e => e.event_type === 'llm_complete' && e.data && e.data.reasoning)
+        .map(e => e.data.reasoning);
+
     if (chat.length > 0) {
         // Render: one bubble per message (user / assistant by role)
+        var _reasonIdx = 0;
         chatEl.innerHTML = chat.map(msg => {
             const role = (msg.role || 'user').toLowerCase();
             const isUser = role === 'user';
             const ts = msg.timestamp != null && uiSettings.showTimestamps
-                ? `<span class="chat-meta">${formatTimestamp(msg.timestamp)}</span>`
+                ? `<span class="chat-meta"><i data-lucide="clock" class="lucide-inline"></i> ${formatTimestamp(msg.timestamp)}</span>`
                 : '';
+            var reasoningHtml = '';
+            if (!isUser) {
+                var r = msg.reasoning || reasoningList[_reasonIdx] || '';
+                _reasonIdx++;
+                if (r) reasoningHtml = `<details class="reasoning-block"><summary>Reasoning</summary><pre class="reasoning-text">${escapeHtml(r)}</pre></details>`;
+            }
             return `
                 <div class="chat-bubble ${isUser ? 'user' : 'ai'}">
                     <div class="chat-avatar">${isUser ? '<i data-lucide="user" class="lucide-inline"></i>' : '<i data-lucide="bot" class="lucide-inline"></i>'}</div>
-                    <div class="chat-content"><div class="chat-text">${escapeHtml(msg.content || '...')}</div>${ts}</div>
+                    <div class="chat-content">${reasoningHtml}<div class="chat-text">${escapeHtml(msg.content || '...')}</div>${ts}</div>
                 </div>
             `;
         }).join('');
     } else if (turns.length > 0) {
-        // Legacy: session.turns with user_transcript + ai_response per turn
-        chatEl.innerHTML = turns.map(turn => {
-            const userConfidence = turn.user_confidence ?
-                `<span class="chat-meta">Confidence: ${(turn.user_confidence * 100).toFixed(0)}%</span>` : '';
-            const turnMetrics = turn.latencies ?
-                `<span class="chat-meta">TTL: ${formatLatency(turn.latencies.ttl)}</span>` : '';
+        // Legacy: session.turns with user_transcript + ai_response per turn. Timestamps from timeline when showTimestamps.
+        const asrFinals = (timeline || []).filter(e => e.event_type === 'asr_final');
+        const ttsCompletes = (timeline || []).filter(e => e.event_type === 'tts_complete');
+        chatEl.innerHTML = turns.map((turn, idx) => {
+            const userTs = asrFinals[idx] && asrFinals[idx].timestamp != null ? asrFinals[idx].timestamp : turn.timestamp;
+            const aiTs = ttsCompletes[idx] && ttsCompletes[idx].timestamp != null ? ttsCompletes[idx].timestamp : null;
+            const clockIcon = '<i data-lucide="clock" class="lucide-inline"></i>';
+            const userMetaParts = [];
+            if (turn.user_confidence)
+                userMetaParts.push(`Confidence: ${(turn.user_confidence * 100).toFixed(0)}%`);
+            if (uiSettings.showTimestamps && (userTs != null || turn.timestamp != null))
+                userMetaParts.push(clockIcon + ' ' + formatTimestamp(userTs != null ? userTs : turn.timestamp));
+            const userMetaHtml = userMetaParts.length
+                ? `<span class="chat-meta">${userMetaParts.map((p, i) => i > 0 ? `<span class="chat-meta-gap"></span>${p}` : p).join('')}</span>`
+                : '';
+            const aiMetaHtml = (uiSettings.showTimestamps && (aiTs != null || turn.ai_timestamp != null))
+                ? `<span class="chat-meta">${clockIcon} ${formatTimestamp(aiTs != null ? aiTs : turn.ai_timestamp)}</span>`
+                : '';
+            var reasoningHtml = '';
+            var r = reasoningList[idx] || '';
+            if (r) reasoningHtml = `<details class="reasoning-block"><summary>Reasoning</summary><pre class="reasoning-text">${escapeHtml(r)}</pre></details>`;
 
             return `
                 <div class="chat-bubble user">
                     <div class="chat-avatar"><i data-lucide="user" class="lucide-inline"></i></div>
-                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.user_transcript || '...')}</div>${userConfidence}</div>
+                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.user_transcript || '...')}</div>${userMetaHtml}</div>
                 </div>
                 <div class="chat-bubble ai">
                     <div class="chat-avatar"><i data-lucide="bot" class="lucide-inline"></i></div>
-                    <div class="chat-content"><div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${turnMetrics}</div>
+                    <div class="chat-content">${reasoningHtml}<div class="chat-text">${escapeHtml(turn.ai_response || '...')}</div>${aiMetaHtml}</div>
                 </div>
             `;
         }).join('');
@@ -2657,11 +2979,16 @@ function renderChatHistory() {
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 }
 
+/** Format session time as MM:SS.mmm (e.g. 00:01.234). */
 function formatTimestamp(seconds) {
     if (seconds == null || typeof seconds !== 'number') return '';
     const m = Math.floor(seconds / 60);
-    const s = (seconds % 60).toFixed(1);
-    return m > 0 ? `${m}:${s.padStart(4, '0')}s` : `${s}s`;
+    const s = seconds % 60;
+    const mm = String(m).padStart(2, '0');
+    const secs = Math.floor(s);
+    const ms = Math.round((s - secs) * 1000);
+    const ss = String(secs).padStart(2, '0') + '.' + String(ms).padStart(3, '0');
+    return mm + ':' + ss;
 }
 
 function renderTimelineMetrics() {
@@ -2970,6 +3297,7 @@ function renderTimeline() {
 }
 
 // Single source: build user amplitude list from timeline (server already has every user_amplitude). Fallback to session.audio_amplitude_history for old sessions.
+// Includes muted so replay can draw user waveform in gray when mic was muted.
 function buildUserAmplitudeFromTimeline(timeline) {
     if (!timeline || !timeline.length) return [];
     const userEvents = timeline.filter(function (e) {
@@ -2977,7 +3305,10 @@ function buildUserAmplitudeFromTimeline(timeline) {
     });
     var out = userEvents.map(function (e) {
         var a = e.amplitude != null ? Number(e.amplitude) : 0;
-        return { timestamp: e.timestamp != null ? Number(e.timestamp) : 0, amplitude: a };
+        var t = e.timestamp != null ? Number(e.timestamp) : 0;
+        var entry = { timestamp: t, amplitude: a };
+        if (e.muted === true) entry.muted = true;
+        return entry;
     }).sort(function (a, b) { return a.timestamp - b.timestamp; });
     // Server stores 0–100. Only normalize 0–1 → 0–100 when data looks like 0–1 (max ≤ 1).
     if (out.length) {
@@ -3021,6 +3352,20 @@ function getAmplitudeAtTime(history, t, maxGapSec) {
     return 0;
 }
 
+// Whether the user mic was muted at time t (for replay: draw user waveform gray when true). Uses nearest sample.
+function getMutedAtTime(history, t) {
+    if (!history || !history.length) return false;
+    const getT = (s) => s.timestamp != null ? s.timestamp : s[0];
+    const getMuted = (s) => s.muted === true;
+    if (t <= getT(history[0])) return getMuted(history[0]);
+    if (t >= getT(history[history.length - 1])) return getMuted(history[history.length - 1]);
+    for (let i = 0; i < history.length - 1; i++) {
+        const t0 = getT(history[i]), t1 = getT(history[i + 1]);
+        if (t >= t0 && t <= t1) return getMuted(history[i]);
+    }
+    return false;
+}
+
 // Get TTS (AI) amplitude at time t from segment list { startTime, endTime, amplitude }
 function getTtsAmplitudeAtTime(segments, t) {
     if (!segments.length) return 0;
@@ -3031,7 +3376,9 @@ function getTtsAmplitudeAtTime(segments, t) {
     return 0;
 }
 
-/** Compute TTL bands from stored amplitude + TTS playback (for recorded session replay). End-of-speech constrained to between first partial and final (before LLM). AI voice start = first TTS segment with amplitude > 0 (any signal). */
+/** Compute TTL bands from stored amplitude + TTS playback (for recorded session replay).
+ * Band start = threshold-based end-of-speech (silence after user voice), not last partial.
+ * Band end = first TTS audio played (tts_first_audio), not tts_start. */
 function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
     if (!ttsSegments || !ttsSegments.length) return [];
     const getT = (s) => (s.timestamp != null ? s.timestamp : s[0]);
@@ -3090,7 +3437,20 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             turnWindows.push({ firstPartialTime: firstPartialTime, asrFinalTime: asrFinalTime });
         }
     }
-    // First TTS sound per turn: prefer timeline's first audio_amplitude (source tts) at 6.69s; else first segment with signal or first chunk
+    // First TTS audio per turn: prefer tts_first_audio (first sound out), then audio_amplitude, then segment (tts_start) fallback
+    const firstTtsFirstAudioByTurn = [];
+    if (timeline && timeline.length && turnWindows.length) {
+        const ttsFirstAudioEvents = timeline.filter(function (e) { return e.event_type === 'tts_first_audio'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        for (var ti = 0; ti < turnWindows.length; ti++) {
+            const win = turnWindows[ti];
+            const nextFinal = turnWindows[ti + 1] ? turnWindows[ti + 1].asrFinalTime : Infinity;
+            const firstInWindow = ttsFirstAudioEvents.find(function (e) {
+                var t = e.timestamp != null ? Number(e.timestamp) : NaN;
+                return !isNaN(t) && t > win.asrFinalTime && t < nextFinal;
+            });
+            firstTtsFirstAudioByTurn.push(firstInWindow ? Number(firstInWindow.timestamp) : null);
+        }
+    }
     const firstTtsAmplitudeByTurn = [];
     if (timeline && timeline.length && turnWindows.length) {
         const ttsAmpEvents = timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
@@ -3104,15 +3464,18 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             firstTtsAmplitudeByTurn.push(firstInWindow ? Number(firstInWindow.timestamp) : null);
         }
     }
-    // Segment-based fallback: first chunk with amplitude > 0 or first chunk
+    // Band end T = first TTS audio (tts_first_audio) when available; else first audio_amplitude (tts); else first segment start (tts_start). Do not min with segmentTime or we pull T back to tts_start.
     const firstPlayPerTurn = responseGroups.map(function (group, k) {
         var firstChunkTime = group[0].startTime;
         const withSignal = group.filter(function (s) { return (s.amplitude != null ? s.amplitude : 0) > 0; });
         var segmentTime = withSignal.length ? Math.min(firstChunkTime, Math.min.apply(null, withSignal.map(function (s) { return s.startTime; }))) : firstChunkTime;
-        var timelineFirst = firstTtsAmplitudeByTurn[k];
-        return (timelineFirst != null && timelineFirst > 0) ? Math.min(timelineFirst, segmentTime) : segmentTime;
+        var timelineFirstAudio = firstTtsFirstAudioByTurn[k];
+        var timelineAmp = firstTtsAmplitudeByTurn[k];
+        if (timelineFirstAudio != null && timelineFirstAudio > 0) return timelineFirstAudio;
+        if (timelineAmp != null && timelineAmp > 0) return timelineAmp;
+        return segmentTime;
     });
-    // One band per turn: S must be in (firstPartialTime, asrFinalTime]; if no timeline, use any S < T
+    // One band per turn: S = threshold-based end-of-speech (silenceStarts) when available; else end-of-speech proxy (asr_final - 150ms), never last partial
     const bands = [];
     const usedSilence = {};
     for (let k = 0; k < firstPlayPerTurn.length; k++) {
@@ -3131,23 +3494,23 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             usedSilence[bestJ] = true;
             bands.push({ start: bestS, end: T, ttlMs: Math.round((T - bestS) * 1000) });
         } else if (win && maxS < T) {
-            // Fallback: place band start between partial and final (e.g. 150ms before final)
-            const fallbackS = Math.max(minS, maxS - 0.15);
+            // Fallback: end-of-speech proxy (150ms before asr_final), not first/last partial
+            const fallbackS = Math.max(0, maxS - 0.15);
             bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         } else {
-            // No turn window for this index (e.g. fewer asr_finals than TTS response groups) or maxS >= T: still show band so 2nd+ turns get a red band
+            // No turn window or maxS >= T: still show band
             const fallbackS = Math.max(0, T - 0.5);
             bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         }
     }
-    // If we have more turns (asr_finals) than TTS segment groups (e.g. first turn's segments were trimmed), add bands for the missing early turns from timeline so every turn gets a red band
-    if (turnWindows.length > bands.length && firstTtsAmplitudeByTurn.length >= turnWindows.length) {
+    // If we have more turns (asr_finals) than TTS segment groups, add bands for the missing early turns
+    if (turnWindows.length > bands.length && (firstTtsFirstAudioByTurn.length >= turnWindows.length || firstTtsAmplitudeByTurn.length >= turnWindows.length)) {
         var missingCount = turnWindows.length - bands.length;
         for (var ti = 0; ti < missingCount; ti++) {
-            const T = firstTtsAmplitudeByTurn[ti];
+            const T = (firstTtsFirstAudioByTurn[ti] != null && firstTtsFirstAudioByTurn[ti] > 0) ? firstTtsFirstAudioByTurn[ti] : firstTtsAmplitudeByTurn[ti];
             const win = turnWindows[ti];
             if (T == null || T <= 0 || !win) continue;
-            const fallbackS = Math.max(win.firstPartialTime, win.asrFinalTime - 0.15);
+            const fallbackS = Math.max(0, win.asrFinalTime - 0.15);
             bands.unshift({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         }
     }
@@ -3226,6 +3589,25 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 timestamp: startTime,
                 inferred: true
             });
+        }
+        // LLM in progress: we have llm_start but no llm_complete yet — draw orange from start (or first token) to "now" (live) or latest event time (replay)
+        if (!complete) {
+            const progressStart = firstToken ? (firstToken.timestamp || 0) : startTime;
+            const endTimeInProgress = (inLive && liveSessionTime != null)
+                ? Math.max(progressStart + 0.1, liveSessionTime)
+                : Math.max(progressStart + 0.1, timeline.length ? Math.max.apply(null, timeline.map(function (e) { return e.timestamp || 0; })) : progressStart + 0.1);
+            if (endTimeInProgress > progressStart) {
+                inferredRectangles.push({
+                    event_type: 'llm_in_progress',
+                    lane: 'llm',
+                    start_time: progressStart,
+                    end_time: endTimeInProgress,
+                    timestamp: progressStart,
+                    phase: 'in_progress',
+                    inferred: true,
+                    growing: inLive && liveSessionTime != null
+                });
+            }
         }
     });
 
@@ -3475,10 +3857,13 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         } else if (event.phase === 'generate' || event.event_type === 'llm_generate') {
             fillColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-llm-generate').trim() || '#FFB74D';
             fillAlpha = 0.85;
+        } else if (event.phase === 'in_progress' || event.event_type === 'llm_in_progress') {
+            fillColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-llm-generate').trim() || '#FFB74D';
+            fillAlpha = 0.85;
         } else {
             // Special colors for other event types
             if (event.event_type?.includes('vad')) {
-                fillColor = '#76B900'; // Green for VAD (user speaking)
+                fillColor = '#76B900'; // NVIDIA green for VAD (user speaking)
                 fillAlpha = 0.5;
             } else if (event.event_type?.includes('asr')) {
                 fillColor = '#2196F3'; // Light blue for generic ASR
@@ -3621,10 +4006,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            // Green: mic (user) waveform. One amplitude bar = 25ms (tStep = 0.025). User and AI data match this.
+            // User waveform: gray only for the segment when mic was muted, green when unmuted (per-sample so sections match).
             if (liveAmplitudeHistory && liveAmplitudeHistory.length > 0) {
-                const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
-                ctx.fillStyle = audioColor;
+                const audioColorGreen = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
+                const audioColorMuted = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio-muted') || '').trim() || '#9ca3af';
                 ctx.globalAlpha = 0.85;
                 const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
                 const barWidthPx = 2;
@@ -3634,6 +4019,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                     const rawAmp = (inLive && t > lastUserTs) ? 0 : getAmplitudeAtTime(liveAmplitudeHistory, t);
                     const amp = Math.min(100, rawAmp * userGain);
                     if (amp <= 0) continue;
+                    ctx.fillStyle = getMutedAtTime(liveAmplitudeHistory, t) ? audioColorMuted : audioColorGreen;
                     const x = visibleLeft + (t - timelineOffset) * timeScale;
                     const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
                     const y1 = centerY - halfH;
@@ -3668,7 +4054,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     }
 
-    // 2b1. Replay (saved session): draw persisted user (mic) waveform — only when t in data range and hide during TTS if below threshold (no green over AI when user silent)
+    // 2b1. Replay (saved session): draw persisted user (mic) waveform — gray when muted, green otherwise
     if (!inLive && !hasStoppedLiveData && replayAudioAmplitudeHistory && replayAudioAmplitudeHistory.length > 0) {
         const laneIndex = lanes.indexOf('audio');
         if (laneIndex !== -1) {
@@ -3685,8 +4071,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const visibleTimeWindow = visibleW / timeScale;
             const visibleStart = timelineOffset - 0.05;
             const visibleEnd = timelineOffset + visibleTimeWindow + 0.05;
-            const audioColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio').trim() || '#76B900';
-            ctx.fillStyle = audioColor;
+            const audioColorGreen = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
+            const audioColorMuted = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio-muted') || '').trim() || '#9ca3af';
             ctx.globalAlpha = 0.85;
             const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
             const barWidthPx = 2;
@@ -3695,6 +4081,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 if (t < userT0 || t > userT1) continue;
                 const amp = Math.min(100, getAmplitudeAtTime(replayAudioAmplitudeHistory, t) * userGain);
                 if (amp <= 0) continue;
+                ctx.fillStyle = getMutedAtTime(replayAudioAmplitudeHistory, t) ? audioColorMuted : audioColorGreen;
                 const x = visibleLeft + (t - timelineOffset) * timeScale;
                 const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
                 const y1 = centerY - halfH;
@@ -4296,8 +4683,26 @@ function stopMicWaveform() {
     state._micWaveformDrawLogged = false;
     state._micWaveformSizeLogged = false;
     state._micWaveformFirstDrawLogged = false;
-    var overlay = document.getElementById('mic-waveform-overlay');
-    if (overlay) overlay.style.display = 'none';
+    var strip = document.getElementById('mic-preview-strip');
+    if (strip) strip.style.display = 'none';
+}
+
+/** Show/hide and style the circular mic button (green = unmuted, red = muted); visible when strip is shown in setup or live. */
+function updateMicMutePreviewButton() {
+    var strip = document.getElementById('mic-preview-strip');
+    var btn = document.getElementById('mic-mute-preview-btn');
+    if (!strip || !btn) return;
+    var stripVisible = strip.style.display !== 'none';
+    var show = (state.sessionState === 'live' || state.sessionState === 'setup') && stripVisible;
+    btn.style.display = show ? '' : 'none';
+    if (show) {
+        btn.classList.toggle('muted', state.micMuted);
+        var inner = btn.querySelector('.mic-mute-preview-btn-inner');
+        if (inner) inner.classList.toggle('flipped', state.micMuted);
+        btn.setAttribute('aria-label', state.micMuted ? 'Click to unmute mic (M)' : 'Click to mute mic (M)');
+        btn.setAttribute('title', state.micMuted ? 'Click or press M to unmute' : 'Click or press M to mute');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+    }
 }
 
 /** Draw last 2000ms of mic as symmetric dotted waveform (above and below center), timeline-style. */
@@ -4351,9 +4756,11 @@ function drawMicWaveform() {
     var drawW = Math.max(0, w - margin * 2);
     var centerY = h / 2;
     var scale = (h / 2) * 0.8 / 128;
+    var container = document.getElementById('session-image');
+    if (container && container.classList.contains('fullscreen')) scale *= 2;
     var radius = 6;
 
-    /* Same rounded rect background for both browser-mic and server-mic (empty or with data). */
+    /* Same rounded rect background for both browser-mic and server-mic (empty or with data). Muted = reddish. */
     ctx.save();
     var bgX = margin;
     var bgY = 0;
@@ -4370,7 +4777,10 @@ function drawMicWaveform() {
     ctx.lineTo(bgX, bgY + radius);
     ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    var bgFill = state.micMuted
+        ? (getComputedStyle(document.documentElement).getPropertyValue('--mic-preview-bg-muted') || '').trim() || 'rgba(0, 102, 102, 0.5)'
+        : (getComputedStyle(document.documentElement).getPropertyValue('--mic-preview-bg') || '').trim() || 'rgba(0, 0, 0, 0.25)';
+    ctx.fillStyle = bgFill;
     ctx.fill();
     ctx.restore();
 
@@ -4380,8 +4790,10 @@ function drawMicWaveform() {
         state._micWaveformFirstDrawLogged = true;
         console.log('[MicWaveform] Drawing server waveform (buffer len=' + ring.length + '); if you see this but no green bars, check canvas/overlay.');
     }
-    var green = (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
-    ctx.fillStyle = green;
+    var barColor = state.micMuted
+        ? (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio-muted') || '').trim() || '#9ca3af'
+        : (getComputedStyle(document.documentElement).getPropertyValue('--timeline-audio') || '').trim() || '#76B900';
+    ctx.fillStyle = barColor;
     var waveformLeft = margin + innerPadding;
     var waveformWidth = Math.max(0, drawW - innerPadding * 2);
     var barWidthPx = 2;
@@ -4414,8 +4826,10 @@ function startMicWaveform(stream) {
         src.connect(analyser);
         state.micAnalyser = analyser;
         state.micAmplitudeBuffer = [];
-        overlay.style.display = 'block';
+        var strip = document.getElementById('mic-preview-strip');
+        if (strip) strip.style.display = 'flex';
         drawMicWaveform();
+        updateMicMutePreviewButton();
     } catch (e) {
         console.warn('Mic waveform failed:', e);
     }
@@ -4496,11 +4910,12 @@ function buildVoiceConfig() {
 /** Start preview waveform for Server USB mic: open /ws/voice and use user_amplitude for the green bar (same connection used for live). */
 function startMicWaveformFromServer() {
     if (state.voiceWs && (state.voiceWs.readyState === WebSocket.OPEN || state.voiceWs.readyState === WebSocket.CONNECTING)) {
-        var overlay = document.getElementById('mic-waveform-overlay');
-        if (overlay) overlay.style.display = 'block';
+        var strip = document.getElementById('mic-preview-strip');
+        if (strip) strip.style.display = 'flex';
         state.micWaveformFromServer = true;
         state.micAmplitudeBuffer = state.micAmplitudeBuffer || [];
         drawMicWaveform();
+        updateMicMutePreviewButton();
         return;
     }
     stopMicWaveform();
@@ -4512,8 +4927,10 @@ function startMicWaveformFromServer() {
     }
     state.micWaveformFromServer = true;
     state.micAmplitudeBuffer = [];
-    overlay.style.display = 'block';
+    var strip = document.getElementById('mic-preview-strip');
+    if (strip) strip.style.display = 'flex';
     drawMicWaveform();
+    updateMicMutePreviewButton();
 
     // Single connection: use /ws/voice for preview (same 50 Hz user_amplitude). On START we send start_session on this WS instead of reopening.
     var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -4790,6 +5207,7 @@ function startPreviewStream(options) {
                 videoFeed.style.display = 'block';
                 if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             }
+            state.cameraPreviewRetryScheduled = false;
             updateDeviceIndicators();
             if (stream.getAudioTracks().length > 0) {
                 if (isServerMicSelected()) startMicWaveformFromServer();
@@ -4799,21 +5217,37 @@ function startPreviewStream(options) {
             }
         })
         .catch(function (err) {
-            console.error('getUserMedia failed:', err);
+            var isRetryAttempt = state.cameraPreviewRetryScheduled;
+            if (isRetryAttempt) {
+                console.warn('[Preview] Camera still unavailable (' + (err.name || 'Error') + '). Use "Retry camera preview" or set Camera to None.');
+            } else {
+                console.warn('getUserMedia failed:', err.name, err.message);
+            }
             if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                 showMicrophonePermissionDeniedHint();
             }
+            // When browser video failed, show placeholder so user sees "no camera" instead of blank/broken
+            if (wantBrowserVideo) {
+                var vf = document.getElementById('video-feed');
+                var mjpegEl = document.getElementById('video-feed-mjpeg');
+                var ph = document.getElementById('image-placeholder');
+                if (vf) { vf.src = ''; vf.srcObject = null; vf.style.display = 'none'; }
+                if (mjpegEl) { mjpegEl.src = ''; mjpegEl.style.display = 'none'; }
+                if (ph) { ph.style.display = 'flex'; updateImagePlaceholderContent(); }
+            }
             updateDeviceIndicators();
             if (wantAudio && isServerMicSelected()) startMicWaveformFromServer();
+            // Retry once per session after 3s for device errors (e.g. camera was busy, then user reset it)
+            var retriable = (err.name === 'NotReadableError' || err.name === 'NotFoundError' || err.name === 'OverconstrainedError');
+            if (retriable && wantBrowserVideo && !state.cameraPreviewRetryScheduled) {
+                state.cameraPreviewRetryScheduled = true;
+                setTimeout(function () {
+                    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+                    console.log('[Preview] Retrying camera after previous failure...');
+                    startPreviewStream();
+                }, 3000);
+            }
         });
-}
-
-/** Update the live ASR label (Listening: &lt;partial text&gt;) from state.liveAsrInterimText. Call on every asr_partial and on asr_final (to clear). */
-function updateLiveAsrLabel() {
-    const wrap = document.getElementById('live-asr-label-wrap');
-    const textEl = document.getElementById('live-asr-text');
-    if (!wrap || !textEl) return;
-    textEl.textContent = state.liveAsrInterimText || '';
 }
 
 function updateLiveSessionUI() {
@@ -4821,13 +5255,7 @@ function updateLiveSessionUI() {
     if (state.isLiveSession && state.sessionState === 'live' && state.autoHideConfigOnStart) state.configPanelCollapsed = true;
     updateConfigPanelState();
     applyConfigPanelCollapse();
-    const liveAsrWrap = document.getElementById('live-asr-label-wrap');
-    if (liveAsrWrap) {
-        const showInterim = (currentConfig.app && currentConfig.app.show_interim_asr !== false);
-        liveAsrWrap.style.display = (state.isLiveSession && state.sessionState === 'live' && showInterim) ? 'block' : 'none';
-        if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
-        if (state.isLiveSession && state.sessionState === 'live' && showInterim) updateLiveAsrLabel();
-    }
+    if (!state.isLiveSession || state.sessionState !== 'live') state.liveAsrInterimText = '';
     const sessionControlOverlay = document.getElementById('session-control-overlay');
     const deviceTags = document.getElementById('device-tags');
     const videoFeed = document.getElementById('video-feed');
@@ -4837,7 +5265,6 @@ function updateLiveSessionUI() {
     const pipelineConfigEl = document.getElementById('pipeline-config');
     const startBtn = document.getElementById('start-session-btn');
     const stopBtn = document.getElementById('stop-session-btn');
-    const micMuteBtn = document.getElementById('mic-mute-btn');
 
     const sessionImageEl = document.getElementById('session-image');
     if (sessionImageEl && state.isLiveSession) sessionImageEl.style.display = '';
@@ -4880,7 +5307,6 @@ function updateLiveSessionUI() {
             }
             if (startBtn) startBtn.style.display = 'flex';
             if (stopBtn) stopBtn.style.display = 'none';
-            if (micMuteBtn) micMuteBtn.style.display = 'none';
             // Preview (camera + mic waveform slot) is shown in setup so user sees what they’ll get before clicking START
             startPreviewStream();
             if (isServerMicSelected()) startMicWaveformFromServer();
@@ -4891,8 +5317,14 @@ function updateLiveSessionUI() {
                 if (!hasVideo) updateImagePlaceholderContent();
             }
             // Show video feed - either WebRTC (videoFeed) or MJPEG fallback (mjpegFeed)
-            // Only show one to avoid overlap
+            // Only show one to avoid overlap. Re-attach state.previewStream if it exists but video was cleared (e.g. after re-render).
             var mjpegFeedSetup = document.getElementById('video-feed-mjpeg');
+            if (hasVideo && videoFeed && state.previewStream && state.previewStream.getVideoTracks().length > 0 && (!videoFeed.srcObject || videoFeed.srcObject.getVideoTracks().length === 0)) {
+                videoFeed.srcObject = state.previewStream;
+                videoFeed.style.display = 'block';
+                if (imagePlaceholder) imagePlaceholder.style.display = 'none';
+                if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+            }
             var hasWebRTCSetup = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
             var hasMjpegSetup = mjpegFeedSetup && mjpegFeedSetup.src && mjpegFeedSetup.src !== '';
             if (hasVideo) {
@@ -4908,6 +5340,20 @@ function updateLiveSessionUI() {
             } else {
                 if (videoFeed) videoFeed.style.display = 'none';
                 if (mjpegFeedSetup) mjpegFeedSetup.style.display = 'none';
+            }
+            // Deferred restore: startPreviewStream is async; re-apply stream once it's set (fixes timing/race where UI ran before getUserMedia resolved)
+            if (hasVideo && (state.previewStream == null || state.previewStream.getVideoTracks().length === 0)) {
+                setTimeout(function () {
+                    if (!state.isLiveSession || state.sessionState !== 'setup') return;
+                    var v = document.getElementById('video-feed');
+                    var ph = document.getElementById('image-placeholder');
+                    if (state.previewStream && state.previewStream.getVideoTracks().length > 0 && v) {
+                        v.srcObject = state.previewStream;
+                        v.style.display = 'block';
+                        if (ph) ph.style.display = 'none';
+                        updateSessionImageContainerAspect();
+                    }
+                }, 300);
             }
         } else if (state.sessionState === 'live') {
             sessionTitle.textContent = 'Session – ' + turnsSuffix + ' – RECORDING';
@@ -4942,14 +5388,6 @@ function updateLiveSessionUI() {
             }
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'flex';
-            if (micMuteBtn) {
-                micMuteBtn.style.display = 'flex';
-                micMuteBtn.classList.toggle('muted', state.micMuted);
-                micMuteBtn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
-                var icon = micMuteBtn.querySelector('.btn-icon i');
-                if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
-                if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(micMuteBtn);
-            }
             renderTimeline();
             updateVoiceDebugPanel();
         } else if (state.sessionState === 'stopped') {
@@ -4971,7 +5409,6 @@ function updateLiveSessionUI() {
             if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
             if (stopBtn) stopBtn.style.display = 'none';
-            if (micMuteBtn) micMuteBtn.style.display = 'none';
             renderTimeline();
             if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         }
@@ -5092,6 +5529,16 @@ function startNewSession() {
     if (_serverPresetConfig) {
         currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
     }
+    // Ensure new config fields have defaults even if saved/preset config predates them
+    for (var _dk of Object.keys(defaultConfig)) {
+        if (defaultConfig[_dk] && typeof defaultConfig[_dk] === 'object' && currentConfig[_dk]) {
+            for (var _fk of Object.keys(defaultConfig[_dk])) {
+                if (currentConfig[_dk][_fk] === undefined) currentConfig[_dk][_fk] = defaultConfig[_dk][_fk];
+            }
+        }
+    }
+    state.micMuted = !!(currentConfig.app && currentConfig.app.start_with_microphone_muted);
+    state.cameraPreviewRetryScheduled = false;
 
     // Clear chat history
     document.getElementById('chat-history').innerHTML = `
@@ -5182,7 +5629,9 @@ function handleVoiceWsMessage(ev) {
             // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
             var ts = serverTs;
             if (state.liveSessionStartTime > 0 && Array.isArray(state.liveAudioAmplitudeHistory)) {
-                state.liveAudioAmplitudeHistory.push({ timestamp: ts, amplitude: amp });
+                var entry = { timestamp: ts, amplitude: amp };
+                if (state.micMuted) entry.muted = true;
+                state.liveAudioAmplitudeHistory.push(entry);
                 // Server USB: end-of-speech from sparse user_amplitude (20 Hz). Use consecutive sample count, not wall-clock,
                 // so we don't need 0.15s of messages (asr_final would win). 3 consecutive below-threshold ≈ 100ms at 20 Hz.
                 var userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
@@ -5241,7 +5690,9 @@ function handleVoiceWsMessage(ev) {
                 // user_amplitude may already be pushing into liveAudioAmplitudeHistory; do not clear it.
                 if (state.pendingServerMicAmplitude && state.pendingServerMicAmplitude.length) {
                     state.liveAudioAmplitudeHistory = state.liveAudioAmplitudeHistory || [];
-                    state.liveAudioAmplitudeHistory.push.apply(state.liveAudioAmplitudeHistory, state.pendingServerMicAmplitude);
+                    state.pendingServerMicAmplitude.forEach(function (s) {
+                        state.liveAudioAmplitudeHistory.push({ timestamp: s.timestamp, amplitude: s.amplitude, muted: false });
+                    });
                     state.pendingServerMicAmplitude = [];
                 }
                 if (state.micWaveformFromServer) state.micAmplitudeBuffer = [];
@@ -5258,12 +5709,15 @@ function handleVoiceWsMessage(ev) {
                     }
             state.liveTimelineEvents.push(evt);
                     renderTimeline();
+            if (evt.event_type === 'error' && evt.data && evt.data.message) {
+                showVoiceErrorToast(evt.data.message);
+            }
             if (evt.event_type === 'asr_partial') {
                 state.voiceTurnActive = true;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
                         if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
                 state.liveAsrInterimText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
-                        updateLiveAsrLabel();
+                        syncFullscreenOverlays();
             } else if (evt.event_type === 'asr_final') {
                         if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
                     var ft = evt.timestamp != null ? Number(evt.timestamp) : null;
@@ -5271,7 +5725,7 @@ function handleVoiceWsMessage(ev) {
                                 state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
                         }
                         state.liveAsrInterimText = '';
-                        updateLiveAsrLabel();
+                        syncFullscreenOverlays();
                 var userText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                         if (userText) {
                             var last = state.liveChatTurns[state.liveChatTurns.length - 1];
@@ -5401,16 +5855,16 @@ function vlmStartCapture(fps, quality, maxWidth) {
         console.log('[VLM] Capture already running');
         return;
     }
-    
+
     vlmRingBuffer.fps = fps || 3.0;
     vlmRingBuffer.quality = quality || 0.7;
     vlmRingBuffer.maxWidth = maxWidth || 640;
     vlmRingBuffer.frames = [];
     vlmRingBuffer.isCapturing = true;
-    
+
     const intervalMs = 1000 / vlmRingBuffer.fps;
     vlmRingBuffer.captureInterval = setInterval(vlmCaptureFrame, intervalMs);
-    
+
     console.log('[VLM] Started capture: fps=' + vlmRingBuffer.fps + ', quality=' + vlmRingBuffer.quality + ', maxWidth=' + vlmRingBuffer.maxWidth);
 }
 
@@ -5432,22 +5886,22 @@ function vlmStopCapture() {
  */
 function vlmCaptureFrame() {
     const videoFeed = document.getElementById('video-feed');
-    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
-        return; // No video available
+    if (!videoFeed || videoFeed.videoWidth === 0 || (videoFeed.paused && !videoFeed.loop)) {
+        return;
     }
-    
+
     try {
         const canvas = document.createElement('canvas');
         const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
         canvas.width = Math.min(videoFeed.videoWidth, vlmRingBuffer.maxWidth);
         canvas.height = Math.round(canvas.width / aspectRatio);
-        
+
         const ctx = canvas.getContext('2d');
         ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
-        
+
         const dataUrl = canvas.toDataURL('image/jpeg', vlmRingBuffer.quality);
         const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
-        
+
         // Add to ring buffer
         vlmRingBuffer.frames.push({
             data: dataUrl,
@@ -5455,7 +5909,7 @@ function vlmCaptureFrame() {
             width: canvas.width,
             height: canvas.height
         });
-        
+
         // Trim if over max
         while (vlmRingBuffer.frames.length > vlmRingBuffer.maxFrames) {
             vlmRingBuffer.frames.shift();
@@ -5473,7 +5927,7 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
     if (frames.length === 0 || nFrames <= 0) {
         return [];
     }
-    
+
     // Filter frames within time range
     const inRange = frames.filter(f => f.timestamp >= tStart && f.timestamp <= tEnd);
     if (inRange.length === 0) {
@@ -5482,12 +5936,12 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
         const latest = frames.slice(-Math.min(nFrames, frames.length));
         return latest;
     }
-    
+
     // If we have fewer frames than requested, return all
     if (inRange.length <= nFrames) {
         return inRange;
     }
-    
+
     // Select evenly spaced frames
     const result = [];
     const duration = tEnd - tStart;
@@ -5508,7 +5962,7 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
             result.push(closest);
         }
     }
-    
+
     return result;
 }
 
@@ -5517,7 +5971,7 @@ function vlmGetFrames(tStart, tEnd, nFrames) {
  */
 function vlmSendFrames(tStart, tEnd, nFrames) {
     const selectedFrames = vlmGetFrames(tStart, tEnd, nFrames);
-    
+
     if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
         const payload = {
             type: 'vlm_frames',
@@ -5554,10 +6008,10 @@ function captureAndSendVideoFrame() {
         }
         return;
     }
-    
+
     // Fallback: capture fresh frame
     const videoFeed = document.getElementById('video-feed');
-    if (!videoFeed || !videoFeed.srcObject || videoFeed.paused || videoFeed.ended || videoFeed.videoWidth === 0) {
+    if (!videoFeed || videoFeed.videoWidth === 0 || (videoFeed.paused && !videoFeed.loop)) {
         if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
             state.voiceWs.send(JSON.stringify({
                 type: 'vlm_frames',
@@ -5569,7 +6023,7 @@ function captureAndSendVideoFrame() {
         }
         return;
     }
-    
+
     try {
         const canvas = document.createElement('canvas');
         const aspectRatio = videoFeed.videoWidth / videoFeed.videoHeight;
@@ -5579,7 +6033,7 @@ function captureAndSendVideoFrame() {
         ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         const sessionTime = state.liveSessionStartTime > 0 ? (Date.now() / 1000) - state.liveSessionStartTime : 0;
-        
+
         if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
             state.voiceWs.send(JSON.stringify({
                 type: 'vlm_frames',
@@ -5666,9 +6120,10 @@ function startSessionRecording() {
         startLiveSystemStatsPoll();
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
-        state.micMuted = true;
+        /* Use current state.micMuted (may have been toggled in preview); do not overwrite from config */
         state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
-        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: true }));
+        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+        updateMicMutePreviewButton();
         updateVoiceDebugPanel();
         document.getElementById('chat-history').innerHTML = `
         <div class="empty-state">
@@ -5713,6 +6168,7 @@ function startSessionRecording() {
         if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
+        updateMicMutePreviewButton();
 
         // Create TTS AudioContext now (under user gesture) so playback is not blocked by autoplay policy
         if (!state.ttsAudioContext) {
@@ -5735,8 +6191,8 @@ function startSessionRecording() {
         var config = buildVoiceConfig();
         ws.send(JSON.stringify({ type: 'config', config: config }));
         ws.send(JSON.stringify({ type: 'start_session', config: config }));
-        state.micMuted = true;
-        ws.send(JSON.stringify({ type: 'mic_mute', muted: true }));
+        /* Use current state.micMuted (may have been toggled in preview); do not overwrite from config */
+        ws.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
         console.log('[Voice] Config and start_session sent, starting mic stream');
         startVoiceMicStream();
     };
@@ -5794,6 +6250,7 @@ function renderLiveChat() {
     }
     chatEl.scrollTop = chatEl.scrollHeight;
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    syncFullscreenOverlays();
 }
 
 const TARGET_SAMPLE_RATE = 16000;
@@ -6118,18 +6575,29 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
     }
 }
 
-function toggleMicMute() {
-    if (state.sessionState !== 'live' || !state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN) return;
-    state.micMuted = !state.micMuted;
-    state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+function updateMicMuteButton() {
     var btn = document.getElementById('mic-mute-btn');
-    if (btn) {
-        btn.classList.toggle('muted', state.micMuted);
-        btn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
-        var icon = btn.querySelector('.btn-icon i');
-        if (icon) icon.setAttribute('data-lucide', state.micMuted ? 'mic-off' : 'mic');
-        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+    if (!btn) return;
+    btn.classList.toggle('muted', state.micMuted);
+    btn.setAttribute('aria-label', state.micMuted ? 'Unmute mic to speak' : 'Mute mic');
+    var iconName = state.micMuted ? 'mic-off' : 'mic';
+    var iconSpan = btn.querySelector('.btn-icon');
+    if (iconSpan) {
+        iconSpan.innerHTML = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
     }
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
+}
+
+function toggleMicMute() {
+    /* In setup: toggle determines how session will start (muted/unmuted). In live: toggle and send to server. */
+    if (state.sessionState !== 'live' && state.sessionState !== 'setup') return;
+    if (state.sessionState === 'live' && (!state.voiceWs || state.voiceWs.readyState !== WebSocket.OPEN)) return;
+    state.micMuted = !state.micMuted;
+    if (state.sessionState === 'live') {
+        state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
+        renderTimeline(); // redraw so user waveform shows gray when muted
+    }
+    updateMicMutePreviewButton();
 }
 
 function stopSessionRecording() {
@@ -6153,7 +6621,7 @@ function stopSessionRecording() {
     stopVoiceMicStream();
     stopPreviewStream();
     state.sessionState = 'stopped';
-    state.micMuted = true; // reset for next session
+    state.micMuted = !!(currentConfig.app && currentConfig.app.start_with_microphone_muted); // reset for next session
     // Keep isLiveSession true so timeline still shows and can be zoomed/panned
     // Keep message history/balloons visible (no "Session saved!" message)
     const chatEl = document.getElementById('chat-history');
@@ -6170,6 +6638,15 @@ function stopSessionRecording() {
     renderTimeline(); // One frame so zoom/scroll is available
     // Reload again after server closes and sends session_saved (in case session_saved arrives after first load)
     setTimeout(function () { loadSessions(); }, 1500);
+
+    // Exit fullscreen when session ends so user returns to normal layout
+    var container = document.getElementById('session-image');
+    var iconEl = document.getElementById('fullscreen-video-icon');
+    if (container && container.classList.contains('fullscreen')) {
+        container.classList.remove('fullscreen');
+        if (iconEl) iconEl.setAttribute('data-lucide', 'maximize');
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    }
 }
 
 // ===== Event Handlers =====
@@ -6387,8 +6864,71 @@ function setupEventHandlers() {
     document.getElementById('stop-session-btn').addEventListener('click', () => {
         stopSessionRecording();
     });
-    document.getElementById('mic-mute-btn').addEventListener('click', () => {
+    var micMutePreviewBtn = document.getElementById('mic-mute-preview-btn');
+    if (micMutePreviewBtn) {
+        micMutePreviewBtn.addEventListener('click', function () {
+            toggleMicMute();
+            this.classList.add('mic-mute-preview-btn-just-clicked');
+        });
+        micMutePreviewBtn.addEventListener('mouseleave', function () {
+            this.classList.remove('mic-mute-preview-btn-just-clicked');
+        });
+    }
+
+    // Keyboard shortcut: M toggles microphone mute/unmute (when not typing in an input)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'm' && e.key !== 'M') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
         toggleMicMute();
+    });
+
+    // Keyboard shortcut: F toggles fullscreen on the session video container
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'f' && e.key !== 'F') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        toggleVideoFullscreen();
+    });
+
+    // Keyboard shortcut: H toggles the shortcuts guide modal
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'h' && e.key !== 'H') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        toggleShortcutsModal();
+    });
+
+    // Keyboard shortcut: U opens UI Settings modal
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'u' && e.key !== 'U') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        openSettingsModal();
+    });
+
+    // Keyboard shortcut: S starts session (setup) or stops session (live)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 's' && e.key !== 'S') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        if (state.sessionState === 'setup') startSessionRecording();
+        else if (state.sessionState === 'live') stopSessionRecording();
     });
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
@@ -6424,16 +6964,25 @@ function setupEventHandlers() {
 function initTimelineResize() {
     const handle = document.getElementById('timeline-resize-handle');
     const panel = document.getElementById('timeline-panel');
-    const mainPanel = panel.parentElement; // .main-panel
 
     let isResizing = false;
     let startY = 0;
     let startHeight = 0;
+    let lastAppliedHeight = 0;
+
+    function hasTimelineToRender() {
+        return !!(
+            state.selectedSession ||
+            (state.isLiveSession && state.liveTimelineEvents)
+        );
+    }
 
     handle.addEventListener('mousedown', (e) => {
         isResizing = true;
         startY = e.clientY;
         startHeight = panel.offsetHeight;
+        lastAppliedHeight = startHeight;
+        panel.classList.add('timeline-panel--dragging');
         handle.classList.add('dragging');
         document.body.style.cursor = 'ns-resize';
         document.body.style.userSelect = 'none';
@@ -6446,18 +6995,19 @@ function initTimelineResize() {
         // Calculate new height (drag up = increase height, drag down = decrease height)
         const deltaY = startY - e.clientY; // Inverted because timeline is at bottom
         const newHeight = Math.max(200, Math.min(600, startHeight + deltaY));
+        if (newHeight === lastAppliedHeight) return;
 
         panel.style.height = `${newHeight}px`;
-
-        // Re-render timeline to adjust canvas size
-        if (state.selectedSession) {
-            renderTimeline();
-        }
+        lastAppliedHeight = newHeight;
     });
 
     document.addEventListener('mouseup', () => {
         if (isResizing) {
             isResizing = false;
+            panel.classList.remove('timeline-panel--dragging');
+            if (hasTimelineToRender()) {
+                renderTimeline();
+            }
             handle.classList.remove('dragging');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
@@ -6833,6 +7383,49 @@ function updatePipelineLabelTrimming(container) {
     });
 }
 
+/** Toggle fullscreen on the session video/preview container (same pattern as Live VLM WebUI). */
+function toggleVideoFullscreen() {
+    var container = document.getElementById('session-image');
+    var iconEl = document.getElementById('fullscreen-video-icon');
+    if (!container || !iconEl) return;
+    container.classList.toggle('fullscreen');
+    if (container.classList.contains('fullscreen')) {
+        iconEl.setAttribute('data-lucide', 'minimize');
+        updateSessionImageContainerAspect();
+        syncFullscreenOverlays();
+    } else {
+        iconEl.setAttribute('data-lucide', 'maximize');
+    }
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
+/** Toggle mirror (flip horizontal) on video/preview feed. */
+function toggleVideoMirror() {
+    var container = document.getElementById('session-image');
+    if (!container) return;
+    container.classList.toggle('video-mirrored');
+}
+
+/** Sync fullscreen overlay bubbles with latest user transcript and AI response. Call when chat or ASR updates and container is fullscreen. */
+function syncFullscreenOverlays() {
+    var container = document.getElementById('session-image');
+    if (!container || !container.classList.contains('fullscreen')) return;
+    var aiEl = document.getElementById('fullscreen-ai-text');
+    var userEl = document.getElementById('fullscreen-user-text');
+    if (!aiEl || !userEl) return;
+    var lastAi = '';
+    var lastUser = '';
+    if (state.liveChatTurns && state.liveChatTurns.length > 0) {
+        var t = state.liveChatTurns[state.liveChatTurns.length - 1];
+        if (t.assistant) lastAi = t.assistant;
+        if (t.user) lastUser = t.user;
+    }
+    if (state.liveAsrInterimText) lastUser = state.liveAsrInterimText;
+    aiEl.textContent = lastAi;
+    userEl.textContent = lastUser;
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+}
+
 /** Refresh pipeline display when config or devices change (live session uses currentConfig and real device labels). */
 function refreshPipelineDisplay() {
     const el = document.getElementById('pipeline-config');
@@ -6929,6 +7522,21 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+        // ESC to exit video fullscreen (same as Live VLM WebUI)
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                var container = document.getElementById('session-image');
+                var iconEl = document.getElementById('fullscreen-video-icon');
+                if (container && container.classList.contains('fullscreen')) {
+                    container.classList.remove('fullscreen');
+                    if (iconEl) {
+                        iconEl.setAttribute('data-lucide', 'maximize');
+                        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+                    }
+                }
+            }
+        });
+
         // Close modal on backdrop click
         document.getElementById('settings-modal').addEventListener('click', (e) => {
             if (e.target.id === 'settings-modal') {
@@ -6979,6 +7587,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Close modal on ESC key
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                const shortcutsModal = document.getElementById('shortcuts-modal');
+                if (shortcutsModal && shortcutsModal.classList.contains('show')) {
+                    closeShortcutsModal();
+                    return;
+                }
                 const modal = document.getElementById('settings-modal');
                 if (modal.classList.contains('show')) {
                     closeSettingsModal();
@@ -6986,6 +7599,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 closeSessionMenus();
             }
         });
+
+        // Shortcuts modal: close button and click-outside
+        var shortcutsModalEl = document.getElementById('shortcuts-modal');
+        if (shortcutsModalEl) {
+            var shortcutsCloseBtn = document.getElementById('shortcuts-modal-close');
+            if (shortcutsCloseBtn) shortcutsCloseBtn.addEventListener('click', closeShortcutsModal);
+            shortcutsModalEl.addEventListener('click', function (e) {
+                if (e.target.id === 'shortcuts-modal') closeShortcutsModal();
+            });
+        }
 
         // Session list: menu button and dropdown actions (delegation)
         const sessionItems = document.getElementById('session-items');
@@ -7130,6 +7753,8 @@ function openSettingsModal() {
     document.getElementById('ui-auto-scroll-chat').checked = uiSettings.autoScrollChat;
     document.getElementById('ui-show-timestamps').checked = uiSettings.showTimestamps;
     document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
+    const limitSessionImageHeightEl = document.getElementById('ui-limit-session-image-height');
+    if (limitSessionImageHeightEl) limitSessionImageHeightEl.checked = !!uiSettings.limitSessionImageHeight;
 
     const timelineAuto = document.getElementById('ui-timeline-height-auto');
     const timelinePx = document.getElementById('ui-timeline-height-px');
@@ -7156,7 +7781,58 @@ function closeSettingsModal() {
     modal.classList.remove('show');
 }
 
-/** Apply UI settings that affect layout (New Chat button label, timeline panel height). Call after loadUISettings or after saving. */
+function openShortcutsModal() {
+    var modal = document.getElementById('shortcuts-modal');
+    if (!modal) return;
+    modal.classList.add('show');
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(modal);
+}
+
+function closeShortcutsModal() {
+    var modal = document.getElementById('shortcuts-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+function toggleShortcutsModal() {
+    var modal = document.getElementById('shortcuts-modal');
+    if (!modal) return;
+    if (modal.classList.contains('show')) {
+        closeShortcutsModal();
+    } else {
+        openShortcutsModal();
+    }
+}
+
+/** Debug: run in browser console to inspect why limitSessionImageHeight may not apply. Call: __debugLimitSessionImageHeight() */
+function __debugLimitSessionImageHeight() {
+    const el = document.getElementById('session-image');
+    const mainWrap = document.getElementById('chat-panel-main-wrap');
+    const setting = typeof uiSettings !== 'undefined' ? uiSettings.limitSessionImageHeight : 'N/A';
+    const bodyAttr = document.body ? document.body.getAttribute('data-limit-session-image-height') : 'N/A';
+    const classes = el ? Array.from(el.classList) : [];
+    const computed = el && el.ownerDocument && el.ownerDocument.defaultView
+        ? el.ownerDocument.defaultView.getComputedStyle(el)
+        : null;
+    const maxHeight = computed ? computed.getPropertyValue('max-height') : 'N/A';
+    const flex = computed ? computed.getPropertyValue('flex') : 'N/A';
+    const wrapOverflow = mainWrap && mainWrap.ownerDocument && mainWrap.ownerDocument.defaultView
+        ? mainWrap.ownerDocument.defaultView.getComputedStyle(mainWrap).getPropertyValue('overflow-y')
+        : 'N/A';
+    console.log('[limitSessionImageHeight debug]', {
+        uiSettings_limitSessionImageHeight: setting,
+        body_data_limit_session_image_height: bodyAttr,
+        session_image_exists: !!el,
+        session_image_classList: classes,
+        computed_max_height: maxHeight,
+        computed_flex: flex,
+        chat_panel_main_wrap_overflow_y: wrapOverflow,
+        chat_panel_has_collapsed: document.getElementById('chat-panel')?.classList.contains('chat-panel--config-collapsed'),
+    });
+    return { setting, bodyAttr, el, classes, maxHeight, flex, wrapOverflow };
+}
+if (typeof window !== 'undefined') window.__debugLimitSessionImageHeight = __debugLimitSessionImageHeight;
+
+/** Apply UI settings that affect layout (New Chat button label, timeline panel height, session image height cap). Call after loadUISettings or after saving. */
 function applyUISettingsToLayout() {
     const newBtn = document.getElementById('new-session-btn');
     if (newBtn) {
@@ -7173,6 +7849,10 @@ function applyUISettingsToLayout() {
             panel.style.height = px + 'px';
         }
     }
+    // Use body data attribute so limit applies to .session-image-container even if element is recreated or not yet in DOM
+    if (document.body) {
+        document.body.setAttribute('data-limit-session-image-height', uiSettings.limitSessionImageHeight ? 'true' : 'false');
+    }
     if (state.selectedSession) {
         renderTimeline();
     }
@@ -7188,6 +7868,8 @@ function saveSettingsFromModal() {
     uiSettings.autoScrollChat = document.getElementById('ui-auto-scroll-chat').checked;
     uiSettings.showTimestamps = document.getElementById('ui-show-timestamps').checked;
     uiSettings.showDebugInfo = document.getElementById('ui-show-debug-info').checked;
+    const limitSessionImageHeightEl = document.getElementById('ui-limit-session-image-height');
+    uiSettings.limitSessionImageHeight = limitSessionImageHeightEl ? limitSessionImageHeightEl.checked : false;
 
     const timelineAuto = document.getElementById('ui-timeline-height-auto');
     const timelinePx = document.getElementById('ui-timeline-height-px');
@@ -7228,6 +7910,7 @@ function resetUISettings() {
         uiSettings.userAudioGain = 2;
         uiSettings.aiAudioGain = 2;
         uiSettings.userVoiceThreshold = 5;
+        uiSettings.limitSessionImageHeight = true;
 
         saveUISettings();
 
@@ -7239,6 +7922,8 @@ function resetUISettings() {
         document.getElementById('ui-auto-scroll-chat').checked = uiSettings.autoScrollChat;
         document.getElementById('ui-show-timestamps').checked = uiSettings.showTimestamps;
         document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
+        const limitSessionImageHeightResetEl = document.getElementById('ui-limit-session-image-height');
+        if (limitSessionImageHeightResetEl) limitSessionImageHeightResetEl.checked = uiSettings.limitSessionImageHeight;
         const timelineAuto = document.getElementById('ui-timeline-height-auto');
         const timelinePx = document.getElementById('ui-timeline-height-px');
         const timelinePxValue = document.getElementById('ui-timeline-height-px-value');

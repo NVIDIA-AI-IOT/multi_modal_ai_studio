@@ -12,7 +12,7 @@
     --nvidia-black: #000000;
 
     /* Timeline Colors (Live RIVA WebUI palette) */
-    --timeline-user: #76B900;          /* User/Audio - NVIDIA Green */
+    --timeline-user: #76B900;          /* User/Audio - NVIDIA green (unmuted) */
     --timeline-ai: #9C27B0;            /* AI/System - Purple */
     --timeline-vad: #64B5F6;           /* VAD - Light Blue */
     --timeline-asr: #1976D2;           /* ASR/Speech - Dark Blue */
@@ -23,7 +23,11 @@
 
     /* Semantic aliases for timeline lanes (Live RIVA WebUI style) */
     --timeline-system: #9C27B0;        /* System lane - Purple */
-    --timeline-audio: #76B900;         /* Audio lane - Green */
+    --timeline-audio: #76B900;         /* Audio lane / mic button (unmuted) - NVIDIA green */
+    --timeline-audio-muted: #9ca3af;   /* User waveform (preview bar + timeline) when muted - gray */
+    --mic-button-muted: #006666;      /* Mic button when muted - grayish teal */
+    --mic-preview-bg: rgba(0, 0, 0, 0.4);     /* Preview balloon when unmuted - transparent gray */
+    --mic-preview-bg-muted: rgba(0, 102, 102, 0.8);  /* Preview balloon when muted - grayish #006666 */
     --timeline-speech: #1976D2;        /* Speech/ASR lane - Blue (final transcript dot) */
     --timeline-speech-partial: #64B5F6; /* ASR partial transcript dot - Light blue */
     --timeline-llm: #FF9800;           /* LLM lane - Orange */
@@ -139,7 +143,7 @@
     --text-tertiary: var(--light-text-tertiary);
     --border-color: var(--light-border-color);
     --border-hover: var(--light-border-hover);
-    --config-panel-bg-readonly: #e8eaed;
+    --config-panel-bg-readonly: #f1f3f4; /* lighter gray in light mode for easier reading */
     --config-panel-bg-editable: var(--light-bg-primary);
 
     /* Light mode specific tweaks */
@@ -673,12 +677,18 @@ code, pre {
     background: var(--config-panel-bg-editable);
 }
 
-/* Locked once session has started (live or stopped): grayed, no interaction */
+/* Locked once session has started (live or stopped): gray background, tabs clickable, form read-only */
 .config-panel.config-panel--locked {
     background: var(--config-panel-bg-readonly);
 }
 .config-panel.config-panel--locked .config-content {
-    opacity: 0.75;
+    opacity: 0.9;
+}
+.config-panel.config-panel--locked .config-tabs {
+    pointer-events: auto;
+}
+.config-panel.config-panel--locked .config-content .config-tab-content,
+.config-panel.config-panel--locked .config-content #config-tab-content {
     pointer-events: none;
 }
 
@@ -829,6 +839,21 @@ code, pre {
     flex: 1;
     overflow-y: auto;
     padding: var(--space-lg);
+}
+
+.config-footer {
+    flex-shrink: 0;
+    padding: var(--space-md) var(--space-lg);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.config-footer #save-default-config-btn,
+.config-footer #reset-default-config-btn {
+    flex: 1;
+    min-width: 0;
 }
 
 .config-section {
@@ -1056,6 +1081,14 @@ code, pre {
     cursor: not-allowed;
     opacity: 0.8;
 }
+[data-theme="light"] .config-form.readonly input,
+[data-theme="light"] .config-form.readonly select,
+[data-theme="light"] .config-form.readonly textarea,
+[data-theme="light"] .readonly-config-input {
+    background: var(--light-bg-tertiary);
+    border: 1px solid var(--light-border-color);
+    color: var(--light-text-primary);
+}
 
 .config-form.readonly input[type="checkbox"],
 .config-form.readonly input[type="range"] {
@@ -1195,6 +1228,30 @@ code, pre {
 
 .form-group {
     margin-bottom: var(--space-lg);
+}
+
+.vision-video-unavailable-banner {
+    padding: var(--space-md);
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+.vision-video-unavailable-banner code {
+    background: rgba(0, 0, 0, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+[data-theme="light"] .vision-video-unavailable-banner {
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #1a1d1f;
+}
+[data-theme="light"] .vision-video-unavailable-banner code {
+    background: rgba(0, 0, 0, 0.06);
 }
 
 .form-group label {
@@ -1532,6 +1589,10 @@ code, pre {
     min-height: 0;
     max-height: none;
 }
+.chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container.session-image-container--video-aspect {
+    flex: 0 0 auto;
+    min-height: 0;
+}
 .chat-panel.chat-panel--config-collapsed .chat-panel-right-col {
     grid-row: 3;
     grid-column: 2;
@@ -1579,6 +1640,7 @@ code, pre {
 /* Pipeline config: transparent grid, device slots + connected pipeline bar */
 .pipeline-config-container {
     flex-shrink: 0;
+    min-width: 0;
     padding: var(--space-xs) 0;
     margin-bottom: var(--space-sm);
     background: transparent;
@@ -1614,6 +1676,7 @@ code, pre {
     column-gap: var(--space-sm);
     align-items: center;
     overflow: visible;
+    min-width: 0;
 }
 .pipeline-grid--no-camera {
     grid-template-columns: 1fr 1fr;
@@ -1691,6 +1754,7 @@ code, pre {
     margin: 0 28px;
     display: flex;
     overflow: visible;
+    min-width: 0;
 }
 /* Overlay: corner icons in square containers, vertically centered across 1.5–2.5 row */
 .pipeline-corner {
@@ -1721,6 +1785,7 @@ code, pre {
     align-items: center;
     flex-wrap: nowrap;
     flex: 1;
+    min-width: 0;
     min-height: 28px;
     gap: 0;
     overflow: visible;
@@ -1947,9 +2012,61 @@ code, pre {
     flex-shrink: 0;
     box-shadow: var(--shadow-md);
 }
+/* While in setup (Start overlay visible) and no video yet, keep container 16:9 so it isn't too tall; once video has dimensions (--video-aspect), allow shrink to avoid padding */
+.session-image-container:has(.session-control-overlay--start):not(.session-image-container--video-aspect) {
+    aspect-ratio: 16 / 7;
+    flex-shrink: 0;
+}
+body[data-limit-session-image-height="true"] .session-image-container:has(.session-control-overlay--start):not(.session-image-container--video-aspect):not(.fullscreen) {
+    aspect-ratio: 16 / 7;
+    flex-shrink: 0;
+}
+/* Inner wrapper: in normal mode fills container; in fullscreen becomes centered video frame so overlays sit on video */
+.session-image-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
 /* When video is active, JS sets aspect-ratio from video dimensions to avoid gray letterboxing */
 .session-image-container.session-image-container--video-aspect {
     max-height: none;
+}
+
+/* UI setting: limit session image height so it fits in view without vertical scroll (e.g. 32:9 displays). Driven by body attribute. Exclude .fullscreen so fullscreen mode is unaffected. */
+body[data-limit-session-image-height="true"] .session-image-container:not(.fullscreen) {
+    max-height: 60vh !important;
+    aspect-ratio: auto; /* allow height to be capped; inner content letterboxes via object-fit: contain */
+}
+body[data-limit-session-image-height="true"] .session-image-container:not(.fullscreen).session-image-container--video-aspect {
+    max-height: 60vh !important;
+    aspect-ratio: auto;
+}
+/* Preview (non-collapsed): allow main-wrap and session-image to shrink so 60vh cap is effective */
+body[data-limit-session-image-height="true"] .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-main-wrap {
+    min-height: 0;
+}
+body[data-limit-session-image-height="true"] .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-main-wrap .session-image-container:not(.fullscreen) {
+    max-height: 60vh !important;
+    min-height: 0;
+    flex-shrink: 1; /* override base flex-shrink: 0 so item can shrink below intrinsic (aspect-ratio) size */
+    aspect-ratio: auto; /* allow height to be capped by max-height; inner video/img will letterbox via object-fit: contain */
+}
+/* In setup (Start overlay visible) and no video yet: keep container 16:9; once video has dimensions, allow shrink to avoid top/bottom padding */
+body[data-limit-session-image-height="true"] .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-main-wrap .session-image-container:not(.fullscreen):has(.session-control-overlay--start):not(.session-image-container--video-aspect) {
+    aspect-ratio: 16 / 9;
+    flex-shrink: 0;
+}
+/* With limit-height: let session-image shrink so main-wrap doesn’t scroll; show video at reduced size */
+body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container:not(.fullscreen) {
+    max-height: 60vh !important;
+    flex: 1 1 0;
+    min-height: 0;
+}
+body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-collapsed .chat-panel-main-wrap .session-image-container:not(.fullscreen).session-image-container--video-aspect {
+    max-height: 60vh !important;
+    flex: 1 1 0;
+    min-height: 0;
 }
 
 .session-preview-image,
@@ -1961,6 +2078,165 @@ code, pre {
 /* Keep video aspect ratio (contain); container aspect is set from video to minimize letterboxing */
 .session-image-container.session-image-container--video-aspect .session-video-feed {
     object-fit: contain;
+}
+
+/* Top-right controls: Mirror + Fullscreen (like Live VLM WebUI) */
+.fullscreen-controls {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 10;
+}
+.fullscreen-controls .fullscreen-btn {
+    position: static;
+}
+.fullscreen-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    opacity: 0.5;
+}
+.fullscreen-btn:hover {
+    background: rgba(0, 0, 0, 0.8);
+    border-color: var(--accent-primary);
+    opacity: 0.9;
+    transform: scale(1.05);
+}
+.fullscreen-btn svg,
+.fullscreen-btn i {
+    width: 20px !important;
+    height: 20px !important;
+}
+.mirror-btn {
+    flex: 0 0 auto;
+}
+
+/* Fullscreen mode: container fills viewport, inner is centered video frame (no stretch, overlays on video) */
+.session-image-container.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    z-index: 9999;
+    margin: 0;
+    border-radius: 0;
+    border: none;
+    aspect-ratio: auto;
+    max-height: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+}
+/* Inner fits in viewport using actual video/mjpeg aspect (set by JS from videoWidth/videoHeight or naturalWidth/naturalHeight); fallback 16:9 */
+.session-image-container.fullscreen .session-image-inner {
+    position: relative;
+    width: min(100vw, 100vh * var(--fullscreen-ar-w, 16) / var(--fullscreen-ar-h, 9));
+    height: min(100vh, 100vw * var(--fullscreen-ar-h, 9) / var(--fullscreen-ar-w, 16));
+    max-width: 100vw;
+    max-height: 100vh;
+    flex-shrink: 0;
+}
+.session-image-container.fullscreen .session-image-inner video,
+.session-image-container.fullscreen .session-image-inner img.session-video-feed {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.session-image-container.fullscreen .fullscreen-btn {
+    opacity: 0.8;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 100;
+}
+.session-image-container.fullscreen .fullscreen-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+.session-image-container.fullscreen .session-control-overlay {
+    z-index: 100;
+}
+.session-image-container.fullscreen .fullscreen-controls {
+    z-index: 101;
+}
+
+/* Fullscreen mic-preview-strip: 2× height (96px), lower position; 2x waveform amplitude via JS */
+.session-image-container.fullscreen .mic-preview-strip {
+    z-index: 100;
+    min-height: 96px !important;
+    height: 96px !important;
+    bottom: 12px;
+    flex-shrink: 0;
+}
+
+/* Fullscreen conversation overlays: black transparent rectangles with inset spacing */
+.fullscreen-ai-bubble,
+.fullscreen-user-bubble {
+    display: none;
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    padding: 14px 18px;
+    z-index: 99;
+    pointer-events: none;
+    max-height: 26vh;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.72);
+    border-radius: 10px;
+    color: white;
+}
+.session-image-container.fullscreen .fullscreen-ai-bubble {
+    display: block;
+    top: 80px; /* below STOP, Mirror, Shrink icons (12px + 40px + gap) */
+}
+/* AI bubble: lighter purple for readability on dark fullscreen background (timeline-ai is #9C27B0) */
+.session-image-container.fullscreen .fullscreen-ai-bubble .fullscreen-bubble-label,
+.session-image-container.fullscreen .fullscreen-ai-bubble .fullscreen-bubble-text {
+    color: #d465ff; /* Material Purple 100 - lighter than --timeline-ai */
+}
+/* You (user) bubble: distance from bottom. Micro-adjust: larger = higher, smaller = lower (closer to mic strip). */
+.session-image-container.fullscreen .fullscreen-user-bubble {
+    display: block;
+    bottom: 120px;
+}
+.fullscreen-bubble-label {
+    font-size: clamp(0.85rem, 2.4vw, 1.15rem);
+    font-weight: 600;
+    color: var(--nvidia-green-light);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.fullscreen-bubble-text {
+    font-size: clamp(1.05rem, 2.8vw, 1.5rem);
+    line-height: 1.5;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.fullscreen-bubble-text:empty::after {
+    content: '\00a0';
+}
+
+/* Video mirror (flip horizontal) */
+.session-image-container.video-mirrored #video-feed,
+.session-image-container.video-mirrored #video-feed-mjpeg {
+    transform: scaleX(-1);
 }
 
 .image-placeholder,
@@ -1986,8 +2262,7 @@ code, pre {
     transition: top 0.35s ease-out, left 0.35s ease-out, transform 0.35s ease-out;
 }
 .session-control-overlay .start-btn,
-.session-control-overlay .stop-btn,
-.session-control-overlay .mic-mute-btn {
+.session-control-overlay .stop-btn {
     pointer-events: auto;
     flex: none;
 }
@@ -1997,7 +2272,7 @@ code, pre {
     left: 50%;
     transform: translate(-50%, -50%);
 }
-/* Top-left (live): STOP + MIC in a row like Live VLM WebUI */
+/* Top-left (live): STOP only; mute is on the bottom mic strip */
 .session-control-overlay--stop {
     top: var(--space-md);
     left: var(--space-md);
@@ -2008,8 +2283,7 @@ code, pre {
     align-items: flex-start;
     gap: var(--space-sm);
 }
-.session-control-overlay--stop .stop-btn--overlay,
-.session-control-overlay--stop .mic-mute-btn--overlay {
+.session-control-overlay--stop .stop-btn--overlay {
     padding: var(--space-sm) var(--space-lg);
     font-size: 0.9rem;
     box-shadow: var(--shadow-lg);
@@ -2018,9 +2292,6 @@ code, pre {
     justify-content: center;
 }
 .session-control-overlay--stop .stop-btn--overlay:hover {
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
-}
-.session-control-overlay--stop .mic-mute-btn--overlay:hover {
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
 }
 
@@ -2052,15 +2323,113 @@ code, pre {
     display: none;
 }
 
-/* Mic amplitude waveform: bottom of camera preview, raised 20px; inset 60px L/R; timeline-style drawn in canvas */
-.mic-waveform-overlay {
+/* Mic preview strip: when muted, red circle button (left) + waveform balloon (right). Circle flips to green + mic icon on hover. */
+.mic-preview-strip {
     position: absolute;
     left: 60px;
     right: 60px;
-    bottom: 20px;
-    height: 28px;
-    z-index: 3;
+    bottom: 12px;
+    min-height: 48px;
+    height: 48px;
+    z-index: 4; /* above session-control-overlay (3) so mute button is clickable in preview */
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: auto; /* allow clicks on the mute button in setup and live */
+}
+.mic-preview-strip .mic-mute-preview-btn {
+    pointer-events: auto;
+    flex: 0 0 auto;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    color: #fff;
+    /* Soft glow to avoid sharp edge; single blurred shadow so no expand/contract */
+    box-shadow: 0 0 20px 6px rgba(255, 255, 255, 0.28);
+    transition: box-shadow 0.25s ease, transform 0.2s ease;
+    overflow: hidden;
+    perspective: 220px;
+    display: block;
+}
+.mic-preview-strip .mic-mute-preview-btn:hover {
+    /* Slightly stronger soft glow + subtle ring; no hard edge */
+    box-shadow: 0 0 2px 8px rgba(0, 0, 0, 0.22), 0 0 4px 12px rgba(255, 255, 255, 0.3);
+    transform: scale(1.05);
+}
+.mic-preview-strip .mic-mute-preview-btn-inner {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.35s ease; /* flip animates on hover and on unhover (unless just clicked) */
+    transform: rotate3d(1, 1, 0, 0deg);
+}
+.mic-preview-strip .mic-mute-preview-btn-inner.flipped {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+/* Hover: flip to show opposite face (mic <-> mic-off); shadow/glow expands on button */
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-inner {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-inner.flipped {
+    transform: rotate3d(1, 1, 0, 0deg);
+}
+/* After click: stay on current face (no flip) while still hovered; on leave only shadow shrinks */
+.mic-preview-strip .mic-mute-preview-btn.mic-mute-preview-btn-just-clicked:hover .mic-mute-preview-btn-inner {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+.mic-preview-strip .mic-mute-preview-btn.mic-mute-preview-btn-just-clicked:hover .mic-mute-preview-btn-inner.flipped {
+    transform: rotate3d(1, 1, 0, 180deg);
+}
+.mic-preview-strip .mic-mute-preview-btn.mic-mute-preview-btn-just-clicked:hover .mic-mute-preview-btn-inner:not(.flipped) {
+    transform: rotate3d(1, 1, 0, 0deg);
+}
+.mic-preview-strip .mic-mute-preview-btn-face {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+}
+.mic-preview-strip .mic-mute-preview-btn-face--unmuted {
+    background: var(--timeline-audio, #76B900);
+    transform: rotate3d(1, 1, 0, 0deg);
+    transition: background 0.2s ease;
+}
+/* Hover (flip shows opposite face): unmuted face = mic on green; muted face = mic-off on gray */
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-face--unmuted {
+    background: var(--timeline-audio, #76B900);
+}
+.mic-preview-strip .mic-mute-preview-btn-face--muted {
+    background: var(--mic-button-muted, #006666);
+    transform: rotate3d(1, 1, 0, 180deg);
+    transition: background 0.2s ease;
+}
+.mic-preview-strip .mic-mute-preview-btn:hover .mic-mute-preview-btn-face--muted {
+    background: var(--mic-button-muted, #006666);
+}
+.mic-preview-strip .mic-mute-preview-btn .mic-preview-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.mic-waveform-overlay {
+    flex: 1;
+    min-width: 0;
+    min-height: 28px;
+    align-self: stretch;
+    padding: 8px 0;
     pointer-events: none;
+}
+.session-image-container.fullscreen .mic-waveform-overlay {
+    padding: 20px 0;
 }
 .mic-waveform-overlay canvas {
     display: block;
@@ -2106,44 +2475,10 @@ code, pre {
     box-shadow: var(--shadow-lg);
 }
 
-/* Push-to-talk: Unmute / Mute Mic (shown only when live); same size as STOP */
-.mic-mute-btn,
 .session-control .stop-btn {
     flex: 0 0 auto;
     min-width: 11rem;
     width: 11rem;
-}
-.mic-mute-btn {
-    padding: var(--space-md) var(--space-xl);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-sm);
-    transition: all var(--transition-base);
-    white-space: nowrap;
-}
-.mic-mute-btn.muted {
-    background: linear-gradient(135deg, var(--nvidia-green), var(--nvidia-green-dark));
-    color: white;
-    box-shadow: var(--shadow-md), var(--glow-nvidia);
-}
-.mic-mute-btn.muted:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg), var(--glow-nvidia-strong);
-}
-.mic-mute-btn:not(.muted) {
-    background: linear-gradient(135deg, #6b7280, #4b5563);
-    color: white;
-    box-shadow: var(--shadow-md);
-}
-.mic-mute-btn:not(.muted):hover {
-    background: linear-gradient(135deg, #4b5563, #374151);
-    transform: translateY(-2px);
 }
 
 /* Start button loading state */
@@ -2185,26 +2520,6 @@ code, pre {
 .pipeline-badge.vlm {
     background: var(--nvidia-green, #76b900);
     color: white;
-}
-
-/* ===== Live ASR label (updated on every partial; like Live RIVA WebUI) ===== */
-.live-asr-label-wrap {
-    flex-shrink: 0;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    margin-bottom: 4px;
-    min-height: 1.5em;
-}
-.live-asr-prefix {
-    color: var(--text-tertiary);
-    margin-right: 0.25rem;
-}
-#live-asr-text {
-    color: var(--timeline-speech, var(--text-primary));
 }
 
 /* ===== Chat History (compact: more lines visible) ===== */
@@ -2325,11 +2640,10 @@ code, pre {
 .chat-bubble.user {
     border-left: 1px solid #4a6b28;
     border-right: 3px solid var(--info);
-    flex-direction: row-reverse;
     background: #4a6b28;
     color: rgba(255,255,255,0.95);
     border-color: #4a6b28;
-    margin-left: 20%;
+    margin-left: auto;
 }
 
 .chat-bubble.ai,
@@ -2405,6 +2719,19 @@ code, pre {
     background: rgba(0, 0, 0, 0.15);
 }
 
+/* Light mode: reasoning text must be dark for readability */
+[data-theme="light"] .reasoning-block {
+    border-color: rgba(90, 143, 0, 0.4);
+}
+[data-theme="light"] .reasoning-block summary {
+    color: var(--nvidia-green-dark);
+    background: rgba(118, 185, 0, 0.12);
+}
+[data-theme="light"] .reasoning-text {
+    color: #1a1d1f;
+    background: rgba(0, 0, 0, 0.06);
+}
+
 /* Confidence / TTL: subtle, small, right-aligned */
 .chat-meta {
     display: block;
@@ -2414,6 +2741,17 @@ code, pre {
     margin-top: 0.15rem;
     line-height: 1.2;
     text-align: right;
+}
+.chat-meta .lucide-inline {
+    width: 0.9em;
+    height: 0.9em;
+    vertical-align: -0.15em;
+    margin-right: 0.15em;
+}
+.chat-meta-gap {
+    display: inline-block;
+    width: 1em;
+    min-width: 1em;
 }
 
 .chat-placeholder {
@@ -2464,6 +2802,10 @@ code, pre {
     padding: var(--space-sm) var(--space-md); /* Reduced padding */
     position: relative;
     transition: height var(--transition-base), min-height var(--transition-base);
+}
+
+.timeline-panel.timeline-panel--dragging {
+    transition: none;
 }
 
 .timeline-panel.timeline-panel--height-auto {
@@ -2792,6 +3134,14 @@ code, pre {
     transform: scale(0.95);
 }
 
+/* Icon button with text label (e.g. Preset) – allow width to fit content */
+.icon-btn.icon-btn--with-label {
+    width: auto;
+    min-width: 36px;
+    padding: 0 10px;
+    gap: 6px;
+}
+
 /* System prompt preset buttons [1] [2] [3] */
 .system-prompt-preset-btn {
     min-width: 32px;
@@ -2884,6 +3234,28 @@ code, pre {
     transform: translateY(0);
 }
 
+/* Secondary button: same size and alignment as primary, outline/muted style */
+.secondary-btn {
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-base);
+}
+
+.secondary-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-hover);
+}
+
+.secondary-btn:active {
+    background: var(--bg-tertiary);
+}
+
 /* ===== Scrollbar Styling ===== */
 ::-webkit-scrollbar {
     width: 8px;
@@ -2957,6 +3329,46 @@ code, pre {
 .modal-content--settings {
     max-width: 720px;
     width: 92%;
+}
+
+/* Shortcuts guide: compact modal */
+.modal-content--shortcuts {
+    max-width: 380px;
+}
+
+.shortcuts-list {
+    padding: var(--space-md) var(--space-lg);
+}
+
+.shortcuts-dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-sm) var(--space-lg);
+    margin: 0;
+    align-items: baseline;
+}
+
+.shortcuts-dl dt {
+    margin: 0;
+    font-weight: 600;
+}
+
+.shortcuts-dl dd {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.shortcuts-dl kbd {
+    display: inline-block;
+    min-width: 2.2em;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    text-align: center;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 1px 0 var(--border-color);
 }
 
 .modal-content--settings .modal-body {
@@ -3069,6 +3481,14 @@ code, pre {
     color: var(--text-primary);
 }
 
+/* UI Settings modal: larger gear icon in header */
+#settings-modal .modal-header .lucide-inline,
+#settings-modal .modal-header h2 svg {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+}
+
 .modal-close {
     background: none;
     border: none;
@@ -3099,6 +3519,7 @@ code, pre {
 
 .modal-footer {
     display: flex;
+    align-items: center;
     gap: var(--space-md);
     padding: var(--space-lg);
     border-top: 1px solid var(--border-color);
@@ -3230,6 +3651,30 @@ code, pre {
     text-overflow: ellipsis;
     text-align: center;
     border-top: 1px solid var(--border-color);
+}
+
+.local-video-scenario-badge {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    background: rgba(118, 185, 0, 0.9);
+    color: #000;
+    font-size: 0.55rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.4;
+    pointer-events: none;
+}
+
+.local-video-thumb.has-scenario {
+    position: relative;
+}
+
+.local-video-thumb.has-scenario.selected .local-video-scenario-badge {
+    background: var(--nvidia-green);
 }
 
 /* ===== Responsive Design ===== */

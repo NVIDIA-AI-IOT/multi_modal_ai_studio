@@ -34,6 +34,7 @@ class TimelineEvent:
         amplitude: Optional amplitude for waveform rendering (0-100)
         source: Optional source identifier ('user', 'tts', 'ai')
         render_type: Optional rendering hint ('point', 'rectangle', 'waveform')
+        muted: Optional; when True, user amplitude was recorded while mic was muted (replay draws gray)
     """
     timestamp: float
     event_type: str
@@ -44,7 +45,8 @@ class TimelineEvent:
     amplitude: Optional[float] = None
     source: Optional[str] = None
     render_type: Optional[Literal['point', 'rectangle', 'waveform']] = None
-    
+    muted: Optional[bool] = None
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = {
@@ -62,9 +64,11 @@ class TimelineEvent:
             result["amplitude"] = self.amplitude
         if self.source is not None:
             result["source"] = self.source
+        if self.muted is not None:
+            result["muted"] = self.muted
         # render_type is a UI preference, not persisted in session data
         return result
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'TimelineEvent':
         """Create from dictionary."""
@@ -78,6 +82,7 @@ class TimelineEvent:
             amplitude=data.get("amplitude"),
             source=data.get("source"),
             render_type=data.get("render_type"),
+            muted=data.get("muted"),
         )
 
 
@@ -111,9 +116,10 @@ class Timeline:
         source: Optional[str] = None,
         render_type: Optional[Literal['point', 'rectangle', 'waveform']] = None,
         timestamp: Optional[float] = None,
+        muted: Optional[bool] = None,
     ) -> TimelineEvent:
         """Add event to timeline.
-        
+
         Args:
             event_type: Event identifier (e.g., "asr_final", "llm_token")
             lane: Timeline lane
@@ -124,7 +130,8 @@ class Timeline:
             source: Optional source identifier ('user', 'tts', 'ai')
             render_type: Optional rendering hint ('point', 'rectangle', 'waveform')
             timestamp: Optional seconds since session start; if None, uses current time
-        
+            muted: Optional; when True, user amplitude was recorded while mic was muted
+
         Returns:
             The created TimelineEvent
         """
@@ -141,7 +148,8 @@ class Timeline:
             end_time=end_time,
             amplitude=amplitude,
             source=source,
-            render_type=render_type
+            render_type=render_type,
+            muted=muted,
         )
         
         self.events.append(event)
@@ -372,15 +380,17 @@ class Timeline:
         source: str = 'user',
         data: Optional[Dict[str, Any]] = None,
         timestamp: Optional[float] = None,
+        muted: Optional[bool] = None,
     ) -> TimelineEvent:
         """Add an audio amplitude sample for waveform visualization.
-        
+
         Args:
             amplitude: Audio amplitude (0-100 scale)
             source: Audio source ('user' or 'tts'/'ai')
             data: Optional metadata
             timestamp: Optional seconds since session start; if None, uses current time
-        
+            muted: Optional; when True, user mic was muted at this sample (replay draws gray)
+
         Returns:
             The created TimelineEvent
         """
@@ -391,6 +401,7 @@ class Timeline:
             amplitude=amplitude,
             source=source,
             timestamp=timestamp,
+            muted=muted if source == 'user' else None,
         )
     
     def get_summary(self) -> Dict[str, Any]:

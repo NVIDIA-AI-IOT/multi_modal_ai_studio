@@ -45,6 +45,8 @@ docs/*.md
 !docs/audio_pipeline.md
 !docs/plan-ui-improvement-collapsible-config.md
 !docs/VLM_SETUP.md
+!docs/THIRD_PARTY_DEPENDENCIES.md
+!docs/third_party_dependencies.md
 *.log
 # Session storage: ignore all except committed example sessions
 sessions/*
@@ -60,8 +62,17 @@ src/debug_videos/
 *.pem
 credentials.json
 
+# Videos: ignore all except committed sample videos
+videos/*
+!videos/cosmos_20260304_123451_30f_5fps.mp4
+!videos/robot_hand_768_5fps.mp4
+
 # Debug videos
 debug_videos/
+
+# Generated for OSRB / nSpect (run scripts/generate_third_party_licenses.sh)
+third_party_licenses.csv
+third_party_licenses.md
 
 # Test outputs
 .pytest_cache/

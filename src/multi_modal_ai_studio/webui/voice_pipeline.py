@@ -18,6 +18,7 @@ import queue
 import struct
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -63,6 +64,32 @@ from multi_modal_ai_studio.backends.realtime import (
 logger = logging.getLogger(__name__)
 
 
+def _format_llm_error_for_user(exc: Exception) -> str:
+    """Build a short, user-facing message for LLM errors (e.g. for a toast)."""
+    msg = str(exc).strip()
+    if not msg:
+        return "LLM request failed. Please try again."
+    if "LLM API error:" in msg:
+        # e.g. "LLM API error: 503" -> "LLM request failed: server returned HTTP 503."
+        rest = msg.replace("LLM API error:", "").strip()
+        if rest.isdigit():
+            return f"LLM request failed: server returned HTTP {rest}."
+        return f"LLM request failed: {rest}."
+    if "Failed to connect" in msg or "Connection refused" in msg or "Connection reset" in msg:
+        return f"LLM request failed: {msg}"
+    if "Timeout" in type(exc).__name__ or "timeout" in msg.lower():
+        return "LLM request failed: request timed out. Try again."
+    return f"LLM request failed: {msg}"
+
+
+def _is_punctuation_or_empty(text: str) -> bool:
+    """Return True if text is empty or only whitespace/punctuation (Riva TTS rejects such input)."""
+    s = (text or "").strip()
+    if not s:
+        return True
+    return all(c in " \t\n\r.,!?;:\u2014\u2013-…\"'()[]{}" for c in s)
+
+
 class TTSChunkBuffer:
     """Word-count based buffer that chunks LLM tokens for streamed TTS.
 
@@ -71,21 +98,21 @@ class TTSChunkBuffer:
     eagerly at natural break characters when enough words have accumulated.
     """
 
-    FIRST_CHUNK_WORDS = 10
-    MIN_BREAK_WORDS = 6
-    MAX_CHUNK_WORDS = 18
     TTS_BREAKS = frozenset(".!?,;:\n\u2014-")
 
-    def __init__(self) -> None:
+    def __init__(self, first_chunk_words: int = 10) -> None:
         self._buf = ""
         self._first_sent = False
+        self._first_chunk_words = max(3, min(first_chunk_words, 30))
+        self._min_break_words = max(3, self._first_chunk_words // 2)
+        self._max_chunk_words = max(self._first_chunk_words, self._first_chunk_words * 2)
 
     def add(self, token: str) -> Optional[str]:
         """Add a token. Returns a chunk when one is ready to speak."""
         self._buf += token
         words = len(self._buf.split())
-        limit = self.FIRST_CHUNK_WORDS if not self._first_sent else self.MAX_CHUNK_WORDS
-        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self.MIN_BREAK_WORDS
+        limit = self._first_chunk_words if not self._first_sent else self._max_chunk_words
+        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self._min_break_words
         if hit_break or words >= limit:
             chunk = self._buf.strip()
             self._buf = ""
@@ -491,7 +518,7 @@ async def _run_realtime_loop(
                         now = time.time() - session.timeline.start_time
                         if now - last_amplitude_time >= amplitude_interval:
                             amp = _pcm_rms_to_amplitude(msg.data)
-                            session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+                            session.timeline.add_audio_amplitude(amplitude=amp, source="user", muted=mic_muted)
                             last_amplitude_time = now
                             user_amp_buf.append(amp)
                             if len(user_amp_buf) > 3:
@@ -534,7 +561,7 @@ async def _run_realtime_loop(
                     now = time.time() - session.timeline.start_time
                     if now - last_amplitude_time >= amplitude_interval:
                         amp = _pcm_rms_to_amplitude(chunk)
-                        session.timeline.add_audio_amplitude(amplitude=amp, source="user")
+                        session.timeline.add_audio_amplitude(amplitude=amp, source="user", muted=mic_muted)
                         last_amplitude_time = now
                         user_amp_buf.append(amp)
                         if len(user_amp_buf) > 3:
@@ -759,24 +786,22 @@ async def _run_voice_pipeline(
     vision_quality = getattr(llm_config, "vision_quality", 0.7)
     vision_max_width = getattr(llm_config, "vision_max_width", 640)
     vision_buffer_fps = getattr(llm_config, "vision_buffer_fps", 3.0)
-    
+
     _use_video_encode = bool(getattr(llm_config, "vision_video_encode", False))
-    COSMOS_BROWSER_FPS = 5.0
-    if _use_video_encode and vision_buffer_fps < COSMOS_BROWSER_FPS:
-        logger.info(
-            "[VLM] Cosmos model detected: raising browser capture FPS from %.1f to %.1f",
-            vision_buffer_fps, COSMOS_BROWSER_FPS,
+    if _use_video_encode and vision_buffer_fps < 3.0:
+        logger.warning(
+            "[VLM] vision_buffer_fps=%.1f is very low for video encoding; consider >= 5.0",
+            vision_buffer_fps,
         )
-        vision_buffer_fps = COSMOS_BROWSER_FPS
     
-    # Determine if using server-side camera (USB or local video). Use session.config at call time
+    # Determine if using server-side camera (USB). Use session.config at call time
     # so that start_session-merged config (e.g. browser camera when using server mic) is respected.
+    # Local video uses the browser path: the <video> element plays the MP4,
+    # and vlmCaptureFrame captures from it — so the VLM sees exactly what the user sees.
     def _use_server_camera() -> bool:
         dc = session.config.devices
         vs = getattr(dc, "video_source", "browser")
         if vs == "usb" and bool(getattr(dc, "video_device", None)):
-            return True
-        if vs == "local":
             return True
         return False
 
@@ -863,13 +888,19 @@ async def _run_voice_pipeline(
         # Server camera: read from FrameBroker
         if _use_server_camera() and _frame_broker is not None:
             try:
+                # t_start/t_end are session-relative (seconds since session start),
+                # but FrameBroker stores frames with time.time() epoch timestamps.
+                # Convert to absolute time for correct range lookup.
+                epoch_offset = session.timeline.start_time or 0
+                abs_start = t_start + epoch_offset
+                abs_end = t_end + epoch_offset
                 loop = asyncio.get_event_loop()
                 frames = await loop.run_in_executor(
                     None, 
-                    lambda: _frame_broker.get_frames(t_start, t_end, n_frames, vision_max_width)
+                    lambda: _frame_broker.get_frames(abs_start, abs_end, n_frames, vision_max_width)
                 )
-                logger.info("[VLM] Retrieved %d frames from FrameBroker (t=%.2f to %.2f)", 
-                           len(frames), t_start, t_end)
+                logger.info("[VLM] Retrieved %d frames from FrameBroker (t=%.2f to %.2f, abs=%.2f to %.2f)", 
+                           len(frames), t_start, t_end, abs_start, abs_end)
                 return frames
             except Exception as e:
                 logger.warning("[VLM] FrameBroker get_frames failed: %s", e)
@@ -975,7 +1006,7 @@ async def _run_voice_pipeline(
                 last_amplitude_time = t
                 amp = a
                 did_send = True
-                session.timeline.add_audio_amplitude(amplitude=amp, source="user", timestamp=t)
+                session.timeline.add_audio_amplitude(amplitude=amp, source="user", timestamp=t, muted=mic_muted)
                 try:
                     await ws.send_str(
                         json.dumps({"type": "user_amplitude", "timestamp": round(t, 3), "amplitude": round(amp, 2)})
@@ -1277,7 +1308,6 @@ async def _run_voice_pipeline(
                 # VLM: Request frames (time-synchronized with speech)
                 image_data_urls: list = []
                 speech_duration_secs: float = 0.0
-                is_cosmos = _use_video_encode
                 if vision_enabled:
                     # Use the ASR final's original timestamp as end-of-speech,
                     # NOT ts_llm_start (which is when the turn is dequeued).
@@ -1290,7 +1320,7 @@ async def _run_voice_pipeline(
                     # from before the user started speaking.  This ensures the
                     # model sees the full action context (e.g. user picks up an
                     # object then asks "what did I just do?").
-                    ASR_LATENCY_LOOKBACK = 1.0  # seconds
+                    ASR_LATENCY_LOOKBACK = 2.0  # seconds
                     t_start = max(0, t_start - ASR_LATENCY_LOOKBACK)
                     speech_duration_secs = t_end - t_start
                     
@@ -1310,19 +1340,12 @@ async def _run_voice_pipeline(
                         t_start = t_end - MAX_SPEECH_WINDOW_SECS
                         speech_duration_secs = MAX_SPEECH_WINDOW_SECS
                     
-                    # Cosmos models: request ALL available frames for video encoding.
-                    # Video preserves temporal info (motion, actions, state changes).
-                    # FrameBroker stores at ~10fps → 3s speech ≈ 30 frames, 5s ≈ 50.
-                    # Non-Cosmos: keep few frames (each image ≈ 1000 tokens).
-                    if is_cosmos:
-                        n_frames_request = 100  # large cap; FrameBroker returns what's available
-                    else:
-                        n_frames_request = vision_frames_count  # default 4
+                    n_frames_request = vision_frames_count
                     
                     source = "FrameBroker" if _use_server_camera() else "browser"
                     logger.info(
-                        "[VLM] Requesting %d frames from %s (speech: %.2fs–%.2fs, dur=%.2fs, cosmos=%s)",
-                        n_frames_request, source, t_start, t_end, speech_duration_secs, is_cosmos,
+                        "[VLM] Requesting %d frames from %s (speech: %.2fs–%.2fs, dur=%.2fs, video_encode=%s)",
+                        n_frames_request, source, t_start, t_end, speech_duration_secs, _use_video_encode,
                     )
                     
                     ts_frame_request = time.time()
@@ -1343,8 +1366,9 @@ async def _run_voice_pipeline(
                             "speech_duration": round(speech_duration_secs, 2),
                             "latency_ms": round(frame_latency_ms),
                             "source": source,
-                            "cosmos_video": is_cosmos,
+                            "video_encode": _use_video_encode,
                         })
+
                     else:
                         logger.warning("[VLM] Vision enabled but frame capture failed")
                     
@@ -1427,7 +1451,9 @@ async def _run_voice_pipeline(
                     nonlocal tts_consumer_error
 
                     async def _collect_audio(text_chunk: str) -> list:
-                        """Synthesize a text chunk and return all audio as a list."""
+                        """Synthesize a text chunk and return all audio as a list. Skips punctuation-only (Riva rejects)."""
+                        if _is_punctuation_or_empty(text_chunk):
+                            return []
                         result = []
                         async for c in tts.synthesize_stream(text_chunk):
                             result.append(c)
@@ -1519,16 +1545,22 @@ async def _run_voice_pipeline(
                 ts_first = ts_llm_start
                 ts_llm_complete = ts_llm_start
                 tts_started = False
-                chunk_buf = TTSChunkBuffer() if use_stream_tts else None
+                chunk_buf = TTSChunkBuffer(first_chunk_words=getattr(tts_config, "tts_chunk_words", 10)) if use_stream_tts else None
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 
-                # Text-only history anchors VLM answers to prior responses,
-                # causing repeated outputs even when the visual scene changes.
-                # Skip history when vision input is present — the video/images
-                # provide all the temporal context the model needs.
-                if image_data_urls:
+                # When vision input is present, by default skip history to avoid repeated answers
+                # when the scene changes. If vision_include_history is True, send text-only history
+                # so follow-ups like "How about this?" get prior Q&A context.
+                vision_include_history = getattr(llm_config, "vision_include_history", False)
+                if image_data_urls and not vision_include_history:
                     history_slice = None
+                elif image_data_urls and vision_include_history and max_history > 0:
+                    history_slice = conversation_history[-(max_history * 2):]
+                    # Omit the last assistant message when sending new images so the model is not
+                    # primed to repeat it (history anchoring). User questions and earlier turns stay.
+                    if history_slice and history_slice[-1].get("role") == "assistant":
+                        history_slice = history_slice[:-1]
                 else:
                     history_slice = conversation_history[-(max_history * 2):] if max_history > 0 else None
 
@@ -1562,7 +1594,7 @@ async def _run_voice_pipeline(
 
                             if use_stream_tts:
                                 ready = chunk_buf.add(token.token)
-                                if ready:
+                                if ready and not _is_punctuation_or_empty(ready):
                                     if not tts_started:
                                         tts_started = True
                                         tts_q = asyncio.Queue()
@@ -1581,8 +1613,16 @@ async def _run_voice_pipeline(
                     session.timeline.add_event("llm_complete", Lane.LLM, data=llm_complete_data)
                 except Exception as e:
                     logger.exception("LLM error: %s", e)
-                    full_response = full_response or "Sorry, I had an error."
+                    full_response = full_response or "An error occurred. Please try again."
                     session.timeline.add_event("llm_complete", Lane.LLM, data={"text": full_response, "error": str(e)})
+                    ts_err = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                    err_message = _format_llm_error_for_user(e)
+                    await send_event({
+                        "event_type": "error",
+                        "lane": "llm",
+                        "data": {"message": err_message},
+                        "timestamp": ts_err,
+                    })
 
                 ts_llm_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 logger.info("[timing] llm_complete @ %.2fs (llm took %.2fs)", ts_llm_complete, ts_llm_complete - ts_llm_start)
@@ -1601,7 +1641,7 @@ async def _run_voice_pipeline(
                 try:
                     if use_stream_tts:
                         remainder = chunk_buf.flush()
-                        if remainder:
+                        if remainder and not _is_punctuation_or_empty(remainder):
                             if not tts_started:
                                 tts_started = True
                                 tts_q = asyncio.Queue()
@@ -1894,18 +1934,21 @@ async def _run_voice_pipeline(
                 "Reply with only the title, no quotes or extra punctuation."
             )
             title_text = ""
-            saved_reasoning = getattr(llm.config, "enable_reasoning", False)
-            llm.config.enable_reasoning = False
-            try:
-                async for token in llm.generate_stream(
-                    prompt=prompt,
-                    history=None,
-                    system_prompt=title_sys,
-                ):
-                    if token.token:
-                        title_text += token.token
-            finally:
-                llm.config.enable_reasoning = saved_reasoning
+            title_model = (getattr(llm.config, "cheap_model", None) or llm.config.model or "").strip()
+            title_llm = OpenAILLMBackend(
+                config=replace(
+                    llm.config,
+                    model=title_model,
+                    enable_reasoning=False,
+                )
+            )
+            async for token in title_llm.generate_stream(
+                prompt=prompt,
+                history=None,
+                system_prompt=title_sys,
+            ):
+                if token.token:
+                    title_text += token.token
             import re as _re
             title_text = _re.sub(r'<think>.*?</think>', '', title_text, flags=_re.DOTALL).strip()
             title_text = title_text.strip().split("\n")[0].strip()[:50]

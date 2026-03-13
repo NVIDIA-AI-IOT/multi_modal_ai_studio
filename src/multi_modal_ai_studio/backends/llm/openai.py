@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 from typing import Any, AsyncIterator, Dict, List, Optional
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -24,6 +25,33 @@ from multi_modal_ai_studio.backends.base import (
 from multi_modal_ai_studio.config.schema import LLMConfig
 
 logger = logging.getLogger(__name__)
+
+# -----------------------------------------------------------------------------
+# Video encode capability (PyAV + PIL)
+# -----------------------------------------------------------------------------
+
+def video_encode_available() -> bool:
+    """Return True if frames can be encoded to MP4 (PyAV and PIL available)."""
+    try:
+        import av  # noqa: F401
+        from PIL import Image  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _log_video_encode_unavailable() -> None:
+    """Log a prominent error when Video Input is selected but PyAV/PIL are missing."""
+    msg = (
+        "\n"
+        "********************************************************************************\n"
+        "  VIDEO INPUT UNAVAILABLE: PyAV and/or PIL are not installed.\n"
+        "  Vision will use N-Image (multiple JPEGs) instead of MP4.\n"
+        "  To enable Video Input: pip install av Pillow\n"
+        "  Or in the UI select \"N-Image Input\" instead of \"Video Input\".\n"
+        "********************************************************************************\n"
+    )
+    logger.error(msg)
 
 
 def _format_json(obj: Any) -> str:
@@ -110,72 +138,6 @@ def _build_request_debug_log(url: str, headers: Dict[str, str], payload: Dict[st
     return f"{curl}\n\nPayload (preview):\n{preview}"
 
 
-def strip_markdown(text: str, preserve_spaces: bool = False) -> str:
-    """Remove markdown formatting from text.
-
-    Args:
-        text: Text to process
-        preserve_spaces: If True, preserve leading/trailing spaces (for streaming chunks)
-
-    Returns:
-        Text with markdown removed
-    """
-    # Remove code blocks
-    text = re.sub(r'```[\s\S]*?```', '', text)
-    text = re.sub(r'`([^`]+)`', r'\1', text)
-
-    # Remove headers
-    text = re.sub(r'#{1,6}\s+', '', text)
-
-    # Remove bold/italic
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
-    text = re.sub(r'\*([^*]+)\*', r'\1', text)
-    text = re.sub(r'__([^_]+)__', r'\1', text)
-    text = re.sub(r'_([^_]+)_', r'\1', text)
-
-    # Remove links [text](url) -> text
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-
-    # Remove list markers
-    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
-    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
-
-    # Clean up extra whitespace (but preserve spaces in streaming mode)
-    if not preserve_spaces:
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = text.strip()
-
-    return text
-
-
-def _is_ollama_backend(config) -> bool:
-    """Return True if the configured api_base points to an Ollama server."""
-    api_base = getattr(config, "api_base", "") or ""
-    return "11434" in api_base or "ollama" in api_base.lower()
-
-
-def _is_tensorrt_edge_backend(config) -> bool:
-    """Return True if api_base points to a TensorRT Edge LLM server (image payload format)."""
-    api_base = getattr(config, "api_base", "") or ""
-    base_lower = api_base.lower()
-    return "58010" in api_base or "tensorrt" in base_lower or "edge-llm" in base_lower
-
-
-def _should_use_video(config) -> bool:
-    """Return True when frames should be encoded as MP4 video.
-
-    Controlled by ``vision_video_encode`` config flag, but automatically
-    disabled for backends that don't support video_url (e.g. Ollama, TensorRT Edge).
-    """
-    if not bool(getattr(config, "vision_video_encode", False)):
-        return False
-    if _is_ollama_backend(config):
-        return False
-    if _is_tensorrt_edge_backend(config):
-        return False
-    return True
-
-
 def _strip_data_url_prefix(data_url: str) -> str:
     """Extract raw base64 payload from a data URL.
 
@@ -185,18 +147,6 @@ def _strip_data_url_prefix(data_url: str) -> str:
     if "," in data_url:
         return data_url.split(",", 1)[1]
     return data_url
-
-
-# Cosmos-Reason models always use video encoding (even for few frames)
-# for temporal understanding.  The browser capture FPS is raised
-# dynamically for Cosmos so both browser and USB cameras provide a
-# similar number of frames.
-_MIN_FRAMES_FOR_VIDEO = 2
-
-# When sending individual images (non-Cosmos VLMs), cap the count to
-# limit token usage.  Each image ≈ 1000 tokens; 6 images ≈ 6000 tokens
-# is a good trade-off between visual context and prefill latency.
-_MAX_INDIVIDUAL_IMAGES = 6
 
 
 def _encode_images_to_video_base64(
@@ -234,7 +184,6 @@ def _encode_images_to_video_base64(
         import time as _time
         from PIL import Image
     except ImportError:
-        logger.warning("[Video Encode] PyAV or PIL not available, falling back to multi-image")
         return None
 
     n_frames = len(image_data_urls)
@@ -334,7 +283,6 @@ class OpenAILLMBackend(LLMBackend):
     Features:
     - Streaming token generation
     - Conversation history management
-    - Automatic model detection (for Ollama)
     - Markdown stripping for voice output
     """
 
@@ -357,9 +305,40 @@ class OpenAILLMBackend(LLMBackend):
             raise ConfigError("LLM API base URL is required")
 
         self.api_base = config.api_base.rstrip("/")
-        self.api_key = config.api_key or "EMPTY"
+        self.api_key = config.api_key or ""
 
         self.logger.info(f"Initialized OpenAI-compatible LLM: {config.model} @ {self.api_base}")
+
+    def _is_local_api_base(self, base: str) -> bool:
+        """True if base URL is localhost or private IP (no auth sent to local vLLM/Ollama)."""
+        try:
+            parsed = urlparse(base if base.startswith("http") else f"http://{base}")
+            host = (parsed.hostname or "").lower()
+            if not host or host == "localhost":
+                return True
+            if host == "127.0.0.1":
+                return True
+            # Private IP ranges
+            if host.startswith("10."):
+                return True
+            if host.startswith("192.168."):
+                return True
+            if host.startswith("172."):
+                parts = host.split(".")
+                if len(parts) == 4 and parts[1].isdigit():
+                    b = int(parts[1])
+                    if 16 <= b <= 31:
+                        return True
+            return False
+        except Exception:
+            return False
+
+    def _should_send_auth(self) -> bool:
+        """True if we should send Authorization header (e.g. for OpenAI). Skip for local vLLM/Ollama."""
+        if self._is_local_api_base(self.api_base):
+            return False
+        key = (self.api_key or "").strip()
+        return bool(key and key.upper() != "EMPTY")
 
     async def list_available_models(self) -> List[str]:
         """List available models from the LLM API.
@@ -391,7 +370,9 @@ class OpenAILLMBackend(LLMBackend):
         # Try OpenAI /v1/models endpoint
         try:
             async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Bearer {self.api_key}"}
+                headers = {}
+                if self._should_send_auth():
+                    headers["Authorization"] = f"Bearer {self.api_key}"
                 async with session.get(
                     f"{self.api_base}/models",
                     headers=headers,
@@ -417,36 +398,21 @@ class OpenAILLMBackend(LLMBackend):
         self,
         image_data_urls: List[str],
         prompt: str,
-        vision_fmt: str,
         speech_duration: Optional[float],
     ) -> list:
         """Build the multimodal ``content`` list for a user message.
 
-        Dispatches to the correct format based on *vision_fmt*:
-          • ``"openai"``       — vLLM / Ollama / SGLang / OpenAI (image_url, video_url)
-          • ``"tensorrt_edge"`` — TensorRT Edge LLM ({"type":"image","image":"<b64>"})
+        Two paths controlled purely by the user's ``vision_video_encode`` config:
+        - True  → encode frames as MP4 video (``video_url``), fall back to images on failure
+        - False → send individual images (``image_url``)
 
-        Returns the ``content`` list ready to be placed inside a user message.
+        No backend detection, no sub-sampling, no hardcoded caps.
         """
-        if vision_fmt == "tensorrt_edge":
-            return self._vision_content_tensorrt_edge(image_data_urls, prompt, speech_duration)
-        return self._vision_content_openai(image_data_urls, prompt, speech_duration)
+        content: list = [{"type": "text", "text": prompt}]
 
-    def _vision_content_openai(
-        self,
-        image_data_urls: List[str],
-        prompt: str,
-        speech_duration: Optional[float],
-    ) -> list:
-        """OpenAI-standard format (vLLM, Ollama, SGLang, OpenAI API)."""
-        content: list = []
+        use_video = bool(getattr(self.config, "vision_video_encode", False))
 
-        # Video encoding for temporal understanding (Cosmos-Reason or explicit flag).
-        video_url = None
-        if (
-            _should_use_video(self.config)
-            and len(image_data_urls) >= _MIN_FRAMES_FOR_VIDEO
-        ):
+        if use_video and len(image_data_urls) >= 2:
             video_url = _encode_images_to_video_base64(
                 image_data_urls,
                 speech_duration_secs=speech_duration or 0.0,
@@ -456,52 +422,19 @@ class OpenAILLMBackend(LLMBackend):
                     "type": "video_url",
                     "video_url": {"url": video_url},
                 })
-                self.logger.info("VLM request (Cosmos video): %d frames encoded to MP4", len(image_data_urls))
+                self.logger.info("VLM request (video): %d frames encoded to MP4", len(image_data_urls))
+                return content
             else:
-                self.logger.warning("Video encoding failed, falling back to multi-image")
-                video_url = None
+                _log_video_encode_unavailable()
 
-        # Multi-image fallback: non-Cosmos models or video encoding failure.
-        if not video_url:
-            detail = getattr(self.config, "vision_detail", "auto")
-            imgs = image_data_urls
-            if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
-                step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
-                imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
-                self.logger.info("VLM: sub-sampled %d → %d images", len(image_data_urls), len(imgs))
-            for img_url in imgs:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": img_url, "detail": detail},
-                })
-            self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(imgs))
-
-        content.append({"type": "text", "text": prompt})
-        return content
-
-    def _vision_content_tensorrt_edge(
-        self,
-        image_data_urls: List[str],
-        prompt: str,
-        speech_duration: Optional[float],
-    ) -> list:
-        """TensorRT Edge LLM format: ``{"type":"image","image":"<raw_base64>"}``."""
-        content: list = []
-        imgs = image_data_urls
-
-        if len(imgs) > _MAX_INDIVIDUAL_IMAGES:
-            step = len(imgs) / _MAX_INDIVIDUAL_IMAGES
-            imgs = [imgs[int(i * step)] for i in range(_MAX_INDIVIDUAL_IMAGES)]
-            self.logger.info("VLM (TRT-Edge): sub-sampled %d → %d images", len(image_data_urls), len(imgs))
-
-        for img_url in imgs:
+        detail = getattr(self.config, "vision_detail", "auto")
+        for img_url in image_data_urls:
             content.append({
-                "type": "image",
-                "image": _strip_data_url_prefix(img_url),
+                "type": "image_url",
+                "image_url": {"url": img_url, "detail": detail},
             })
+        self.logger.info("VLM request (multi-image): %d image(s) + text prompt", len(image_data_urls))
 
-        self.logger.info("VLM request (TRT-Edge): %d image(s) + text prompt", len(imgs))
-        content.append({"type": "text", "text": prompt})
         return content
 
     async def generate_stream(
@@ -539,14 +472,10 @@ class OpenAILLMBackend(LLMBackend):
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
-        elif getattr(self.config, "enable_reasoning", False) and not _is_ollama_backend(self.config):
-            # Cosmos with vLLM (--reasoning-parser): instruct model to use <think> format
-            reasoning_fmt = (
-                "\n\nAnswer the question using the following format:\n\n<think>\n"
-                "Your reasoning.\n</think>\n\n"
-                "Write your final answer immediately after the </think> tag."
-            )
-            sys_prompt = (sys_prompt or "") + reasoning_fmt
+        elif getattr(self.config, "enable_reasoning", False):
+            reasoning_fmt = getattr(self.config, "reasoning_prompt", "") or ""
+            if reasoning_fmt:
+                sys_prompt = (sys_prompt or "") + reasoning_fmt
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
@@ -554,12 +483,9 @@ class OpenAILLMBackend(LLMBackend):
         if history:
             messages.extend(history)
 
-        # Add current prompt - with images/video if provided (VLM multi-modal format)
-        # Format is derived from api_base: TensorRT Edge (e.g. :58010) uses image payload; else OpenAI-style.
-        vision_fmt = "tensorrt_edge" if _is_tensorrt_edge_backend(self.config) else "openai"
         if image_data_urls and len(image_data_urls) > 0:
             user_content = self._build_vision_content(
-                image_data_urls, prompt, vision_fmt, speech_duration,
+                image_data_urls, prompt, speech_duration,
             )
             messages.append({"role": "user", "content": user_content})
         else:
@@ -567,10 +493,9 @@ class OpenAILLMBackend(LLMBackend):
 
         # Prepare API request
         url = f"{self.api_base}/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-        }
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if self._should_send_auth():
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         max_tokens = self.config.max_tokens
         if self.config.minimal_output:
@@ -603,10 +528,14 @@ class OpenAILLMBackend(LLMBackend):
         token_count = 0
         reasoning_started = False
         in_think_block = False  # fallback tracker if server lacks reasoning parser
+        _router_model = None  # track which model actually served the request (useful for routers)
 
         try:
+            body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Length"] = str(len(body_bytes))
+            self.logger.debug("LLM request body: %d bytes", len(body_bytes))
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
+                async with session.post(url, headers=headers, data=body_bytes) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
                         self.logger.error(f"LLM API error: {resp.status} - {error_text}")
@@ -618,6 +547,13 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Skip empty lines and non-data lines
                         if not line or not line.startswith("data: "):
+                            if line and ("error" in line.lower() or "500" in line):
+                                self.logger.warning("SSE non-data line (possible error): %.300s", line)
+                                if "500" in line or "Internal Server Error" in line:
+                                    err_msg = "[LLM backend error — the model crashed. This often means the image payload is too large for Edge LLM.]"
+                                    self.logger.error("Edge LLM 500: yielding error to user")
+                                    yield LLMToken(token=err_msg, is_final=False)
+                                    full_response += err_msg
                             continue
 
                         # Remove "data: " prefix
@@ -625,10 +561,24 @@ class OpenAILLMBackend(LLMBackend):
 
                         # Check for end of stream
                         if line == "[DONE]":
+                            if in_think_block and not full_response:
+                                self.logger.warning(
+                                    "[LLM] Model exhausted max_tokens (%d) inside <think> and never produced an answer. "
+                                    "Increase max_tokens or disable reasoning.",
+                                    self.config.max_tokens,
+                                )
+                                exhaust_msg = "[No answer — the model used all its tokens on reasoning. Try increasing Max Tokens or disabling reasoning.]"
+                                full_response = exhaust_msg
+                                token_count = 1
+                                yield LLMToken(token=exhaust_msg, is_final=False)
+
+                            reasoning_response = reasoning_response.strip()
                             final_meta: Dict[str, Any] = {
                                 "token_count": token_count,
                                 "full_response": full_response,
                             }
+                            if _router_model:
+                                final_meta["router_model"] = _router_model
                             if reasoning_response:
                                 final_meta["reasoning"] = reasoning_response
                             yield LLMToken(
@@ -641,12 +591,20 @@ class OpenAILLMBackend(LLMBackend):
                         try:
                             chunk = json.loads(line)
 
-                            if "choices" in chunk and len(chunk["choices"]) > 0:
-                                delta = chunk["choices"][0].get("delta", {})
+                            if _router_model is None and chunk.get("model"):
+                                _router_model = chunk["model"]
+                                self.logger.info("[LLM] Router model: %s", _router_model)
 
-                                # vLLM reasoning parser puts thinking into
-                                # reasoning_content and answer into content.
-                                rc = delta.get("reasoning_content") or ""
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                delta = chunk["choices"][0].get("delta") or {}
+
+                                # vLLM/cosmos-reason: thinking in reasoning_content or reasoning;
+                                # answer in content.
+                                rc = (
+                                    delta.get("reasoning_content")
+                                    or delta.get("reasoning")
+                                    or ""
+                                )
                                 if rc:
                                     if not reasoning_started:
                                         reasoning_started = True
@@ -662,31 +620,22 @@ class OpenAILLMBackend(LLMBackend):
                                 if not content:
                                     continue
 
-                                # Fallback: strip <think>...</think> if the
-                                # server doesn't have a reasoning parser.
+                                # Fallback: strip <think>...</think> from content
+                                # when the server lacks a reasoning parser (e.g. Ollama).
                                 if "<think>" in content:
                                     in_think_block = True
                                     content = content.split("<think>", 1)[0]
                                 if in_think_block:
                                     if "</think>" in content:
-                                        after = content.split("</think>", 1)[1]
                                         reasoning_response += content.split("</think>", 1)[0]
+                                        content = content.split("</think>", 1)[1]
                                         in_think_block = False
-                                        content = after
                                     else:
                                         reasoning_response += content
                                         continue
 
                                 if not content:
                                     continue
-
-                                content = strip_markdown(content, preserve_spaces=True)
-
-                                # Strip leading whitespace from first answer token after reasoning
-                                if token_count == 0:
-                                    content = content.lstrip()
-                                    if not content:
-                                        continue
 
                                 full_response += content
                                 token_count += 1
@@ -720,6 +669,8 @@ class OpenAILLMBackend(LLMBackend):
                     "chars": len(full_response),
                     "tokens": token_count,
                 }
+                if _router_model:
+                    response_log["router_model"] = _router_model
                 if reasoning_response:
                     response_log["reasoning"] = reasoning_response
                     self.logger.info(
