@@ -164,6 +164,8 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         data["tts"] = tts
     if "llm" in data:
         llm = dict(data["llm"])
+        if "include_conversation_history" not in llm and "vision_include_history" in llm:
+            llm["include_conversation_history"] = llm.pop("vision_include_history")
         if "ollama_url" in llm and "api_base" not in llm:
             base = (llm.get("ollama_url") or "").rstrip("/")
             llm["api_base"] = f"{base}/v1" if base else "http://localhost:11434/v1"
@@ -1551,17 +1553,19 @@ async def _run_voice_pipeline(
                 tts_q: Optional[asyncio.Queue] = None
                 tts_task: Optional[asyncio.Task] = None
 
-                # When vision input is present, by default skip history to avoid repeated answers
-                # when the scene changes. If vision_include_history is True, send text-only history
-                # so follow-ups like "How about this?" get prior Q&A context.
-                vision_include_history = getattr(llm_config, "vision_include_history", False)
-                if image_data_urls and not vision_include_history:
+                # One flag for all turns: include_conversation_history (default True).
+                # When False: no history for any turn. When True: send last N turns; for vision turns
+                # send text-only history and omit last assistant message to avoid image/history anchoring.
+                include_history = getattr(
+                    llm_config, "include_conversation_history",
+                    getattr(llm_config, "vision_include_history", True),
+                )
+                if not include_history:
                     history_slice = None
-                elif image_data_urls and vision_include_history and max_history > 0:
+                elif image_data_urls and max_history > 0:
                     history_slice = conversation_history[-(max_history * 2):]
-                    # Omit the last assistant message when sending new images so the model is not
-                    # primed to repeat it (history anchoring). User questions and earlier turns stay.
-                    if history_slice and history_slice[-1].get("role") == "assistant":
+                    omit_last = getattr(llm_config, "vision_omit_last_assistant", True)
+                    if omit_last and history_slice and history_slice[-1].get("role") == "assistant":
                         history_slice = history_slice[:-1]
                 else:
                     history_slice = conversation_history[-(max_history * 2):] if max_history > 0 else None

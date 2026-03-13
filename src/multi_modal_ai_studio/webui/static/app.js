@@ -598,8 +598,8 @@ const defaultConfig = {
         api_base: 'http://localhost:11434/v1',
         ollama_url: 'http://localhost:11434',
         api_key: '',
-        model: 'llama3.2:3b',
-        cheap_model: 'llama3.2:3b',
+        model: '',  // Unspecified: first model from server list is used when models are loaded
+        cheap_model: '',
         temperature: 0.7,
         max_tokens: 2048,
         minimal_output: false,
@@ -607,7 +607,8 @@ const defaultConfig = {
         system_prompt: 'You are a helpful AI assistant. Reply in plain text only — no markdown, asterisks, or other formatting.',
         extra_request_body: '',
         enable_vision: false,
-        vision_include_history: false,
+        include_conversation_history: true,
+        vision_omit_last_assistant: true,
         vision_system_prompt: 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations. Use plain text only — no markdown or formatting.',
         vision_detail: 'auto',
         vision_frames: 4,
@@ -778,6 +779,10 @@ function _normalizePresetToFrontend(preset) {
         if (out.tts.server && !out.tts.riva_server) out.tts.riva_server = out.tts.server;
     }
     if (out.llm && out.llm.scheme && !out.llm.backend) out.llm.backend = out.llm.scheme;
+    if (out.llm && out.llm.vision_include_history !== undefined && out.llm.include_conversation_history === undefined) {
+        out.llm.include_conversation_history = out.llm.vision_include_history;
+        delete out.llm.vision_include_history;
+    }
     return out;
 }
 
@@ -1348,19 +1353,19 @@ function renderLLMConfig(config, readonly = false) {
 
             <div class="form-group">
                 <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} id="llm-minimal-output" ${config.minimal_output ? 'checked' : ''}
-                           onchange="onLLMMinimalOutputChange(this.checked)">
-                    Minimal output (no reasoning)
-                </label>
-                ${!readonly ? '<span class="input-hint">For Nemotron etc.: answer with only a number or few tokens; system prompt + max_tokens are adjusted</span>' : ''}
-            </div>
-
-            <div class="form-group">
-                <label class="checkbox-label">
                     <input type="checkbox" ${disabled} id="llm-stream" ${config.stream ? 'checked' : ''}
                            onchange="updateConfig('llm', 'stream', this.checked)">
                     Enable Streaming Responses
                 </label>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" ${disabled} id="llm-include-conversation-history" ${(config.include_conversation_history !== undefined ? config.include_conversation_history : config.vision_include_history) ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'include_conversation_history', this.checked)">
+                    Include conversation history (for follow-ups). With vision, only text is sent as history.
+                </label>
+                ${!readonly ? '<span class="input-hint">Applies to all LLM turns. When off, each turn is stateless. With vision on, history is sent as text only; current frames only.</span>' : ''}
             </div>
 
             <div class="form-group">
@@ -1408,24 +1413,13 @@ function renderLLMConfig(config, readonly = false) {
                        oninput="updateConfig('llm', 'vision_max_width', parseInt(this.value)); document.getElementById('vision-max-width-value').textContent = this.value + 'px';">
                 <span id="vision-max-width-value" class="range-value">${config.vision_max_width || 640}px</span>
 
-                <label class="checkbox-label" style="margin-top: 12px;">
-                    <input type="checkbox" ${disabled} id="llm-vision-include-history" ${config.vision_include_history ? 'checked' : ''}
-                           onchange="updateConfig('llm', 'vision_include_history', this.checked)">
-                    Include conversation history (for follow-ups like &quot;How about this?&quot;)
-                </label>
-                ${!readonly ? '<span class="input-hint">When on, previous Q&amp;A is sent as text so the model can answer follow-up questions. May repeat answers if the scene did not change.</span>' : ''}
-
-                <label class="checkbox-label" style="margin-top: 12px;">
-                    <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
-                           onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
-                    Enable Reasoning (chain-of-thought)
-                </label>
-                ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to the system prompt. Reasoning text is stripped before TTS.</span>' : ''}
-                <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
-                    <label>Reasoning Prompt</label>
-                    <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;" placeholder="e.g. Think step-by-step in <think>...</think> then your final answer."
-                              onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt ?? defaultConfig.llm.reasoning_prompt ?? '')}</textarea>
-                    ${!readonly ? '<span class="input-hint">Appended to system prompt when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
+                <div id="vlm-omit-last-assistant-wrap" style="display: ${(config.include_conversation_history !== undefined ? config.include_conversation_history : config.vision_include_history) ? 'block' : 'none'}; margin-top: 12px;">
+                    <label class="checkbox-label">
+                        <input type="checkbox" ${disabled} id="llm-vision-omit-last-assistant" ${config.vision_omit_last_assistant !== false ? 'checked' : ''}
+                               onchange="updateConfig('llm', 'vision_omit_last_assistant', this.checked)">
+                        Omit last assistant from history
+                    </label>
+                    ${!readonly ? '<span class="input-hint">When on, the previous assistant reply is not sent so the model does not repeat it (e.g. same question with new object).</span>' : ''}
                 </div>
             </div>
 
@@ -1441,6 +1435,30 @@ function renderLLMConfig(config, readonly = false) {
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
                           onchange="updateConfig('llm', currentConfig.llm.enable_vision ? 'vision_system_prompt' : 'system_prompt', this.value)">${escapeHtml(config.enable_vision ? (config.vision_system_prompt || 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.') : (config.system_prompt || ''))}</textarea>
                 ${!readonly ? `<span class="input-hint">${config.enable_vision ? 'Vision system prompt (used when Enable Vision is checked)' : 'Text LLM system prompt'}</span>` : ''}
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
+                    Enable reasoning (chain-of-thought) through system prompt
+                </label>
+                ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to the system prompt. Reasoning text is stripped before TTS.</span>' : ''}
+                <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
+                    <label>Reasoning Prompt</label>
+                    <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;" placeholder="e.g. Think step-by-step in <think>...</think> then your final answer."
+                              onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt ?? defaultConfig.llm.reasoning_prompt ?? '')}</textarea>
+                    ${!readonly ? '<span class="input-hint">Appended to system prompt when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" ${disabled} id="llm-minimal-output" ${config.minimal_output ? 'checked' : ''}
+                           onchange="onLLMMinimalOutputChange(this.checked)">
+                    Minimal output (no reasoning)
+                </label>
+                ${!readonly ? '<span class="input-hint">For Nemotron etc.: answer with only a number or few tokens; system prompt + max_tokens are adjusted</span>' : ''}
             </div>
 
             <div class="form-group">
@@ -2050,25 +2068,8 @@ function renderAppConfig(config, readonly = false) {
                 </select>
                 ${!readonly ? '<span class="input-hint">Timeline and UI display options are in UI Settings (<i data-lucide="settings" class="lucide-inline"></i> in header)</span>' : ''}
             </div>
-
-            ${!readonly ? `
-            <div class="form-group" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-color);">
-                <button type="button" class="btn-secondary" onclick="resetSessionConfigToDefaults()" style="width: 100%;">
-                    <i data-lucide="rotate-ccw" class="lucide-inline"></i> Reset All Configuration to Defaults
-                </button>
-                <div class="input-hint">Clears saved configuration and restores factory defaults (ASR, LLM, TTS, Devices). Page will reload.</div>
-            </div>
-            ` : ''}
         </div>
     `;
-}
-
-function resetSessionConfigToDefaults() {
-    if (!confirm('Reset all configuration (ASR, LLM/VLM, TTS, Devices, App) to factory defaults? This cannot be undone.')) return;
-    try {
-        localStorage.removeItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
-    } catch (e) {}
-    location.reload();
 }
 
 function appConfigRefresh() {
@@ -2498,6 +2499,10 @@ function updateConfig(section, key, value) {
         if (asrFullVoice) {
             currentConfig.asr.realtime_session_type = 'transcription';
         }
+    }
+    if (section === 'llm' && key === 'include_conversation_history') {
+        var wrap = document.getElementById('vlm-omit-last-assistant-wrap');
+        if (wrap) wrap.style.display = value ? 'block' : 'none';
     }
     updateConfigTabStates();
 

@@ -124,9 +124,12 @@ class LLMConfig:
         reasoning_prompt: The prompt text appended to the system prompt when enable_reasoning
             is True. Users can customise this to match their model's reasoning format.
         history_turns: Number of previous turns to include as context (0=no history)
-        vision_include_history: When enable_vision is True, if True include text-only conversation
-            history so follow-ups (e.g. "How about this?") get context. If False, no history is sent
-            with vision input to avoid repeated answers when the scene changes.
+        include_conversation_history: If True (default), send last N turns as context for all LLM turns.
+            If False, no history is sent (stateless). For vision turns we still send history as text-only
+            and attach only current frames to avoid image-anchoring.
+        vision_omit_last_assistant: When vision is on and include_conversation_history is True, if True
+            (default) omit the last assistant message from the history sent to avoid repetition (e.g.
+            "What do I show?" with new object -> "A phone" again). If False, send full text history.
     """
     scheme: Literal["openai", "anthropic", "none"] = "openai"
     api_base: str = "http://localhost:11434/v1"
@@ -139,10 +142,11 @@ class LLMConfig:
     system_prompt: str = "You are a helpful voice assistant."
     extra_request_body: Optional[str] = None
     top_p: float = 1.0
-    frequency_penalty: float = 0.0
+    frequency_penalty: float = 0
     presence_penalty: float = 0.0
     history_turns: int = 3  # Previous turns sent as text-only context (0=disabled)
-    vision_include_history: bool = False  # When vision on: include history for follow-ups (default: no)
+    include_conversation_history: bool = True  # Send conversation history for all turns; vision uses text-only history
+    vision_omit_last_assistant: bool = True  # When vision + history on: omit last assistant message to avoid repetition
 
     # -------------------------------------------------------------------------
     # Vision (VLM) settings - send camera frames with prompts
@@ -437,6 +441,9 @@ class SessionConfig:
         if 'riva_server' in asr_data and 'server' not in asr_data:
             asr_data['server'] = asr_data.pop('riva_server', None)
         llm_data = dict(data.get('llm') or {})
+        # Backward compat: presets/frontend may send vision_include_history
+        if "include_conversation_history" not in llm_data and "vision_include_history" in llm_data:
+            llm_data["include_conversation_history"] = llm_data.pop("vision_include_history")
         if 'ollama_url' in llm_data and 'api_base' not in llm_data:
             base = (llm_data.get('ollama_url') or '').rstrip('/')
             llm_data['api_base'] = f"{base}/v1" if base else "http://localhost:11434/v1"

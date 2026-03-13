@@ -293,8 +293,14 @@ code, pre {
 .content-area {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    min-height: 0; /* allow row to shrink so config/chat panels can scroll internally */
     overflow: hidden;
     transition: grid-template-columns var(--transition-base);
+}
+.content-area > .config-panel,
+.content-area > .chat-panel {
+    min-height: 0; /* allow grid items to shrink so inner scroll works */
+    overflow: hidden;
 }
 .content-area.content-area--config-collapsed {
     grid-template-columns: 48px 1fr;
@@ -674,6 +680,7 @@ code, pre {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
     transition: background-color var(--transition-base);
 }
 .config-panel.config-panel--editable {
@@ -690,8 +697,9 @@ code, pre {
 .config-panel.config-panel--locked .config-tabs {
     pointer-events: auto;
 }
-.config-panel.config-panel--locked .config-content .config-tab-content,
-.config-panel.config-panel--locked .config-content #config-tab-content {
+/* Disable form interaction when locked; keep #config-tab-content scrollable (scrollbar + wheel) */
+.config-panel.config-panel--locked .config-content .config-tab-content .config-form,
+.config-panel.config-panel--locked .config-content #config-tab-content .config-form {
     pointer-events: none;
 }
 
@@ -831,17 +839,22 @@ code, pre {
 }
 
 .config-content {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    display: flex;
-    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden; /* do not scroll here; only #config-tab-content scrolls */
+    display: grid;
+    grid-template-rows: auto 1fr auto; /* tabs, scrollable content, footer (if shown) */
 }
 
-.config-tab-content {
-    flex: 1;
+.config-tab-content,
+#config-tab-content {
+    min-height: 0; /* critical so grid row can shrink and overflow can scroll */
     overflow-y: auto;
+    overflow-x: hidden;
     padding: var(--space-lg);
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y; /* allow vertical scroll to be controlled on touch */
+    overscroll-behavior: contain; /* keep scroll inside this element, don't leak to body */
 }
 
 .config-footer {
