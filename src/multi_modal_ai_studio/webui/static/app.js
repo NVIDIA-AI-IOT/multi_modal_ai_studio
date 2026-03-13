@@ -6678,12 +6678,11 @@ function toggleBrowserSpeakerMute() {
 function updateSpeakerButton() {
     var btn = document.getElementById('speaker-toggle-btn');
     if (!btn) return;
-    var icon = btn.querySelector('i[data-lucide]');
-    if (!icon) return;
     var muted = state.browserSpeakerMuted;
-    icon.setAttribute('data-lucide', muted ? 'volume-x' : 'volume-2');
+    var iconName = muted ? 'volume-x' : 'volume-2';
     btn.setAttribute('title', muted ? 'Speaker off (TTS muted) — click or press Q to unmute' : 'Speaker on (TTS) — click or press Q to mute');
     btn.classList.toggle('speaker-btn-muted', muted);
+    btn.innerHTML = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(btn);
 }
 
@@ -7032,8 +7031,9 @@ function setupEventHandlers() {
         var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
         if (isInput) return;
         e.preventDefault();
+        e.stopPropagation();
         toggleBrowserSpeakerMute();
-    });
+    }, true);
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
     const chatInput = document.getElementById('chat-input');

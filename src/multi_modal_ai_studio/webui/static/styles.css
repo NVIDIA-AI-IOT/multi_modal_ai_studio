@@ -3125,9 +3125,14 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     font-size: 1rem;
 }
 
-/* Speaker (TTS) mute button: highlight when muted */
+/* Speaker (TTS) mute button: filled reddish background + white icon when muted */
 .icon-btn.speaker-btn-muted {
-    color: #bd0f40;
+    background: #bd0f40;
+    border-color: #bd0f40;
+    color: #ffffff;
+}
+.icon-btn.speaker-btn-muted svg {
+    stroke: #ffffff;
 }
 
 .icon-btn:hover {
