@@ -5,6 +5,13 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT"
+
+# So tests can import multi_modal_ai_studio without pip install -e .
+export PYTHONPATH="${ROOT}/src:${PYTHONPATH:-}"
+
 echo "Running quick tests (unit, excluding slow)..."
 echo ""
 
