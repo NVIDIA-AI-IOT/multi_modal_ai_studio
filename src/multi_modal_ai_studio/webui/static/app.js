@@ -74,6 +74,10 @@ const state = {
     voicePcmNode: null,
     /** Push-to-talk: when true, server does not feed mic to ASR (waveform still sent and displayed) */
     micMuted: false,
+    /** When true, browser TTS output is muted (gain 0). Pipeline keeps running; only speaker is silenced. Toggle with Q. */
+    browserSpeakerMuted: false,
+    /** GainNode for browser TTS; all TTS BufferSources connect through this so Q can mute/unmute without stopping playback. */
+    ttsGainNode: null,
     /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
     liveSessionStartTime: 0,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
@@ -6543,6 +6547,11 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         state.ttsNextStartTime = 0;
     }
     const ctx = state.ttsAudioContext;
+    if (!state.ttsGainNode) {
+        state.ttsGainNode = ctx.createGain();
+        state.ttsGainNode.connect(ctx.destination);
+        state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
+    }
     const numSamples = samples.length;
     const buffer = ctx.createBuffer(1, numSamples, sampleRate);
     const ch = buffer.getChannelData(0);
@@ -6555,7 +6564,7 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         state.ttsNextStartTime = startTime + duration;
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.connect(ctx.destination);
+        source.connect(state.ttsGainNode);
         source.start(startTime);
         if (!state.activeTtsSources) state.activeTtsSources = [];
         state.activeTtsSources.push(source);
@@ -6656,6 +6665,12 @@ function toggleMicMute() {
         renderTimeline(); // redraw so user waveform shows gray when muted
     }
     updateMicMutePreviewButton();
+}
+
+/** Toggle browser speaker mute (TTS). Pipeline keeps running; only the browser output is silenced. For demo: talk over TTS with Q. */
+function toggleBrowserSpeakerMute() {
+    state.browserSpeakerMuted = !state.browserSpeakerMuted;
+    if (state.ttsGainNode) state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
 }
 
 function stopSessionRecording() {
@@ -6988,6 +7003,17 @@ function setupEventHandlers() {
         e.preventDefault();
         if (state.sessionState === 'setup') startSessionRecording();
         else if (state.sessionState === 'live') stopSessionRecording();
+    });
+
+    // Keyboard shortcut: Q toggles browser speaker mute (TTS only; pipeline keeps running)
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'q' && e.key !== 'Q') return;
+        var active = document.activeElement;
+        var tag = active ? active.tagName : '';
+        var isInput = active && (tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable);
+        if (isInput) return;
+        e.preventDefault();
+        toggleBrowserSpeakerMute();
     });
 
     // Chat text input (when Mic = None - Text Only): send on button or Enter
