@@ -56,6 +56,12 @@ const state = {
     ttsAudioContext: null,
     /** Next start time for TTS chunk scheduling (context time) */
     ttsNextStartTime: 0,
+    /** Active TTS BufferSource nodes (browser speaker) for barge-in stop */
+    activeTtsSources: [],
+    /** Consecutive asr_partial count for barge-in trigger 'partial' */
+    bargeInPartialCount: 0,
+    /** True after barge-in stopped TTS; ignore further tts_audio until next tts_start */
+    ttsPlaybackStoppedByBargeIn: false,
     /** MediaStream used for voice pipeline mic (may be same as previewStream) */
     voiceMicStream: null,
     /** Selected browser microphone deviceId (from enumerateDevices); null = use browser default */
@@ -5726,7 +5732,29 @@ function handleVoiceWsMessage(ev) {
                         if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
                 state.liveAsrInterimText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                         syncFullscreenOverlays();
+                // Barge-in (partial trigger): stop frontend TTS after N consecutive partials with text
+                var app = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
+                if (app.barge_in_enabled && app.barge_in_trigger === 'partial') {
+                    var txt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
+                    if (txt.length > 0) {
+                        state.bargeInPartialCount = (state.bargeInPartialCount || 0) + 1;
+                        var need = Math.max(1, Math.min(20, parseInt(app.barge_in_partial_count, 10) || 3));
+                        if (state.bargeInPartialCount >= need) {
+                            stopTtsPlayback();
+                            state.bargeInPartialCount = 0;
+                        }
+                    } else {
+                        state.bargeInPartialCount = 0;
+                    }
+                }
             } else if (evt.event_type === 'asr_final') {
+                state.bargeInPartialCount = 0;
+                // Barge-in (final trigger): stop frontend TTS when user final transcript arrives
+                var appFinal = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
+                if (appFinal.barge_in_enabled && appFinal.barge_in_trigger !== 'partial') {
+                    var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
+                    if (finalTxt.length > 0) stopTtsPlayback();
+                }
                         if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
                     var ft = evt.timestamp != null ? Number(evt.timestamp) : null;
                             if (typeof ft === 'number' && !isNaN(ft))
@@ -5774,6 +5802,9 @@ function handleVoiceWsMessage(ev) {
         } else if (msg.type === 'tts_start') {
             state.firstTtsPlayTimeThisResponse = null;
             state.earliestTtsPlayTimeAboveThreshold = null;
+            state.activeTtsSources = [];
+            state.bargeInPartialCount = 0;
+            state.ttsPlaybackStoppedByBargeIn = false;
             if (isServerSpeakerSelected()) state.ttsNextStartTime = -1;
             if (state.ttsAudioContext) {
                 if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
@@ -5805,7 +5836,7 @@ function handleVoiceWsMessage(ev) {
             }
             if (isServerSpeakerSelected()) {
                 recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000, skipSegmentPush);
-            } else {
+            } else if (!state.ttsPlaybackStoppedByBargeIn) {
                 playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments);
             }
         } else if (msg.type === 'session_saved' && msg.session_id) {
@@ -6062,6 +6093,7 @@ function handleVoiceWsClose(ev) {
         stopVoiceMicStream();
     vlmStopCapture();  // Stop VLM frame capture
         if (state.sessionState === 'live') {
+            stopTtsPlayback();
             stopLiveSystemStatsPoll();
             if (state.liveTimelineRafId != null) {
                 cancelAnimationFrame(state.liveTimelineRafId);
@@ -6101,6 +6133,9 @@ function startSessionRecording() {
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
+        state.activeTtsSources = [];
+        state.bargeInPartialCount = 0;
+        state.ttsPlaybackStoppedByBargeIn = false;
         state.liveAudioAmplitudeHistory = [];
         state._userAmplitudeSmoothBuf = [];
         state.pendingServerMicAmplitude = [];
@@ -6157,6 +6192,9 @@ function startSessionRecording() {
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
         state.ttsNextStartTime = 0;
+        state.activeTtsSources = [];
+        state.bargeInPartialCount = 0;
+        state.ttsPlaybackStoppedByBargeIn = false;
         state.liveAudioAmplitudeHistory = [];
         state._userAmplitudeSmoothBuf = [];
         state.pendingServerMicAmplitude = [];
@@ -6482,6 +6520,24 @@ function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
     }
 }
 
+/** Stop all scheduled TTS playback (barge-in). Stops every source in activeTtsSources and resets schedule. */
+function stopTtsPlayback() {
+    if (!state.activeTtsSources || !state.activeTtsSources.length) return;
+    try {
+        for (var i = 0; i < state.activeTtsSources.length; i++) {
+            var s = state.activeTtsSources[i];
+            if (s && typeof s.stop === 'function') {
+                try { s.stop(0); } catch (e) { }
+            }
+        }
+    } catch (e) { }
+    state.activeTtsSources = [];
+    state.ttsNextStartTime = 0;
+    state.ttsPlaybackStoppedByBargeIn = true;
+    var ctx = state.ttsAudioContext;
+    if (ctx && typeof ctx.currentTime === 'number') state.ttsNextStartTime = ctx.currentTime;
+}
+
 /** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push from PCM; first/earliest set below when serverAmplitudeSegments provided.
  * serverAmplitudeSegments: optional array of { startTime?, endTime?, amplitude } from server; we use amplitude but assign startTime/endTime from when we schedule playback (client session time) so purple aligns with audio. */
 function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments) {
@@ -6509,6 +6565,8 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         source.buffer = buffer;
         source.connect(ctx.destination);
         source.start(startTime);
+        if (!state.activeTtsSources) state.activeTtsSources = [];
+        state.activeTtsSources.push(source);
         var nowSec = Date.now() / 1000;
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
@@ -6611,6 +6669,7 @@ function toggleMicMute() {
 function stopSessionRecording() {
     if (state.sessionState !== 'live') return;
 
+    stopTtsPlayback();
     stopLiveSystemStatsPoll();
 
     if (state.liveTimelineRafId != null) {
