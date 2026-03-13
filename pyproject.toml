@@ -65,12 +65,11 @@ Documentation = "https://github.com/yourusername/multi-modal-ai-studio/tree/main
 Repository = "https://github.com/yourusername/multi-modal-ai-studio"
 Issues = "https://github.com/yourusername/multi-modal-ai-studio/issues"
 
-[tool.setuptools]
-packages = ["multi_modal_ai_studio"]
-package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
-multi_modal_ai_studio = ["server/static/**/*"]
+multi_modal_ai_studio = ["webui/static/**/*"]
 
 [tool.black]
 line-length = 100
