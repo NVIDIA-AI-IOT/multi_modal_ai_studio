@@ -131,8 +131,11 @@
                                 STOP
                             </button>
                         </div>
-                        <!-- Top-right controls: Mirror + Fullscreen (like Live VLM WebUI) -->
+                        <!-- Top-right controls: Speaker (TTS) + Mirror + Fullscreen -->
                         <div class="fullscreen-controls" id="fullscreen-controls">
+                            <button type="button" class="fullscreen-btn speaker-fullscreen-btn" id="speaker-toggle-fullscreen-btn" title="Speaker on (TTS) — click or press Q to mute">
+                                <i data-lucide="volume-2" class="lucide-inline"></i>
+                            </button>
                             <button type="button" class="fullscreen-btn mirror-btn" id="mirror-video-btn" onclick="toggleVideoMirror()" title="Mirror video">
                                 <i data-lucide="flip-horizontal" class="lucide-inline"></i>
                             </button>
