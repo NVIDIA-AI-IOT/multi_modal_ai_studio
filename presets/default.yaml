@@ -46,7 +46,7 @@ llm:
     Think step-by-step inside <think> tags, then write your final answer immediately
     after </think>. The final answer MUST be exactly one descriptive sentence — no
     lists, no paragraphs, no tags.'
-  vision_include_history: true
+  include_conversation_history: true
   scheme: openai
 tts:
   backend: riva
