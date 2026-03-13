@@ -45,8 +45,8 @@ docs/*.md
 !docs/audio_pipeline.md
 !docs/plan-ui-improvement-collapsible-config.md
 !docs/VLM_SETUP.md
-!docs/THIRD_PARTY_DEPENDENCIES.md
 !docs/third_party_dependencies.md
+!docs/todo_barge_in_server_speaker.md
 *.log
 # Session storage: ignore all except committed example sessions
 sessions/*
