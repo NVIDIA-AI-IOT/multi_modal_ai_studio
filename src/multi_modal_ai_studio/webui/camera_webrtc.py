@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 """
 WebRTC server-side camera stream: capture /dev/video0 (or device) on the server
 and send it to the browser as a WebRTC video track so the client can use <video> natively.

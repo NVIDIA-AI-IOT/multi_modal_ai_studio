@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 name: "OpenAI Realtime"
 description: "OpenAI Realtime API for low-latency voice interaction"
 
