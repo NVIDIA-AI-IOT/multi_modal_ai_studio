@@ -39,14 +39,8 @@ ENV/
 Thumbs.db
 
 # Project specific
+# Private planning/development notes (single-developer, per-session)
 docs/cursor/
-docs/*.md
-!docs/asr_model_for_multi_utterance.md
-!docs/audio_pipeline.md
-!docs/plan-ui-improvement-collapsible-config.md
-!docs/VLM_SETUP.md
-!docs/THIRD_PARTY_DEPENDENCIES.md
-!docs/third_party_dependencies.md
 *.log
 # Session storage: ignore all except committed example sessions
 sessions/*

@@ -4,7 +4,7 @@ This document dissects the internal logic and architecture of Multi-modal AI Stu
 
 **Scope**: Main application flow with ASR and TTS on RIVA, WebUI, and support for browser vs server-side (USB/ALSA) audio devices. Realtime API path is noted where it diverges.
 
-- **PCM path trace (refactored)**: For a step-by-step trace of how **Browser PCM** and **Server USB mic** flow through the pipeline, see [pcm_pipeline_trace.md](pcm_pipeline_trace.md). Per-chunk handling is **refactored**: both inputs use the same **`_feed_pcm_preview_only`** (preview) and **`_feed_pcm_to_pipeline`** (live) in `voice_pipeline.py`; no per-mic duplication.
+- **PCM path trace (refactored)**: For a step-by-step trace of how **Browser PCM** and **Server USB mic** flow through the pipeline, see [audio_pcm_pipeline_traced.md](audio_pcm_pipeline_traced.md). Per-chunk handling is **refactored**: both inputs use the same **`_feed_pcm_preview_only`** (preview) and **`_feed_pcm_to_pipeline`** (live) in `voice_pipeline.py`; no per-mic duplication.
 
 ---
 
@@ -93,9 +93,9 @@ src/multi_modal_ai_studio/
 
 ## 2. High-level data flow
 
-**Diagram 1 — System context (one box per “system”)**
+**Diagram 1 — System context (one box per "system")**
 
-- **Browser**: User; captures mic (WebRTC), plays TTS, shows timeline/chat; sends config + PCM (or “start_session” for server mic); on Stop sends `system_stats`, `tts_playback_segments`, `audio_amplitude_history`, `ttl_bands`.
+- **Browser**: User; captures mic (WebRTC), plays TTS, shows timeline/chat; sends config + PCM (or "start_session" for server mic); on Stop sends `system_stats`, `tts_playback_segments`, `audio_amplitude_history`, `ttl_bands`.
 - **Web server (aiohttp)**: Serves static UI; REST for sessions, devices, health, presets; WebSockets: `/ws/voice`, `/ws/mic-preview`, `/ws/camera-webrtc`.
 - **Voice pipeline (server)**: One per `/ws/voice` connection: normalizes config, creates Session + Timeline, runs either **Classic (Riva ASR → LLM → Riva TTS)** or **Realtime (OpenAI Realtime WebSocket)**; records events into Session; on disconnect/stop merges client payload into session and saves JSON to `session_dir`.
 - **Riva (gRPC)**: ASR and TTS services (host:port).
@@ -118,7 +118,7 @@ src/multi_modal_ai_studio/
                                               TTS PCM → Browser (base64) and/or Server speaker (ALSA)
 ```
 
-For how PCM gets into this pipeline (Browser Mic vs Server USB mic, preview vs live, and the shared **`_feed_pcm_preview_only`** / **`_feed_pcm_to_pipeline`** helpers), see [pcm_pipeline_trace.md](pcm_pipeline_trace.md) **§5.1** (Browser Mic) and **§5.2** (Server Mic) and their Mermaid diagrams.
+For how PCM gets into this pipeline (Browser Mic vs Server USB mic, preview vs live, and the shared **`_feed_pcm_preview_only`** / **`_feed_pcm_to_pipeline`** helpers), see [audio_pcm_pipeline_traced.md](audio_pcm_pipeline_traced.md) **§5.1** (Browser Mic) and **§5.2** (Server Mic) and their Mermaid diagrams.
 
 ### 2.1 Standard ways to draw browser, server, and WebSocket
 
@@ -126,14 +126,14 @@ There are two commonly accepted diagram types for this kind of architecture; use
 
 | Purpose | Diagram type | What to show |
 |--------|---------------|--------------|
-| **Structure** (what talks to what) | **Context/container diagram** (e.g. [C4 model](https://c4model.com/)) | One box per “system”: *User* → *Browser* (or “Web client”) ↔ *Web server* (e.g. “server.py” / “Multi-modal AI Studio”) ↔ *Riva*, *LLM API*, etc. Label each link with the **protocol**: `HTTPS`, `WebSocket /ws/voice`, `gRPC`, `HTTP`. For WebSocket, a single bidirectional link labeled “WebSocket” is standard. |
+| **Structure** (what talks to what) | **Context/container diagram** (e.g. [C4 model](https://c4model.com/)) | One box per "system": *User* → *Browser* (or "Web client") ↔ *Web server* (e.g. "server.py" / "Multi-modal AI Studio") ↔ *Riva*, *LLM API*, etc. Label each link with the **protocol**: `HTTPS`, `WebSocket /ws/voice`, `gRPC`, `HTTP`. For WebSocket, a single bidirectional link labeled "WebSocket" is standard. |
 | **Behavior** (message order over time) | **Sequence diagram** (UML or [Mermaid](https://mermaid.js.org/syntax/sequenceDiagram.html)) | **Lifelines**: Browser (client), Server. **Messages**: (1) HTTP GET for page/static; (2) WebSocket handshake (HTTP Upgrade → 101 Switching Protocols); (3) first message (e.g. `config`); (4) bidirectional messages (async: use dashed arrow or open arrowhead in UML). This makes it clear the WebSocket is a persistent, full-duplex channel after the handshake. |
 
 **Conventions that are widely used:**
 
-- **Client vs server**: Draw “Browser” or “Web client” on the left, “Server” or “Web server” (you can label it “server.py” or “Voice pipeline”) on the right. In C4, the browser is often a “container” (e.g. “Web Browser – HTML/JS”) and the app is another container (“Web application – Python/aiohttp”).
-- **WebSocket**: Either show as one **bidirectional** connection labeled “WebSocket” (structure), or as a **sequence**: HTTP Upgrade request → 101 response, then a note or frame “WebSocket channel” with request/response or event messages inside (behavior).
-- **REST vs WebSocket**: Use two links from Browser to Server if you need both: “HTTPS (REST)” and “WebSocket (/ws/voice)”.
+- **Client vs server**: Draw "Browser" or "Web client" on the left, "Server" or "Web server" (you can label it "server.py" or "Voice pipeline") on the right. In C4, the browser is often a "container" (e.g. "Web Browser – HTML/JS") and the app is another container ("Web application – Python/aiohttp").
+- **WebSocket**: Either show as one **bidirectional** connection labeled "WebSocket" (structure), or as a **sequence**: HTTP Upgrade request → 101 response, then a note or frame "WebSocket channel" with request/response or event messages inside (behavior).
+- **REST vs WebSocket**: Use two links from Browser to Server if you need both: "HTTPS (REST)" and "WebSocket (/ws/voice)".
 
 **Tools you can adopt:**
 
@@ -142,7 +142,7 @@ There are two commonly accepted diagram types for this kind of architecture; use
 | **[Mermaid](https://mermaid.js.org/)** | Text in repo (e.g. `.md`) | Version-controlled, renders in GitHub/GitLab, VS Code; sequence + C4-style possible | Sequence diagrams, simple context; paste into PPT via export or screenshot |
 | **[PlantUML](https://www.plantuml.com/)** | Text | Standard UML, many diagram types, export to PNG/SVG | Sequence, component, deployment |
 | **draw.io (diagrams.net)** | XML or cloud | Drag-and-drop, good for workshops; can import into Lucidchart | Context/container boxes, ad-hoc flows |
-| **Lucidchart** | Cloud | Collaboration, templates, export | Same as draw.io; label connectors “WebSocket”, “HTTPS” |
+| **Lucidchart** | Cloud | Collaboration, templates, export | Same as draw.io; label connectors "WebSocket", "HTTPS" |
 
 **Minimal Mermaid example (sequence) for our WebSocket:**
 
@@ -209,9 +209,9 @@ You can paste the Mermaid block into any Markdown that supports Mermaid (GitHub,
 
 **Diagram 4 — Config flow**
 
-- Box “Frontend state” → sends `config` (first WS message) and optional `start_session.config`.
-- Box “voice_pipeline” → `_normalize_frontend_config` → `SessionConfig.from_dict` → `Session(config)`.
-- Box “Session” → `session.config` used by backends and devices; saved in `session.to_dict()`.
+- Box "Frontend state" → sends `config` (first WS message) and optional `start_session.config`.
+- Box "voice_pipeline" → `_normalize_frontend_config` → `SessionConfig.from_dict` → `Session(config)`.
+- Box "Session" → `session.config` used by backends and devices; saved in `session.to_dict()`.
 
 ---
 
@@ -221,14 +221,14 @@ You can paste the Mermaid block into any Markdown that supports Mermaid (GitHub,
 - **Timeline** (`core/timeline.py`): List of `TimelineEvent` (timestamp, event_type, lane, data, optional start_time, end_time, amplitude, source). Lanes: SYSTEM, AUDIO, SPEECH, LLM, TTS.
 - **Key event types**: `session_start`, `user_speech_end`, `asr_partial`, `asr_final`, `llm_start`, `llm_first_token`, `llm_complete`, `tts_start`, `tts_first_audio`, `tts_complete`, `audio_amplitude` (source `user` or `tts`).
 - **Turns**: Each ASR final triggers a turn: `session.start_turn` → LLM → TTS → `session.end_turn`. `end_turn` uses `timeline.calculate_component_latencies(turn_id)` and stores TTL and component latencies on the turn.
-- **TTL override**: If client sends `ttl_bands` on stop, server calls `session.apply_ttl_bands()` so turn latencies use client-computed “first TTS sound” per turn (single source of truth for TTL in saved session).
+- **TTL override**: If client sends `ttl_bands` on stop, server calls `session.apply_ttl_bands()` so turn latencies use client-computed "first TTS sound" per turn (single source of truth for TTL in saved session).
 
 **Diagram 5 — Session and timeline (server)**
 
-- Box “Session” containing: Config, Timeline (events), Turns (with latencies), optional system_stats, tts_playback_segments, audio_amplitude_history, ttl_bands.
-- Arrow: “Events” from Voice pipeline → Timeline (add_event / add_audio_amplitude).
-- Arrow: “On stop” from Client → Session (merge stats, segments, amplitude history, ttl_bands).
-- Arrow: Session → “session_dir / {id}.json” (save).
+- Box "Session" containing: Config, Timeline (events), Turns (with latencies), optional system_stats, tts_playback_segments, audio_amplitude_history, ttl_bands.
+- Arrow: "Events" from Voice pipeline → Timeline (add_event / add_audio_amplitude).
+- Arrow: "On stop" from Client → Session (merge stats, segments, amplitude history, ttl_bands).
+- Arrow: Session → "session_dir / {id}.json" (save).
 
 ---
 
@@ -240,15 +240,15 @@ These are the main places where the same or related data is maintained in more t
 
 - **Server**: For every PCM chunk (browser or server capture), the **refactored** path uses **`_feed_pcm_preview_only`** or **`_feed_pcm_to_pipeline`**; the live path computes RMS → 0–100 amplitude and calls `session.timeline.add_audio_amplitude(..., source="user")` or `source="tts"`. Amplitude is stored **in the timeline** as events.
 - **Client**: Client also keeps `liveAudioAmplitudeHistory` and `liveTtsAmplitudeHistory` (from `user_amplitude` and from TTS playback). On stop it sends them as `audio_amplitude_history` and `tts_playback_segments`. Server stores them on the session and saves to JSON.
-- **Replay**: UI uses both `session.audio_amplitude_history` and timeline events (`event_type === 'audio_amplitude'`) and merges them for “full coverage” (see comment in app.js around “Merge session audio_amplitude_history with timeline user amplitude events”).
+- **Replay**: UI uses both `session.audio_amplitude_history` and timeline events (`event_type === 'audio_amplitude'`) and merges them for "full coverage" (see comment in app.js around "Merge session audio_amplitude_history with timeline user amplitude events").
 - **Duplication**: User amplitude exists in (1) server timeline events and (2) client `audio_amplitude_history`. TTS amplitude exists in (1) server timeline events and (2) client `tts_playback_segments`. Refactor option: treat server timeline as the single source and drop client amplitude history, or clearly define one as canonical and the other as optional/legacy.
 
 ### 6.2 TTL (time to first audio)
 
 - **Server**: `timeline.calculate_component_latencies(turn_id)` computes TTL from events (e.g. `user_speech_end` → `tts_first_audio`). Stored in `turn.latencies["ttl"]`.
-- **Client**: Builds `liveTtlBands` from “first TTS sound” per turn (e.g. first `audio_amplitude` with source tts in the timeline or from playback). Sends as `ttl_bands` on stop.
+- **Client**: Builds `liveTtlBands` from "first TTS sound" per turn (e.g. first `audio_amplitude` with source tts in the timeline or from playback). Sends as `ttl_bands` on stop.
 - **Override**: Server calls `session.apply_ttl_bands()` so saved session metrics use client `ttl_bands` as the source of truth for TTL.
-- **Duplication**: TTL is computed both from server timeline and from client; saved file uses client’s notion. Refactor option: compute TTL only on server from timeline (e.g. first `tts_first_audio` or first TTS `audio_amplitude` per turn) and stop sending/using `ttl_bands`, or document client TTL as the intended source and stop computing TTL from server events for display.
+- **Duplication**: TTL is computed both from server timeline and from client; saved file uses client's notion. Refactor option: compute TTL only on server from timeline (e.g. first `tts_first_audio` or first TTS `audio_amplitude` per turn) and stop sending/using `ttl_bands`, or document client TTL as the intended source and stop computing TTL from server events for display.
 
 ### 6.3 Session recording (timeline vs client payload)
 
@@ -259,7 +259,7 @@ These are the main places where the same or related data is maintained in more t
 ### 6.4 Config (frontend vs server)
 
 - **Frontend**: Keeps UI state (selected devices, presets, form values) and sends a single `config` object (and optionally `start_session.config`).
-- **Server**: Normalizes and stores `SessionConfig`; does not re-query frontend except at connection and optional start_session. Session file stores `config` from server’s view.
+- **Server**: Normalizes and stores `SessionConfig`; does not re-query frontend except at connection and optional start_session. Session file stores `config` from server's view.
 - **Duplication**: Minimal: frontend is the editor; server is the canonical instance after normalization. Device labels / types can be merged from client in `start_session` to avoid loss when switching to server speaker.
 
 ---
@@ -268,11 +268,11 @@ These are the main places where the same or related data is maintained in more t
 
 **Diagram 6 — Audio I/O**
 
-- **Microphone**  
-  - Browser: getUserMedia → ScriptProcessorNode / AudioWorklet → PCM → WebSocket binary.  
-  - Server USB/ALSA: `devices/capture.py` → `start_server_mic_capture(alsa|usb, device, queue, stop_event)` → thread that runs `arecord` (ALSA) or pyaudio (USB). The pipeline reads from the capture queue in **`server_capture_consumer()`** and, per chunk, calls either **`_feed_pcm_preview_only()`** (preview, before start_session) or **`_feed_pcm_to_pipeline()`** (live: ASR + timeline + user_amplitude). Same two helpers are used for browser mic in **`receive_loop()`** (binary PCM → preview or pipeline). See [pcm_pipeline_trace.md](pcm_pipeline_trace.md) for the refactored flow and line references.
-- **Speaker**  
-  - Browser: TTS base64 chunks → decode → AudioContext → destination.  
+- **Microphone**
+  - Browser: getUserMedia → ScriptProcessorNode / AudioWorklet → PCM → WebSocket binary.
+  - Server USB/ALSA: `devices/capture.py` → `start_server_mic_capture(alsa|usb, device, queue, stop_event)` → thread that runs `arecord` (ALSA) or pyaudio (USB). The pipeline reads from the capture queue in **`server_capture_consumer()`** and, per chunk, calls either **`_feed_pcm_preview_only()`** (preview, before start_session) or **`_feed_pcm_to_pipeline()`** (live: ASR + timeline + user_amplitude). Same two helpers are used for browser mic in **`receive_loop()`** (binary PCM → preview or pipeline). See [audio_pcm_pipeline_traced.md](audio_pcm_pipeline_traced.md) for the refactored flow and line references.
+- **Speaker**
+  - Browser: TTS base64 chunks → decode → AudioContext → destination.
   - Server USB/ALSA: `devices/playback.py` → `start_server_speaker_playback(device, sample_rate)` → aplay subprocess; pipeline writes TTS PCM to process stdin.
 - **Session start**: With server mic, pipeline waits for client `start_session` before calling `session.start()` and setting `pipeline_live`; until then, capture is fed to **`_feed_pcm_preview_only`** (user_amplitude only). After start_session, chunks go to **`_feed_pcm_to_pipeline`** (ASR + timeline + user_amplitude).
 
@@ -297,7 +297,7 @@ Use these as labels for boxes and flows:
 3. **HTTP/WS routes**: List of GET/PATCH routes and WS paths with handler names.
 4. **Config flow**: Frontend config → normalize → SessionConfig → Session; optional start_session merge.
 5. **Session contents**: Config, Timeline (events), Turns, system_stats, tts_playback_segments, audio_amplitude_history, ttl_bands; save to session_dir.
-6. **Duplication**: Two-way arrow “Amplitude: server timeline ↔ client amplitude_history/tts_playback_segments”; “TTL: server calculate_component_latencies ↔ client ttl_bands”.
+6. **Duplication**: Two-way arrow "Amplitude: server timeline ↔ client amplitude_history/tts_playback_segments"; "TTL: server calculate_component_latencies ↔ client ttl_bands".
 7. **Audio I/O**: Browser mic/speaker vs Server ALSA/pyaudio (capture + playback) with labels for WebSocket vs queue/subprocess.
 
 ---
@@ -315,7 +315,7 @@ Use these as labels for boxes and flows:
 
 - **Realtime ASR (transcription-only)**: New backend `backends/asr/realtime.py` implementing ASRBackend using the OpenAI-compatible Realtime API for audio→transcript only; pipeline branch so classic path can run Realtime ASR + existing LLM (openai.py) + Riva TTS. Not implemented yet; marked for later.
 
-- **RIVA availability check (server-side)**: On startup or when serving the voice UI, probe the configured RIVA endpoint (e.g. `localhost:50051`) to see if the server is reachable and which services are up (ASR and/or TTS, e.g. via gRPC health or list services). If RIVA is unreachable or a service is missing, deactivate the RIVA option for ASR and/or TTS in the UI (or show a clear “RIVA unavailable” state) so users don’t select RIVA and then hit connection errors. Improves UX when RIVA isn’t running or was started with only ASR or only TTS.
+- **RIVA availability check (server-side)**: On startup or when serving the voice UI, probe the configured RIVA endpoint (e.g. `localhost:50051`) to see if the server is reachable and which services are up (ASR and/or TTS, e.g. via gRPC health or list services). If RIVA is unreachable or a service is missing, deactivate the RIVA option for ASR and/or TTS in the UI (or show a clear "RIVA unavailable" state) so users don't select RIVA and then hit connection errors. Improves UX when RIVA isn't running or was started with only ASR or only TTS.
 
 ---
 
