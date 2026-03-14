@@ -346,6 +346,7 @@ class OpenAILLMBackend(LLMBackend):
         """List available models from the LLM API.
 
         Attempts to detect models from Ollama's native API or OpenAI endpoint.
+        We probe /api/tags first (Ollama can run on any port), then fall back to /v1/models.
 
         Returns:
             List of model names, or empty list if detection fails
@@ -396,6 +397,13 @@ class OpenAILLMBackend(LLMBackend):
     # Vision content formatting — one method per API format
     # -----------------------------------------------------------------
 
+    def _api_supports_video_url(self) -> bool:
+        """True if the API is known to support video_url. Ollama only supports image_url."""
+        base = (self.api_base or "").lower()
+        if ":11434" in base or "ollama" in base:
+            return False
+        return True
+
     def _build_vision_content(
         self,
         image_data_urls: List[str],
@@ -404,15 +412,14 @@ class OpenAILLMBackend(LLMBackend):
     ) -> list:
         """Build the multimodal ``content`` list for a user message.
 
-        Two paths controlled purely by the user's ``vision_video_encode`` config:
-        - True  → encode frames as MP4 video (``video_url``), fall back to images on failure
-        - False → send individual images (``image_url``)
-
-        No backend detection, no sub-sampling, no hardcoded caps.
+        Two paths: video (video_url) when enabled and API supports it, else images (image_url).
+        Ollama does not support video_url and returns 400; we send image_url only for it.
         """
         content: list = [{"type": "text", "text": prompt}]
 
-        use_video = bool(getattr(self.config, "vision_video_encode", False))
+        use_video = bool(getattr(self.config, "vision_video_encode", False)) and self._api_supports_video_url()
+        if getattr(self.config, "vision_video_encode", False) and not self._api_supports_video_url():
+            self.logger.debug("Vision: API does not support video_url (e.g. Ollama); using image_url only")
 
         if use_video and len(image_data_urls) >= 2:
             video_url = _encode_images_to_video_base64(

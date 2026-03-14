@@ -361,15 +361,18 @@ Ollama serves on `http://localhost:11434/v1` by default. In the UI, set:
 
 vLLM provides high-throughput serving with GPU acceleration. Example with Cosmos-Reason2 for vision:
 
-**[Cosmos-Reason2-8B on Jetson AI Lab](https://www.jetson-ai-lab.com/models/cosmos-reason2-8b/)** — full setup including model download and platform-specific Docker images.
+**[Cosmos-Reason2-8B on Jetson AI Lab](https://www.jetson-ai-lab.com/models/cosmos-reason2-8b/)** — full setup including model download and platform-specific Docker images. The FP8 model is downloaded from NGC; you need an NGC account with access to the **nim** org (and often the **nvidia** team). If NGC download fails, see [NGC Cosmos model download fails](#ngc-cosmos-model-download-fails-completed-0-failed-n) below.
 
 Quick reference for Jetson Thor (after downloading the FP8 model per the link above):
 
 ```bash
 export MODEL_PATH="${HOME}/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8"
 
+mkdir -p ~/.cache/vllm
+sudo sysctl -w vm.drop_caches=3
 sudo docker run -it --rm --runtime=nvidia --network host \
   -v $MODEL_PATH:/models/cosmos-reason2-8b:ro \
+  -v ${HOME}/.cache/vllm:/root/.cache/vllm \
   ghcr.io/nvidia-ai-iot/vllm:0.14.0-r38.3-arm64-sbsa-cu130-24.04 \
   vllm serve /models/cosmos-reason2-8b \
     --served-model-name nvidia/cosmos-reason2-8b-fp8 \
@@ -378,12 +381,151 @@ sudo docker run -it --rm --runtime=nvidia --network host \
     --reasoning-parser qwen3 \
     --media-io-kwargs '{"video": {"num_frames": -1}}' \
     --enable-prefix-caching \
-    --port 8000
+    --port 8010
 ```
 
+The second volume `-v ${HOME}/.cache/vllm:/root/.cache/vllm` persists vLLM’s **torch.compile cache** on the host. The first run compiles kernels and writes them there; later runs reuse the cache and start faster. Create `~/.cache/vllm` **before** the first run (as in the example above) so it is owned by your user; otherwise the container may create it as root and you can hit permission issues later.
+
+`vm.drop_caches=3` frees **system (CPU) memory** (page cache, etc.); it does **not** free **GPU VRAM**. If you start vLLM a second time while the first container is still running, the GPU has no free VRAM and vLLM will fail with "Free memory on device cuda:0 (...) is less than desired". **Stop the first vLLM container** (e.g. Ctrl+C or `docker stop`) so the driver releases GPU memory, then start again.
+
+> **Port conflict with Riva**: The **Riva container** exposes ports **8000–8002** (and 8888, 50051). If you run both Riva and vLLM on the same machine, use a different vLLM port so they don't clash. The example above uses `--port 8010`; in the app set **LLM API Base** to `http://localhost:8010/v1`. If Riva is not running, `--port 8000` is fine.
+>
 > **Memory tuning**: On shared-memory systems (Jetson), lower `--gpu-memory-utilization` to leave room for the OS, Riva, and the application. On discrete GPUs with dedicated VRAM, `0.8` is safe.
 >
 > **Desktop GPU / x86_64**: Use `vllm/vllm-openai:latest` or `nvcr.io/nvidia/vllm:latest` instead of the Jetson image.
+
+### vLLM troubleshooting
+
+#### `OSError: [Errno 98] Address already in use`
+
+vLLM fails at startup with `sock.bind(addr) OSError: [Errno 98] Address already in use` when the API port (default **8000**) is already taken—for example by a previous vLLM run, another container, or another service.
+
+**1. Find what is using the port**
+
+```bash
+# Default vLLM port is 8000; use your --port if different
+lsof -i :8000
+# or
+ss -tlnp | grep 8000
+# or
+fuser 8000/tcp
+```
+
+If **`ss` shows port 8000 in LISTEN but `lsof` and `fuser` show no PID**, the process is usually **inside a Docker container**. List containers and look for one that has port 8000:
+
+```bash
+docker ps -a
+# Look for a container with 0.0.0.0:8000->8000/tcp or similar in PORTS
+```
+
+**2. Free the port or use another**
+
+- **Riva is using 8000** (container `riva-speech` exposes 8000–8002): Don't stop Riva. Start vLLM on a different port and point the app to it:
+  ```bash
+  # In the vllm serve command, use e.g.:
+  --port 8010
+
+  # In Multi-modal AI Studio, set LLM API Base to:
+  # http://localhost:8010/v1
+  ```
+- **Another Docker container** (e.g. leftover vLLM): Stop and remove it if you don't need it:
+  ```bash
+  docker ps -a
+  docker stop <container_id_or_name>
+  docker rm <container_id_or_name>
+  # or: docker rm -f <container_id_or_name>
+  ```
+- **Process on the host** (when lsof/fuser show a PID): Kill it:
+  ```bash
+  kill <PID>
+  # or: fuser -k 8000/tcp
+  ```
+
+**3. Use a different port**
+
+If you need to keep whatever is on 8000, start vLLM with `--port 8010` (or another free port) and set the app's **LLM API Base** to `http://localhost:8010/v1`.
+
+#### `ValueError: Free memory on device cuda:0 (...) is less than desired GPU memory utilization`
+
+Another process (often a **previous vLLM container**) is still using the GPU, so there isn’t enough free VRAM. Stop the other process: if the first vLLM was started in another terminal, press **Ctrl+C** there, or run `docker ps` and `docker stop <container_id>`. The driver may take **30–60 seconds** to release VRAM after the container exits; run `nvidia-smi` and wait until free memory is back to normal before starting vLLM again. `vm.drop_caches=3` only frees system RAM, not GPU VRAM.
+
+#### `ValidationError: Invalid repository ID or local directory specified: '/models/...'`
+
+vLLM fails during startup with a message like **Invalid repository ID or local directory specified: '/models/cosmos-reason2-8b'** when the model path inside the container is missing, wrong, or doesn't contain the expected config files.
+
+**1. Check the model directory on the host**
+
+Ensure `MODEL_PATH` points to the directory that contains the model files (e.g. `config.json` for Hugging Face–style models):
+
+```bash
+echo $MODEL_PATH
+ls -la "$MODEL_PATH"
+# Must contain at least: config.json (and usually model weights, tokenizer files, etc.)
+```
+
+If the directory is missing or empty, download the model first (see [Cosmos-Reason2-8B on Jetson AI Lab](https://www.jetson-ai-lab.com/models/cosmos-reason2-8b/) or your model’s instructions).
+
+**2. Check the volume mount**
+
+The `docker run` command must mount that host path into the container path vLLM uses:
+
+```bash
+# Example: host path -> container path /models/cosmos-reason2-8b
+-v $MODEL_PATH:/models/cosmos-reason2-8b:ro
+```
+
+- Use an **absolute path** for `MODEL_PATH` (e.g. `$HOME/.cache/huggingface/hub/...`), not a relative one, so the mount is correct from any working directory.
+- The path after the colon must match the path you pass to `vllm serve` (e.g. `vllm serve /models/cosmos-reason2-8b`).
+
+**3. Verify the container sees the files**
+
+Run a quick check that the mounted directory exists and has a config inside the container:
+
+```bash
+docker run --rm -v "$MODEL_PATH:/models/cosmos-reason2-8b:ro" \
+  ghcr.io/nvidia-ai-iot/vllm:0.14.0-r38.3-arm64-sbsa-cu130-24.04 \
+  ls -la /models/cosmos-reason2-8b
+```
+
+You should see `config.json` and other model files. If the list is empty or "No such file or directory", fix `MODEL_PATH` or the mount path and try again.
+
+#### Fix Hugging Face cache permissions (root-owned)
+
+If `~/.cache/huggingface` or `~/.cache/huggingface/hub` is owned by **root** (e.g. created by [jetson-containers](https://github.com/dusty-nv/jetson-containers) or another tool running with `sudo`), commands run as your user (NGC CLI, Python, Hugging Face libraries) will get **Permission denied** when writing there.
+
+**Fix:** make the cache tree owned by the current user:
+
+```bash
+sudo chown -R $USER:$USER ~/.cache/huggingface
+```
+
+Then retry the download or command that was failing. To avoid the issue in the future, create the directory as your user before any tool that might run as root: `mkdir -p ~/.cache/huggingface/hub`.
+
+#### NGC Cosmos model download fails (Completed: 0, Failed: N)
+
+If `ngc registry model download-version "nim/nvidia/cosmos-reason2-8b:1208-fp8-static-kv8" --dest ~/.cache/huggingface/hub` fails with **Completed: 0, Failed: 14**:
+
+- **Permission denied when writing files:** If the debug log shows `[Errno 13] Permission denied` for paths under `~/.cache/huggingface/hub/`, the destination is likely **root-owned**. See [Fix Hugging Face cache permissions (root-owned)](#fix-hugging-face-cache-permissions-root-owned) above: run `sudo chown -R $USER:$USER ~/.cache/huggingface`, then retry. If you only need to fix the model subdirectory: `sudo chown -R $USER:$USER ~/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8` (and ensure the parent `hub` is writable). Alternatively remove the partial dir and re-download: `rm -rf ~/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8` then run the same `ngc registry model download-version ...` again, or use a different `--dest` you can write to.
+
+- **403 or auth/org errors:** If the debug log shows **403** or org/entitlement errors (rather than Permission denied), try setting the effective org to **nvidia**. The NGC CLI uses **`NGC_CLI_ORG`** from the environment. Example for `~/.bashrc`:
+  ```bash
+  export NGC_CLI_ORG=nvidia
+  # optional: export NGC_CLI_API_KEY=<your-key>
+  ```
+  Then in the same shell (or a new terminal after `source ~/.bashrc`):
+  ```bash
+  ngc config current   # check effective org
+  ngc registry model download-version "nim/nvidia/cosmos-reason2-8b:1208-fp8-static-kv8" --dest ~/.cache/huggingface/hub
+  export MODEL_PATH="${HOME}/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8"
+  ```
+  If the env var is not picked up, use `--org nvidia` on the command (next bullet). The download often succeeds with the default org (e.g. with `NGC_CLI_ORG` unset); only try `nvidia` if you see 403 or org/entitlement errors.
+
+- **Explicit org/team:** `ngc registry model download-version "nim/nvidia/cosmos-reason2-8b:1208-fp8-static-kv8" --org nim --team nvidia --dest ~/.cache/huggingface/hub`
+
+- **Browser:** If you can download from the [catalog page](https://catalog.ngc.nvidia.com/orgs/nim/teams/nvidia/models/cosmos-reason2-8b?version=1208-fp8-static-kv8) in the browser, save the files into `~/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8/` and set `MODEL_PATH` to that directory.
+
+- **Different machine:** If the same API key and `NGC_CLI_ORG=nvidia` work on one host but not another, the failing host may differ by network, NGC CLI version, or backend. Run with **`--debug`** to see the underlying error: `ngc --debug registry model download-version "nim/nvidia/cosmos-reason2-8b:1208-fp8-static-kv8" --dest ~/.cache/huggingface/hub`. Reliable workaround: **copy the model from the working machine** (e.g. from jat03): `rsync -avz jetson@jat03-iso384:~/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8/ ~/.cache/huggingface/hub/cosmos-reason2-8b_v1208-fp8-static-kv8/` then set `MODEL_PATH` to that directory.
+
 
 ### Option C: OpenAI API
 
@@ -395,9 +537,9 @@ No local setup needed. Set **API Base** to `https://api.openai.com/v1`, provide 
 # Ollama
 curl -s http://localhost:11434/v1/models | python3 -m json.tool
 
-# vLLM
-curl -s http://localhost:8000/v1/models | python3 -m json.tool
-curl -s http://localhost:8000/health && echo "READY" || echo "NOT READY"
+# vLLM (use your port if different, e.g. 8010 when Riva uses 8000)
+curl -s http://localhost:8010/v1/models | python3 -m json.tool
+curl -s http://localhost:8010/health && echo "READY" || echo "NOT READY"
 ```
 
 ### Using Vision
