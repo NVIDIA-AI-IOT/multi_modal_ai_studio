@@ -15,6 +15,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 CHANNELS = 1
+PLAYBACK_RETRIES = 3
+PLAYBACK_RETRY_DELAY = 0.3  # seconds between retries
+
+_RED = "\033[91m"
+_RESET = "\033[0m"
 
 
 def start_server_speaker_playback(
@@ -27,6 +32,9 @@ def start_server_speaker_playback(
     Caller must write 16-bit LE mono PCM to the returned process's stdin,
     then close stdin when done so aplay exits. Use plughw when device is
     hw:X,Y so ALSA can do sample-rate conversion if needed.
+
+    Retries up to PLAYBACK_RETRIES times for transient device errors
+    (e.g. USB audio device momentarily unavailable).
 
     Args:
         device: ALSA device (e.g. hw:2,0).
@@ -52,28 +60,46 @@ def start_server_speaker_playback(
         "-c", str(CHANNELS),
         "-t", "raw",
     ]
-    logger.info("ALSA playback starting: %s (device=%s, rate=%s)", " ".join(cmd), device, sample_rate)
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        # If same device is used for mic (arecord) and speaker, aplay may exit with "Device or resource busy"
-        time.sleep(0.15)
-        if proc.poll() is not None:
-            err = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "") or "(no stderr)"
-            logger.warning("aplay exited immediately for %s: %s", device, err)
+
+    last_err = ""
+    for attempt in range(1, PLAYBACK_RETRIES + 1):
+        logger.info("ALSA playback starting: %s (device=%s, rate=%s)", " ".join(cmd), device, sample_rate)
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            time.sleep(0.15)
+            if proc.poll() is not None:
+                last_err = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "") or "(no stderr)"
+                if attempt < PLAYBACK_RETRIES:
+                    logger.error(
+                        "%saplay exited immediately for %s (attempt %d/%d): %s — retrying in %.1fs%s",
+                        _RED, device, attempt, PLAYBACK_RETRIES, last_err, PLAYBACK_RETRY_DELAY, _RESET,
+                    )
+                    time.sleep(PLAYBACK_RETRY_DELAY)
+                    continue
+                logger.error("%saplay exited immediately for %s after %d attempts: %s%s", _RED, device, attempt, last_err, _RESET)
+                return None
+            if proc_holder is not None:
+                proc_holder.append(proc)
+            return proc
+        except FileNotFoundError:
+            logger.error("%saplay not found; cannot play to ALSA device %s%s", _RED, device, _RESET)
             return None
-        if proc_holder is not None:
-            proc_holder.append(proc)
-        return proc
-    except FileNotFoundError:
-        logger.warning("aplay not found; cannot play to ALSA device %s", device)
-        return None
-    except Exception as e:
-        logger.warning("Failed to start aplay for %s: %s", device, e)
-        return None
+        except Exception as e:
+            last_err = str(e)
+            if attempt < PLAYBACK_RETRIES:
+                logger.error(
+                    "%sFailed to start aplay for %s (attempt %d/%d): %s — retrying in %.1fs%s",
+                    _RED, device, attempt, PLAYBACK_RETRIES, e, PLAYBACK_RETRY_DELAY, _RESET,
+                )
+                time.sleep(PLAYBACK_RETRY_DELAY)
+                continue
+            logger.error("%sFailed to start aplay for %s after %d attempts: %s%s", _RED, device, attempt, e, _RESET)
+            return None
+    return None
 
 
 def stop_server_speaker_playback(proc: Optional[subprocess.Popen]) -> None:

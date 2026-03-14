@@ -14,6 +14,26 @@ import logging
 from pathlib import Path
 
 
+class _ColorFormatter(logging.Formatter):
+    """Logging formatter that adds ANSI colors to the level name."""
+
+    _COLORS = {
+        logging.DEBUG:    "\033[90m",   # grey
+        logging.INFO:     "",           # default
+        logging.WARNING:  "\033[93m",   # yellow
+        logging.ERROR:    "\033[91m",   # red
+        logging.CRITICAL: "\033[91;1m", # bold red
+    }
+    _RESET = "\033[0m"
+
+    def format(self, record: logging.LogRecord) -> str:
+        color = self._COLORS.get(record.levelno, "")
+        msg = super().format(record)
+        if color:
+            return f"{color}{msg}{self._RESET}"
+        return msg
+
+
 def main():
     """Main entry point for CLI."""
     from multi_modal_ai_studio import __version__
@@ -154,11 +174,10 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
 
     args = parser.parse_args()
 
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    # Configure logging with colored output
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_ColorFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.basicConfig(level=getattr(logging, args.log_level), handlers=[_handler])
 
     logger = logging.getLogger(__name__)
     logger.info("Multi-modal AI Studio starting...")

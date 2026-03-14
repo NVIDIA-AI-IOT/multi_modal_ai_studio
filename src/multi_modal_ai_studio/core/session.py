@@ -307,6 +307,7 @@ class Session:
             "audio_amplitude_history": getattr(self, "audio_amplitude_history", None) or [],
             "ttl_bands": getattr(self, "ttl_bands", None) or [],
             "app_version": getattr(self, "app_version", None) or __version__,
+            "capture_health": getattr(self, "capture_health", None),
         }
 
     def save(self, path: Path) -> None:
