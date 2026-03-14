@@ -65,6 +65,11 @@ sudo apt-get install -y portaudio19-dev
 
 ### 2. Virtual Environment
 
+> **Note:** If `python3 -m venv` fails with "No module named venv", install it first:
+> ```bash
+> sudo apt install python3.12-venv
+> ```
+
 ```bash
 # Create venv
 python3 -m venv .venv

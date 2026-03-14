@@ -27,12 +27,11 @@ llm:
   max_tokens: 512
   minimal_output: false
   stream: true
-  system_prompt: You are a helpful voice assistant.
+  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
   extra_request_body: ''
   cheap_model: nvidia/cosmos-reason2-8b-fp8
   enable_vision: true
-  vision_system_prompt: You are a vision assistant. Give ONE short sentence answers
-    only. Be direct. No explanations. Use plain text only — no markdown or formatting.
+  vision_system_prompt: "You are a helpful voice and vision assistant. Give ONE short sentence answers only. Be direct. Plain text only, no markdown, no bullet points, no emojis."
   vision_detail: auto
   vision_frames: 10
   vision_quality: 0.8

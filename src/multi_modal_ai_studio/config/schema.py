@@ -139,7 +139,7 @@ class LLMConfig:
     temperature: float = 0.7
     max_tokens: int = 512
     minimal_output: bool = False
-    system_prompt: str = "You are a helpful voice assistant."
+    system_prompt: str = "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
     extra_request_body: Optional[str] = None
     top_p: float = 1.0
     frequency_penalty: float = 0
@@ -153,7 +153,7 @@ class LLMConfig:
     # When enable_vision=True, camera frames are captured and sent with each prompt
     # -------------------------------------------------------------------------
     enable_vision: bool = False  # Set True for VLM models (Cosmos-Reason, LLaVA, GPT-4V, etc.)
-    vision_system_prompt: str = "You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations."
+    vision_system_prompt: str = "You are a helpful voice and vision assistant. Give ONE short sentence answers only. Be direct. Plain text only, no markdown, no bullet points, no emojis."
     vision_detail: Literal["low", "high", "auto"] = "auto"  # OpenAI vision detail level
     vision_frames: int = 4       # Frames per turn (1=single at speech end, 2-10=during speech)
     vision_quality: float = 0.7  # JPEG quality (0.3=fast/small, 1.0=high quality)

@@ -23,18 +23,41 @@ def _can_capture_video(device_path: str) -> bool:
     
     Some cameras create multiple /dev/video* nodes where only one is the actual
     capture device (others are metadata/control devices).
+    
+    Uses V4L2 ioctl to check capabilities without opening the device exclusively,
+    so it doesn't conflict with active camera streams.
     """
+    import fcntl
+    import struct
+
+    VIDIOC_QUERYCAP = 0x80685600
+    V4L2_CAP_VIDEO_CAPTURE = 0x00000001
+
     try:
-        import cv2
-        cap = cv2.VideoCapture(device_path)
-        if not cap.isOpened():
-            return False
-        ret, _ = cap.read()
-        cap.release()
-        return ret
+        fd = open(device_path, "rb")
+        try:
+            buf = bytearray(104)
+            fcntl.ioctl(fd, VIDIOC_QUERYCAP, buf)
+            capabilities = struct.unpack_from("<I", buf, 84)[0]
+            device_caps_field = struct.unpack_from("<I", buf, 88)[0]
+            caps = device_caps_field if device_caps_field else capabilities
+            return bool(caps & V4L2_CAP_VIDEO_CAPTURE)
+        finally:
+            fd.close()
+    except (OSError, IOError) as e:
+        logger.debug("V4L2 capability check for %s: %s", device_path, e)
+        # If ioctl fails (e.g. device busy), fall back to checking sysfs
+        try:
+            dev_name = Path(device_path).name
+            index_path = Path(f"/sys/class/video4linux/{dev_name}/index")
+            if index_path.exists():
+                return index_path.read_text().strip() == "0"
+        except Exception:
+            pass
+        return True
     except Exception as e:
         logger.debug("Check capture capability for %s: %s", device_path, e)
-        return False
+        return True
 
 
 def list_local_cameras() -> List[Dict[str, str]]:

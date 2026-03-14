@@ -20,10 +20,10 @@ llm:
   temperature: 0.3          # Low temp — critical for precise, consistent vision responses
   max_tokens: 512           # Hard cap on reasoning+answer combined; model uses ~150-275 total
   history_turns: 0           # Disabled — text-only history anchors VLM to prior answers
-  system_prompt: "You analyze live video from the user's camera. Answer based on what you see. Be precise and concise — 1-2 short sentences only."
+  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
   enable_vision: true
-  vision_system_prompt: "You analyze live video from the user's camera. Answer based on what you see. Be precise and concise — 1-2 short sentences only."
-  vision_frames: 100         # Video mode: request many frames for temporal video encoding
+  vision_system_prompt: "You are a helpful voice and vision assistant. Give ONE short sentence answers only. Be direct. Plain text only, no markdown, no bullet points, no emojis."
+  vision_frames: 30         # Video mode: request many frames for temporal video encoding
   vision_detail: auto
   vision_quality: 0.8
   vision_max_width: 768

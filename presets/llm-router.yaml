@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-name: "Cosmos-Reason2 (TensorRT Edge LLM)"
-description: "Cosmos-Reason2 on TensorRT Edge LLM backend — optimized edge inference with video input"
+name: "LLM Router (MoM + Local VLM)"
+description: "Remote MoM model via LLM router with local Edge LLM as utility model for titles and vision"
 
 asr:
   scheme: riva
@@ -15,13 +15,11 @@ asr:
 
 llm:
   scheme: openai
-  api_base: http://localhost:58010/v1
-  model: /workspace/cosmos_onnx/visual-fp16
+  api_base: http://10.110.51.30:8801/v1
+  model: MoM
   temperature: 0.3
   max_tokens: 512
   history_turns: 0
-  enable_reasoning: false
-  extra_request_body: '{"chat_template_kwargs": {"enable_thinking": false}}'
   system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
   enable_vision: true
   vision_system_prompt: "You are a helpful voice and vision assistant. Give ONE short sentence answers only. Be direct. Plain text only, no markdown, no bullet points, no emojis."
@@ -31,6 +29,7 @@ llm:
   vision_max_width: 768
   vision_buffer_fps: 5.0
   vision_video_encode: true
+  enable_reasoning: true
 
 tts:
   scheme: riva
