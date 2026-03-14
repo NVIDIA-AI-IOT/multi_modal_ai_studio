@@ -18,7 +18,7 @@ llm:
   model: llama3.1:8b  # Larger, more capable model
   temperature: 0.5    # Lower temperature for more consistent responses
   max_tokens: 1024    # Allow longer, detailed responses
-  system_prompt: "You are a knowledgeable voice assistant. Provide thorough, accurate responses."
+  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
 
 tts:
   scheme: riva

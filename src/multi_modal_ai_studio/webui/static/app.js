@@ -5074,15 +5074,27 @@ function startPreviewStream(options) {
         var streamUrl = getApiBase() + '/api/camera/stream?device=' + deviceParam;
         var wsUrl = (getApiBase().replace(/^https/, 'wss').replace(/^http/, 'ws') || ('wss://' + window.location.host)) + '/ws/camera-webrtc?device=' + deviceParam;
         function fallbackToMjpeg() {
-            if (mjpegFeed) {
-                mjpegFeed.src = streamUrl;
-                mjpegFeed.style.display = 'block';
+            // Close WebRTC so the server releases the camera device before MJPEG opens it
+            if (state.cameraWebrtcWs) {
+                try { state.cameraWebrtcWs.close(); } catch (e) {}
+                state.cameraWebrtcWs = null;
+            }
+            if (state.cameraWebrtcPc) {
+                try { state.cameraWebrtcPc.close(); } catch (e) {}
+                state.cameraWebrtcPc = null;
             }
             if (videoFeed) {
                 videoFeed.src = '';
                 videoFeed.srcObject = null;
                 videoFeed.style.display = 'none';
             }
+            // Small delay to let the server release the camera device
+            setTimeout(function () {
+                if (mjpegFeed) {
+                    mjpegFeed.src = streamUrl;
+                    mjpegFeed.style.display = 'block';
+                }
+            }, 500);
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
         }
         var pc = new RTCPeerConnection();

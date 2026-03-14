@@ -19,7 +19,7 @@ llm:
   model: gpt-4o-realtime-preview
   temperature: 0.7
   max_tokens: 512
-  system_prompt: "You are a helpful voice assistant."
+  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
 
 tts:
   scheme: openai-realtime

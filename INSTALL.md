@@ -65,6 +65,11 @@ sudo apt-get install -y portaudio19-dev
 
 ### 2. Virtual Environment
 
+> **Note:** If `python3 -m venv` fails with "No module named venv", install it first:
+> ```bash
+> sudo apt install python3.12-venv
+> ```
+
 ```bash
 # Create venv
 python3 -m venv .venv
@@ -391,6 +396,11 @@ The second volume `-v ${HOME}/.cache/vllm:/root/.cache/vllm` persists vLLM’s *
 > **Port conflict with Riva**: The **Riva container** exposes ports **8000–8002** (and 8888, 50051). If you run both Riva and vLLM on the same machine, use a different vLLM port so they don't clash. The example above uses `--port 8010`; in the app set **LLM API Base** to `http://localhost:8010/v1`. If Riva is not running, `--port 8000` is fine.
 >
 > **Memory tuning**: On shared-memory systems (Jetson), lower `--gpu-memory-utilization` to leave room for the OS, Riva, and the application. On discrete GPUs with dedicated VRAM, `0.8` is safe.
+>
+> **GPU memory cleanup**: If vLLM fails to start with an OOM error after stopping another GPU container, free cached memory first:
+> ```bash
+> sudo sysctl -w vm.drop_caches=3
+> ```
 >
 > **Desktop GPU / x86_64**: Use `vllm/vllm-openai:latest` or `nvcr.io/nvidia/vllm:latest` instead of the Jetson image.
 
