@@ -1397,10 +1397,11 @@ async def _run_voice_pipeline(
                 last_tts_amplitude_time = 0.0
                 tts_amplitude_interval = 0.05
                 server_speaker_proc = None
+                _speaker_fail_until = 0.0  # backoff: skip aplay retries until this epoch
                 tts_consumer_error: Optional[Exception] = None
 
                 async def _send_tts_audio(chunk):
-                    nonlocal tts_first_sent, ts_tts_first, last_tts_amplitude_time, server_speaker_proc
+                    nonlocal tts_first_sent, ts_tts_first, last_tts_amplitude_time, server_speaker_proc, _speaker_fail_until
                     if not tts_first_sent:
                         ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                         ref_label = "llm_first_token" if use_stream_tts else "llm_complete"
@@ -1414,11 +1415,12 @@ async def _run_voice_pipeline(
                     )
                     _out_device = session.config.devices.audio_output_device
                     if _use_speaker and chunk.audio:
-                        if server_speaker_proc is None:
+                        if server_speaker_proc is None and time.time() >= _speaker_fail_until:
                             server_speaker_proc = start_server_speaker_playback(_out_device, chunk.sample_rate)
                             if server_speaker_proc is None:
+                                _speaker_fail_until = time.time() + 3.0
                                 logger.warning(
-                                    "Server speaker playback could not start for %s; check aplay and device",
+                                    "Server speaker playback could not start for %s; check aplay and device (suppressing retries for 3s)",
                                     _out_device,
                                 )
                         if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:

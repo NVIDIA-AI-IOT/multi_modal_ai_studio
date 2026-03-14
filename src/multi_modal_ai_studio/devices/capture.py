@@ -22,6 +22,11 @@ CHUNK_SAMPLES = 2048
 CHUNK_BYTES = CHUNK_SAMPLES * 2
 
 
+MAX_CAPTURE_RETRIES = 8
+RETRY_BACKOFF_BASE = 0.5  # seconds; doubles each attempt up to a cap
+RETRY_BACKOFF_MAX = 5.0
+
+
 def _capture_alsa(
     device: str,
     out_queue: "queue.Queue[Optional[bytes]]",
@@ -31,63 +36,104 @@ def _capture_alsa(
     """Capture from ALSA device via arecord; put PCM chunks in out_queue. Runs in thread.
     Uses plughw when device is hw:X,Y so ALSA can do sample-rate conversion (many USB mics only support 48kHz).
     If proc_holder is a list, the subprocess is stored as proc_holder[0] so the caller can terminate it to release the device quickly.
+
+    Auto-restarts arecord up to MAX_CAPTURE_RETRIES times when the device
+    disappears transiently (e.g. USB bus contention with a camera).
     """
     dev = (device or "default").strip()
     if dev.startswith("hw:") and not dev.startswith("plughw:"):
         dev = "plug" + dev
         logger.debug("ALSA using %s for rate conversion (requested 16kHz)", dev)
     cmd = ["arecord", "-D", dev, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", str(CHANNELS), "-t", "raw"]
-    logger.info("ALSA capture starting: %s (device=%s)", " ".join(cmd), device)
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=CHUNK_BYTES,
-        )
-        if proc_holder is not None:
-            proc_holder.append(proc)
-    except FileNotFoundError:
-        logger.warning("arecord not found; cannot capture from ALSA device %s", device)
-        out_queue.put(None)
-        return
-    except Exception as e:
-        logger.warning("Failed to start arecord for %s: %s", device, e)
-        out_queue.put(None)
-        return
-    first_chunk = True
-    try:
-        while not stop_event.is_set() and proc.poll() is None:
-            chunk = proc.stdout.read(CHUNK_BYTES)
-            if not chunk:
-                try:
-                    err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
-                    if err:
-                        logger.warning("ALSA capture read empty (device %s). arecord stderr: %s", device, err)
-                    else:
-                        logger.warning("ALSA capture read returned empty (device %s); check device/sample rate", device)
-                except Exception:
-                    logger.warning("ALSA capture read returned empty (device %s)", device)
-                break
-            if first_chunk:
-                first_chunk = False
-                logger.info("ALSA first PCM chunk received from %s (%d bytes); pipeline will get amplitude", device, len(chunk))
-            out_queue.put(chunk)
-    except Exception as e:
-        logger.warning("ALSA capture read error for %s: %s", device, e)
-    finally:
+
+    retries = 0
+    ever_produced_chunk = False
+
+    while not stop_event.is_set():
+        logger.info("ALSA capture starting: %s (device=%s)", " ".join(cmd), device)
         try:
-            proc.terminate()
-            proc.wait(timeout=1)
-        except Exception:
-            pass
-        out_queue.put(None)
-        if proc_holder is not None and proc_holder and proc_holder[0] is proc:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=CHUNK_BYTES,
+            )
+            if proc_holder is not None:
+                if proc_holder:
+                    proc_holder.clear()
+                proc_holder.append(proc)
+        except FileNotFoundError:
+            logger.warning("arecord not found; cannot capture from ALSA device %s", device)
+            out_queue.put(None)
+            return
+        except Exception as e:
+            logger.warning("Failed to start arecord for %s: %s", device, e)
+            if retries >= MAX_CAPTURE_RETRIES:
+                logger.error("ALSA capture giving up after %d retries for %s", retries, device)
+                out_queue.put(None)
+                return
+            retries += 1
+            delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
+            logger.info("ALSA capture retry %d/%d in %.1fs for %s", retries, MAX_CAPTURE_RETRIES, delay, device)
+            stop_event.wait(delay)
+            continue
+
+        first_chunk_this_run = True
+        died_unexpectedly = False
+        try:
+            while not stop_event.is_set() and proc.poll() is None:
+                chunk = proc.stdout.read(CHUNK_BYTES)
+                if not chunk:
+                    try:
+                        err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
+                        if err:
+                            logger.warning("ALSA capture read empty (device %s). arecord stderr: %s", device, err)
+                        else:
+                            logger.warning("ALSA capture read returned empty (device %s); check device/sample rate", device)
+                    except Exception:
+                        logger.warning("ALSA capture read returned empty (device %s)", device)
+                    died_unexpectedly = True
+                    break
+                if first_chunk_this_run:
+                    first_chunk_this_run = False
+                    if not ever_produced_chunk:
+                        logger.info("ALSA first PCM chunk received from %s (%d bytes); pipeline will get amplitude", device, len(chunk))
+                    else:
+                        logger.info("ALSA capture resumed from %s (%d bytes) after retry", device, len(chunk))
+                    retries = 0
+                    ever_produced_chunk = True
+                out_queue.put(chunk)
+        except Exception as e:
+            logger.warning("ALSA capture read error for %s: %s", device, e)
+            died_unexpectedly = True
+        finally:
             try:
-                proc_holder.clear()
+                proc.terminate()
+                proc.wait(timeout=1)
             except Exception:
                 pass
-        if first_chunk:
+            if proc_holder is not None and proc_holder and proc_holder[0] is proc:
+                try:
+                    proc_holder.clear()
+                except Exception:
+                    pass
+
+        if stop_event.is_set():
+            break
+
+        if died_unexpectedly and retries < MAX_CAPTURE_RETRIES:
+            retries += 1
+            delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
+            logger.warning(
+                "ALSA capture died unexpectedly for %s; retry %d/%d in %.1fs",
+                device, retries, MAX_CAPTURE_RETRIES, delay,
+            )
+            stop_event.wait(delay)
+            continue
+
+        if died_unexpectedly:
+            logger.error("ALSA capture giving up after %d retries for %s", retries, device)
+        elif first_chunk_this_run and not ever_produced_chunk:
             try:
                 err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
                 if err:
@@ -96,6 +142,9 @@ def _capture_alsa(
                     logger.warning("ALSA capture ended without sending any chunks (device %s); check arecord -D %s", device, dev)
             except Exception:
                 logger.warning("ALSA capture ended without sending any chunks (device %s)", device)
+        break
+
+    out_queue.put(None)
 
 
 def _capture_pyaudio(

@@ -3562,10 +3562,13 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     const llmCompletes = timeline.filter(e => e.event_type === 'llm_complete').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
     // LLM: prefill (start → first token) and generate (first token → complete). Like Live RIVA WebUI; first-token boundary from pipeline.
+    // Match llm_first_token and llm_complete to each llm_start by timestamp
+    // range (not array index) so missing events don't shift all subsequent turns.
     llmStarts.forEach((startEv, i) => {
-        const firstToken = llmFirstTokens[i];
-        const complete = llmCompletes[i];
         const startTime = startEv.timestamp || 0;
+        const nextStartTime = (i + 1 < llmStarts.length) ? (llmStarts[i + 1].timestamp || 0) : Infinity;
+        const complete = llmCompletes.find(e => (e.timestamp || 0) >= startTime && (e.timestamp || 0) < nextStartTime) || null;
+        const firstToken = llmFirstTokens.find(e => (e.timestamp || 0) >= startTime && (e.timestamp || 0) < nextStartTime) || null;
         const endTime = (complete && (complete.timestamp || 0)) || startTime;
         if (firstToken && (firstToken.timestamp || 0) > startTime) {
             inferredRectangles.push({
@@ -3740,9 +3743,12 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     });
 
     // TTS lane: one magenta rectangle per turn from tts_start to tts_complete (tts_first_audio shown as thin vertical line later)
+    // Match by timestamp range (not array index) so missing events don't misalign.
     ttsStarts.forEach((startEv, i) => {
-        const complete = ttsCompletes[i];
-        if (complete && (complete.timestamp || 0) > (startEv.timestamp || 0)) {
+        const startTime = startEv.timestamp || 0;
+        const nextStartTime = (i + 1 < ttsStarts.length) ? (ttsStarts[i + 1].timestamp || 0) : Infinity;
+        const complete = ttsCompletes.find(e => (e.timestamp || 0) >= startTime && (e.timestamp || 0) < nextStartTime) || null;
+        if (complete && (complete.timestamp || 0) > startTime) {
             inferredRectangles.push({
                 event_type: 'tts_segment',
                 lane: 'tts',
