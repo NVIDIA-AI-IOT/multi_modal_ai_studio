@@ -174,19 +174,21 @@ class RivaASRBackend(ASRBackend):
 
         self.logger.info("Riva ASR stream started")
 
-    async def send_audio(self, audio_chunk: bytes) -> None:
+    async def send_audio(self, audio_chunk: bytes) -> bool:
         """Send audio chunk for recognition.
 
         Args:
             audio_chunk: Raw PCM audio bytes (16kHz, 16-bit, mono)
 
-        Raises:
-            RuntimeError: If stream not started
+        Returns:
+            True if audio was queued, False if stream is not active (caller should
+            not treat this as fatal — the stream may be restarting).
         """
         if self._sync_audio_queue is None:
-            raise RuntimeError("Stream not started. Call start_stream() first.")
+            return False
 
         self._sync_audio_queue.put(audio_chunk)
+        return True
 
     async def receive_results(self) -> AsyncIterator[ASRResult]:
         """Yield recognition results as they become available.

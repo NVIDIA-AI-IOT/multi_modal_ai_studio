@@ -268,6 +268,7 @@ riva_model_loc="riva-model-repo"  # Docker volume (default)
 # Language/model selection
 asr_acoustic_model="parakeet_1.1b"  # Default for ARM64 v2.24.0
 asr_language_code="en-US"           # ASR language
+asr_accessory_model="silero_diarizer"  # Adds Silero VAD + speaker diarization
 use_asr_streaming_throughput_mode=false  # false=low latency (recommended)
 
 tts_language_code=("multi")           # TTS language
@@ -280,9 +281,17 @@ tts_language_code=("multi")           # TTS language
 - Language codes available: `en-US`, `multi` (multilingual)
 - Pre-optimized for Jetson GPUs (no build step required)
 
+**ASR accessory model** (`asr_accessory_model`):
+- Set to `"silero_diarizer"` to deploy with **Silero VAD** and speaker diarization
+- This makes the `parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer` model available alongside the base `parakeet-1.1b-en-US-asr-streaming`
+- The Silero VAD variant provides better voice activity detection — without it, the base model often clips the beginning of utterances (e.g., "How many monitors do you see?" becomes "monitors do you see") because its default VAD reacts too late to speech onset
+- Only available when `asr_acoustic_model` is `"parakeet_1.1b"`
+- After changing this setting, re-run `riva_init.sh` and `riva_start.sh`
+
 **For Multi-modal AI Studio and Live RIVA WebUI**, recommended settings:
 - Enable ASR + TTS only (NLP/NMT not needed)
 - Use default `parakeet_1.1b` for ASR (best quality/latency balance)
+- Set `asr_accessory_model="silero_diarizer"` for Silero VAD support
 - Keep `use_asr_streaming_throughput_mode=false` for real-time voice apps
 - SSL/TLS can be added later for production deployments
 
