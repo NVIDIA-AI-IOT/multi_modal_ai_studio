@@ -1001,7 +1001,10 @@ async def _run_voice_pipeline(
             return (last_amplitude_time, False, 0.0, 0.0)
         now = time.time() - session.timeline.start_time
         if not mic_muted:
-            await asr.send_audio(pcm_bytes)
+            accepted = await asr.send_audio(pcm_bytes)
+            if not accepted and not getattr(_feed_pcm_to_pipeline, "_warned_dead_stream", False):
+                _feed_pcm_to_pipeline._warned_dead_stream = True
+                logger.warning("[asr] send_audio dropped — ASR stream not active (waiting for auto-restart)")
         amplitudes = _pcm_rms_slices(pcm_bytes, sample_rate=16000, window_s=_amplitude_window_s)
         did_send = False
         amp = 0.0
@@ -1151,13 +1154,19 @@ async def _run_voice_pipeline(
     async def asr_consumer() -> None:
         """Independent ASR task: forward every partial/final to client immediately; enqueue finals for turn_executor.
         Enables barge-in (turn_executor can be cancelled when new final arrives) and avoids phantom partial at tts_complete.
-        On stream end, if we had a partial but no final (e.g. user stopped before VAD), enqueue a synthetic final so one turn runs."""
+        On stream end, if we had a partial but no final (e.g. user stopped before VAD), enqueue a synthetic final so one turn runs.
+
+        Auto-restart: if Riva's gRPC stream dies (idle timeout, server-side limit, or bus contention)
+        and the pipeline has not been stopped, the stream is restarted with exponential backoff."""
         last_asr_final_text: Optional[str] = None
         last_asr_final_ts: Optional[float] = None
         last_partial_text: Optional[str] = None
         last_partial_ts: Optional[float] = None
         asr_received_count = 0
+        _MAX_ASR_RESTARTS = 10
+        _asr_restart_count = 0
         try:
+          while not stopped.is_set():
             async for result in asr.receive_results():
                 if stopped.is_set():
                     break
@@ -1242,16 +1251,51 @@ async def _run_voice_pipeline(
                     asr_consumer._finals_count = finals_count
                     logger.info("[asr] asr_final #%d enqueued for LLM/TTS: %r", finals_count, text[:80])
                     finals_queue.put_nowait(result)
+
+            # --- Inner async-for ended (stream died or returned None) ---
+            if stopped.is_set():
+                break
+
+            _asr_restart_count += 1
+            if _asr_restart_count > _MAX_ASR_RESTARTS:
+                logger.error("[asr] Exceeded max restarts (%d); giving up", _MAX_ASR_RESTARTS)
+                break
+
+            backoff = min(2.0 * _asr_restart_count, 10.0)
+            logger.warning(
+                "[asr] Stream died after %d result(s); restarting (%d/%d) in %.1fs",
+                asr_received_count, _asr_restart_count, _MAX_ASR_RESTARTS, backoff,
+            )
+            try:
+                now_ts = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                session.timeline.add_event(
+                    "asr_stream_restart", Lane.SPEECH,
+                    data={"restart": _asr_restart_count, "prev_results": asr_received_count},
+                )
+                await send_event({
+                    "event_type": "asr_stream_restart",
+                    "lane": "speech",
+                    "data": {"restart": _asr_restart_count, "prev_results": asr_received_count},
+                    "timestamp": now_ts,
+                })
+            except Exception:
+                pass
+
+            await asr.stop_stream()
+            await asyncio.sleep(backoff)
+            if stopped.is_set():
+                break
+            await asr.start_stream()
+            _feed_pcm_to_pipeline._warned_dead_stream = False
+            asr_received_count = 0
+            logger.info("[asr] Stream restarted successfully (%d/%d)", _asr_restart_count, _MAX_ASR_RESTARTS)
+          # --- end while ---
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.exception("asr_consumer error: %s", e)
         finally:
-            logger.info("[asr] Stream ended; received %d ASR result(s) total", asr_received_count)
-            # Only create a synthetic final when the stream had no final at all (e.g. user stopped before
-            # VAD sent a final). Do NOT create one when we already had a final and the last partial is
-            # different (e.g. Riva sent early final "How about computer?" then partials "joke") — that
-            # would create a phantom extra turn; the partial is the tail of the same utterance.
+            logger.info("[asr] Stream ended; received %d ASR result(s) total (restarts=%d)", asr_received_count, _asr_restart_count)
             if last_partial_text and last_asr_final_text is None:
                 try:
                     now_ts = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
@@ -1264,9 +1308,7 @@ async def _run_voice_pipeline(
                     )
                     logger.info("[asr] Stream ended with only partial; enqueueing synthetic final for LLM/TTS: %r", last_partial_text[:80])
                     finals_queue.put_nowait(synthetic)
-                    # Add to timeline so replay/saved session has this final (use partial's time, not stream-end)
                     session.timeline.add_event("asr_final", Lane.SPEECH, data={"text": last_partial_text, "confidence": 1.0})
-                    # Send asr_final to client so UI shows final_transcript (otherwise only partials were sent)
                     await send_event({
                         "event_type": "asr_final",
                         "lane": "speech",
