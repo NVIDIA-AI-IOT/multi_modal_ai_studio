@@ -21,12 +21,56 @@ This guide walks through setting up NVIDIA Riva locally for voice (ASR/TTS). It 
 
 - **Jetson Platform**: Jetson Orin, Thor, AGX Xavier, or newer (ARM64/L4T)
 - **JetPack**: Recent JetPack version (6.0+ recommended)
-- **Docker + NVIDIA Container Toolkit**: Pre-installed on JetPack
+- **Docker + NVIDIA Container Toolkit**: Pre-installed on JetPack. The ARM64 quickstart uses **plain Docker only** (`docker run`, `docker exec`, etc.) — **Docker Compose is not required**.
 - **NGC account with Riva access**: Required for downloading Riva resources
   - Try your account that has Riva entitlements (company or personal)
   - NVIDIA employees: Internal access may require specific team membership
   - External users: May need AI Enterprise trial or proper entitlements
   - **Tip**: If one account doesn't work, try another you have access to
+
+## Configure Docker for GPU (Jetson) — do this first
+
+Riva runs in a container that needs GPU access. On Jetson, Docker must use the **NVIDIA Container Runtime** and be **restarted** after any config change. Doing this once at the start avoids the "container stays Created" / "use --runtime=nvidia instead" errors.
+
+1. **Ensure `/etc/docker/daemon.json` has the NVIDIA runtime and default**
+
+   If the file doesn't exist or is empty, create it. Otherwise merge the `runtimes` and `default-runtime` into your existing config:
+
+   ```json
+   {
+     "runtimes": {
+       "nvidia": {
+         "path": "nvidia-container-runtime",
+         "runtimeArgs": []
+       }
+     },
+     "default-runtime": "nvidia"
+   }
+   ```
+
+   Example (create or edit with sudo):
+
+   ```bash
+   sudo nano /etc/docker/daemon.json
+   ```
+
+2. **Restart Docker so the config is applied**
+
+   **This step is required.** Changes to `daemon.json` do not apply until Docker is restarted.
+
+   ```bash
+   sudo systemctl restart docker
+   ```
+
+3. **Optional: verify GPU access in a container**
+
+   ```bash
+   docker run --rm --runtime=nvidia nvcr.io/nvidia/cuda:13.0.0-runtime-ubuntu24.04 nvidia-smi
+   ```
+
+   You should see your GPU; if not, check NVIDIA Container Toolkit and JetPack install.
+
+Then continue with Part 1 (NGC CLI) below.
 
 ## Part 1: Install NGC CLI
 
@@ -285,30 +329,28 @@ Preparing model repository...
 
 ## Part 6: Start Riva Services (Jetson)
 
+Run from inside the quickstart directory (so `config.sh` is found):
+
 ```bash
 cd riva_quickstart_arm64_v2.24.0
 bash riva_start.sh
 ```
 
-This launches the Riva server via Docker Compose. Services:
-- **riva-speech**: gRPC server on port `50051` (ASR/TTS)
-- **riva-client**: Client container with sample scripts and test files
+This launches the Riva server via **Docker** (the script uses `docker run`; no Docker Compose). One container is started:
+- **riva-speech**: gRPC server on port `50051` (ASR/TTS). A client shell or sample scripts are available separately via `riva_start_client.sh` (see Part 7).
 
 **Note for USB audio**: If using USB microphone/speaker, connect it **before** running `riva_start.sh`. The script will automatically mount it into the container.
 
 ### Verify Deployment
 
 ```bash
-# Check container status
-docker compose ps
+# Check that the riva-speech container is running (name comes from config.sh)
+docker ps -f "name=riva-speech"
 
-# Expected output:
-# NAME                  STATUS
-# riva-speech           Up X minutes
-# riva-client           Up X minutes
-
-# Check logs
-docker compose logs -f riva-speech
+# Check logs if anything looks wrong
+docker logs riva-speech
+# Follow logs in real time:
+docker logs -f riva-speech
 ```
 
 Look for successful startup message:
@@ -340,7 +382,7 @@ riva_streaming_asr_client --list_models
 # 'en-US': 'parakeet-1.1b-en-us-asr-streaming'
 ```
 
-**Note**: Riva 2.24.0 on Jetson defaults to **Parakeet 1.1b**, which is optimized for low-latency streaming ASR. This is the recommended model for real-time voice applications like Live RIVA WebUI.
+**Note**: Riva 2.24.0 on Jetson defaults to **Parakeet 1.1b**, which is optimized for low-latency streaming ASR. This is the recommended model for real-time voice applications (e.g. Multi-modal AI Studio, Live RIVA WebUI).
 
 ### Test Streaming ASR (Primary mode for Parakeet 1.1b)
 
@@ -384,7 +426,7 @@ Throughput: 8.3569e+00 RTFX
 **Streaming ASR is the primary mode for Riva 2.24.0 on Jetson**:
 - Low latency (~100-200ms)
 - Real-time interim results
-- Optimized for conversational AI applications like Live RIVA WebUI
+- Optimized for conversational AI applications (e.g. Multi-modal AI Studio, Live RIVA WebUI)
 
 ### Test with Opus file (WebRTC codec)
 
@@ -456,7 +498,7 @@ This stops and removes containers while preserving downloaded models in the `riv
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Live RIVA WebUI                         │
+│       Voice apps (Multi-modal AI Studio / Live RIVA WebUI)  │
 │  ┌──────────────┐         ┌──────────────┐                  │
 │  │   Browser    │◄───────►│  WebUI       │                  │
 │  │  (WebRTC)    │  WS/RTC │  Server      │                  │
@@ -465,7 +507,7 @@ This stops and removes containers while preserving downloaded models in the `riv
 ├───────────────────────────────────┼─────────────────────────┤
 │                    Docker         │                         │
 │  ┌────────────────────────────────▼───────────────────┐     │
-│  │         riva-speech-api (port 50051)               │     │
+│  │         riva-speech (port 50051)                   │     │
 │  │  ┌────────────┐  ┌────────────┐  ┌────────────┐    │     │
 │  │  │    ASR     │  │    TTS     │  │    NMT     │    │     │
 │  │  │ StreamingR │  │ Synthesize │  │ Translate  │    │     │
@@ -484,11 +526,11 @@ This stops and removes containers while preserving downloaded models in the `riv
 
 ## Part 9: WebRTC and Opus Audio
 
-### Why Opus matters for Live RIVA WebUI
+### Why Opus matters for voice applications
 
-**Opus is WebRTC's standard audio codec** - all modern browsers encode microphone audio as Opus by default. Riva's inclusion of Opus sample files (`/opt/riva/wav/en-US_sample.opus`) confirms it can handle this codec natively.
+**Opus is WebRTC's standard audio codec** — all modern browsers encode microphone audio as Opus by default. Riva's inclusion of Opus sample files (`/opt/riva/wav/en-US_sample.opus`) confirms it can handle this codec natively.
 
-For Live RIVA WebUI, the audio flow will be:
+For Multi-modal AI Studio and Live RIVA WebUI, the audio flow is:
 ```
 Browser (WebRTC) → Opus audio → WebSocket → Bridge → PCM → Riva gRPC → Transcripts
 ```
@@ -506,13 +548,13 @@ NVIDIA provides an **open-source WebSocket ↔ Riva bridge**: [nvidia-riva/webso
 
 **Implementation**: JavaScript/Node.js
 
-For Live RIVA WebUI, we can either:
+For Multi-modal AI Studio and Live RIVA WebUI, options include:
 1. Use the nvidia-riva/websocket-bridge as-is
-2. Build a Python version integrated into our existing async server (reusing Live VLM WebUI's WebRTC scaffolding)
+2. Build a Python version integrated into the existing async server (e.g. reusing Live VLM WebUI's WebRTC scaffolding)
 
-## Next Steps for Live RIVA WebUI
+## Next Steps (Multi-modal AI Studio / Live RIVA WebUI)
 
-1. **Audio Bridge**: Build WebSocket/WebRTC → gRPC adapter
+1. **Audio Bridge**: WebSocket/WebRTC → gRPC adapter
    - Accept Opus audio from browser
    - Decode Opus → PCM (or use Riva's native Opus support)
    - Stream to `riva_asr.StreamingRecognize` gRPC
@@ -526,7 +568,7 @@ For Live RIVA WebUI, we can either:
    - `riva_tts.SynthesizeOnline` gRPC
    - Send audio back to browser via WebRTC
 
-4. **UI**: React/TypeScript frontend
+4. **UI**: Web frontend (e.g. React/TypeScript)
    - Mic capture (WebRTC audio)
    - Live captions overlay
    - Chat transcript panel
@@ -535,6 +577,195 @@ For Live RIVA WebUI, we can either:
 5. **Production**: SSL/TLS, resource limits, monitoring, multi-user support
 
 ## Troubleshooting
+
+### "Waiting for Riva server to load all models... retrying in 10 seconds" (never finishes)
+
+The Riva server container is not becoming healthy within the timeout. The quickstart uses **plain Docker** (no Compose); troubleshoot as follows.
+
+1. **Run from the quickstart directory** (so `config.sh` is loaded)
+   ```bash
+   cd /path/to/riva_quickstart_arm64_v2.24.0
+   bash riva_start.sh
+   ```
+
+2. **Check container status**
+   ```bash
+   docker ps -a -f "name=riva-speech"
+   ```
+   - If **riva-speech** is missing or status is **Exited**: the container failed. Check logs (step 3).
+   - If it is **Up** but the script still retries: health check may be slow (first load can take several minutes), or the server may be failing internally — check logs.
+
+3. **Inspect riva-speech logs**
+   The script suggests: `docker logs riva-speech`. If that shows nothing, see [Health ready check failed and empty logs](#health-ready-check-failed-and-empty-docker-logs-riva-speech).
+   ```bash
+   docker logs riva-speech
+   docker logs --tail=200 riva-speech
+   ```
+   Look for:
+   - **GPU / CUDA errors**: Ensure `nvidia-smi` works and NVIDIA Container Toolkit is installed.
+   - **Model not found / path errors**: Re-run `bash riva_init.sh` and ensure it completed without errors.
+   - **Out of memory**: Jetson may need more swap or fewer models; disable TTS or NLP in `config.sh` to reduce memory.
+
+4. **Restart cleanly**
+   ```bash
+   bash riva_stop.sh
+   bash riva_start.sh
+   ```
+   In another terminal, run `docker logs -f riva-speech` to watch startup output.
+
+### "Health ready check failed" and empty `docker logs riva-speech`
+
+The script suggests `docker logs riva-speech` (the container name is set in `config.sh` as `riva_daemon_speech="riva-speech"`). If that command prints **nothing**, check the container **STATUS** with `docker ps -a -f "name=riva-speech"`:
+
+- **STATUS = Created** → The container was created but **never started** (main process never ran). See [Container stuck in Created](#container-stuck-in-created-never-started) below.
+- **STATUS = Exited** → The process ran then exited; see step 2 below.
+- **STATUS = Up** → Container is running; logs may appear after a short delay, or try `docker logs -f riva-speech`.
+
+1. **Confirm the container exists and its name**
+   ```bash
+   docker ps -a | grep -i riva
+   ```
+   The quickstart creates a container named **riva-speech**. If you see a different name (e.g. from an older run or custom config), use that:
+   ```bash
+   docker logs <container_name_or_id>
+   ```
+
+2. **Container exited immediately**
+   If the container is **Exited**, it may have crashed before writing much. You can still try:
+   ```bash
+   docker logs riva-speech
+   docker logs --tail=200 riva-speech
+   ```
+   Exited containers often keep stdout/stderr; if logs are still empty, the process may have died before any output. Run again and watch in real time:
+   ```bash
+   bash riva_stop.sh
+   bash riva_start.sh
+   ```
+   In a second terminal, as soon as the container starts:
+   ```bash
+   docker logs -f riva-speech
+   ```
+   Look for GPU/CUDA, model path, or OOM errors in the first lines.
+
+### Container stuck in **Created** (never started)
+
+If `docker ps -a -f "name=riva-speech"` shows **STATUS = Created** (and no "Up" time), the container was created by `docker run -d` but the main process never started. There are no logs because the entrypoint hasn't run. Common causes: missing or inaccessible device (e.g. GPU, USB/sound), volume mount failure, or Docker/runtime blocking start.
+
+**Do this:**
+
+1. **Remove the stuck container and try again from the quickstart directory**
+   ```bash
+   docker rm -f riva-speech
+   cd /path/to/riva_quickstart_arm64_v2.24.0
+   bash riva_start.sh
+   ```
+   In a second terminal, watch for the container to go from Created → Up and then stream logs:
+   ```bash
+   watch -n 1 'docker ps -a -f "name=riva-speech"'
+   # When STATUS becomes "Up", run:
+   docker logs -f riva-speech
+   ```
+
+2. **If it stays in Created again**, try starting it manually to see the error:
+   ```bash
+   docker start riva-speech
+   docker logs -f riva-speech
+   ```
+   If `docker start` fails or logs show nothing, inspect the container:
+   ```bash
+   docker inspect riva-speech
+   ```
+   Check **`State.Error`** for the exact message. A very common one on Jetson is below.
+
+4. **If you see: "invoking the NVIDIA Container Runtime Hook directly ... use the NVIDIA Container Runtime (--runtime=nvidia) instead"**
+   See [Riva container stays "Created": use NVIDIA Container Runtime](#riva-container-stays-created-use-nvidia-container-runtime) below.
+
+5. **Verify GPU and devices**
+   The Riva start script mounts `--gpus` and on Tegra also `--device /dev/bus/usb --device /dev/snd`. Ensure:
+   - `nvidia-smi` works and NVIDIA Container Toolkit is installed.
+   - No security profile (e.g. AppArmor) is blocking device access.
+   - If you don't need USB/sound for the server, you could temporarily comment out the extra `--device` flags in `riva_start.sh` to see if the container then starts (for debugging only).
+
+### Container starts then exits immediately (or stays "Created")
+
+If the container goes **Created** and never shows **Up**, or it exits so quickly that `docker logs riva-speech` is empty, the script is hiding the error: it runs `docker run -d ... &> /dev/null`, so all output is discarded. Run the same container **in the foreground** so you see the real error (CUDA, model path, OOM, etc.):
+
+```bash
+cd /path/to/riva_quickstart_arm64_v2.24.0
+source config.sh
+
+# Remove any existing container so we can use the same name
+docker rm -f riva-speech 2>/dev/null
+
+# Same as riva_start.sh but -it (foreground) and no -d; output goes to your terminal
+docker run -it --rm \
+  --init --ipc=host \
+  --gpus "$gpus_to_use" \
+  -p $riva_speech_api_port:$riva_speech_api_port \
+  -p $riva_speech_api_http_port:$riva_speech_api_http_port \
+  -e RIVA_SERVER_HTTP_PORT=$riva_speech_api_http_port \
+  -e "LD_PRELOAD=$ld_preload" \
+  -e "RIVA_API_KEY=$RIVA_API_KEY" \
+  -e "RIVA_API_NGC_ORG=$RIVA_API_NGC_ORG" \
+  -e "RIVA_EULA=$RIVA_EULA" \
+  -v $riva_model_loc:/data \
+  --ulimit memlock=-1 --ulimit stack=67108864 \
+  -p 8000:8000 -p 8001:8001 -p 8002:8002 -p 8888:8888 \
+  $image_speech_api \
+  start-riva --riva-uri=0.0.0.0:$riva_speech_api_port \
+  --asr_service=$service_enabled_asr \
+  --tts_service=$service_enabled_tts \
+  --nlp_service=$service_enabled_nlp
+```
+
+(On Tegra the script also adds `--device /dev/bus/usb --device /dev/snd`; if the command above runs and you need those, add them before `$image_speech_api`.)
+
+- **What you see** is the real failure (e.g. "could not load model", "CUDA error", "No such file", OOM). Fix that and then use `bash riva_start.sh` again.
+- **If it stays in Created** even with this foreground run, the failure is before the process starts (e.g. device or runtime); check `docker events` in another terminal and run the `docker run` above to see the event error.
+
+### Riva container stays "Created": use NVIDIA Container Runtime
+
+If `docker inspect riva-speech` shows in **State.Error** something like:
+
+```text
+invoking the NVIDIA Container Runtime Hook directly (e.g. specifying the docker --gpus flag) is not supported.
+Please use the NVIDIA Container Runtime (e.g. specify the --runtime=nvidia flag) instead: unknown
+```
+
+then Docker on this host is set up to use the **NVIDIA Container Runtime** (full runtime), not the hook used by `--gpus`. The container never starts because the runtime rejects the `--gpus`-based GPU setup.
+
+**Fix A — Configure Docker to use the NVIDIA runtime by default (recommended)**
+Ensure `/etc/docker/daemon.json` has the nvidia runtime and set it as default:
+
+```json
+{
+  "runtimes": {
+    "nvidia": {
+      "path": "nvidia-container-runtime",
+      "runtimeArgs": []
+    }
+  },
+  "default-runtime": "nvidia"
+}
+```
+
+If the file already has `"runtimes": { "nvidia": ... }` but no `"default-runtime": "nvidia"`, add that. Then:
+
+```bash
+sudo systemctl restart docker
+```
+
+After that, run `bash riva_start.sh` again.
+
+**Fix B — Workaround: use `--runtime=nvidia` in the start script**
+If you prefer not to change the default runtime, patch `riva_start.sh` so the container uses the nvidia runtime on Tegra instead of `--gpus`:
+
+1. Open `riva_start.sh` in your quickstart directory.
+2. Find the line: `--gpus '"'$gpus_to_use'"' \`
+3. Replace it with: `--runtime=nvidia \`
+   (This is safe for Jetson/Tegra; the nvidia runtime gives the container GPU access.)
+
+Then run `bash riva_start.sh` again.
 
 ### "403 Forbidden" when downloading quickstart
 
@@ -552,7 +783,7 @@ For Live RIVA WebUI, we can either:
 
 - **Verify GPU**: `nvidia-smi` should show your GPU
 - **Check toolkit**: `docker run --rm --gpus all ubuntu nvidia-smi`
-- **Review logs**: `docker compose logs riva-speech-api`
+- **Review logs**: `docker logs riva-speech` (container name from `config.sh`: `riva_daemon_speech`)
 
 ### Models downloading very slowly
 
@@ -570,7 +801,7 @@ For Live RIVA WebUI, we can either:
 ---
 
 **Document Status**: Updated for Jetson ARM64 deployment (x86 support discontinued)
-**Last Updated**: January 2025
+**Last Updated**: March 2025
 **Riva Version**: 2.24.0 (ARM64)
 **Platform**: NVIDIA Jetson Thor (JAT03)
 

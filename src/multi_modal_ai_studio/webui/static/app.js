@@ -1295,7 +1295,7 @@ function renderLLMConfig(config, readonly = false) {
                         <div class="api-presets-menu" id="presetsMenu" style="display: none;">
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:11434/v1', 'Ollama')"><strong>Ollama</strong><span>http://localhost:11434/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8000/v1', 'vLLM')"><strong>vLLM</strong><span>http://localhost:8000/v1</span></div>
-                            <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8003/v1', 'vLLM (8003)')"><strong>vLLM (8003)</strong><span>http://localhost:8003/v1</span></div>
+                            <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:8010/v1', 'vLLM (8010)')"><strong>vLLM (8010)</strong><span>http://localhost:8010/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:30000/v1', 'SGLang')"><strong>SGLang</strong><span>http://localhost:30000/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://localhost:58010/v1', 'TensorRT Edge LLM')"><strong>TensorRT Edge LLM</strong><span>http://localhost:58010/v1</span></div>
                             <div class="api-preset-item" onclick="selectLLMPreset('http://10.110.51.30:8801/v1', 'LLM Router')"><strong>LLM Router</strong><span>http://10.110.51.30:8801/v1</span></div>

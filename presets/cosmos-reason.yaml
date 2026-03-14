@@ -15,7 +15,7 @@ asr:
 
 llm:
   scheme: openai
-  api_base: http://localhost:8003/v1
+  api_base: http://localhost:8010/v1
   model: /model
   temperature: 0.3          # Low temp — critical for precise, consistent vision responses
   max_tokens: 512           # Hard cap on reasoning+answer combined; model uses ~150-275 total

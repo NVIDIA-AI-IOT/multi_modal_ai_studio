@@ -3,6 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# Distribution name (hyphens); Python package is multi_modal_ai_studio (underscores)
 name = "multi-modal-ai-studio"
 version = "0.1.0"
 description = "Multi-modal AI interface with voice, text, and video support for analyzing conversational AI systems"
@@ -10,7 +11,9 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Chitoku YATO (tokk-nv)", email = "cyato@nvidia.com"},
+    {name = "Aditya Sahu (adsahu-nv)", email = "adsahu@nvidia.com"},
+    {name = "kbenkhaled", email = "kbenkhaled@nvidia.com"},
 ]
 keywords = ["ai", "voice", "multimodal", "riva", "nvidia", "openai", "conversational-ai"]
 classifiers = [
@@ -61,10 +64,10 @@ webrtc-camera = [
 multi-modal-ai-studio = "multi_modal_ai_studio.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/multi-modal-ai-studio"
-Documentation = "https://github.com/yourusername/multi-modal-ai-studio/tree/main/docs"
-Repository = "https://github.com/yourusername/multi-modal-ai-studio"
-Issues = "https://github.com/yourusername/multi-modal-ai-studio/issues"
+Homepage = "https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio"
+Documentation = "https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/tree/main/docs"
+Repository = "https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio"
+Issues = "https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
