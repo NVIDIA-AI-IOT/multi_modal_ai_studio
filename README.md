@@ -2,50 +2,47 @@
 
 ![](./docs/images/screenshot_example_2.png)
 
-**Voice, Text, and Video AI Interface with Advanced Performance Analysis**
+**Voice, text, and video conversational AI with session analysis and latency metrics**
 
-Multi-modal AI Studio is a next-generation conversational AI interface designed for analyzing and optimizing voice AI systems. Built on NVIDIA Riva, OpenAI APIs, and other backends, it features sophisticated session management, real-time timeline visualization, and comprehensive latency metrics.
+Multi-modal AI Studio is a conversational AI interface for building and tuning voice AI systems. It supports NVIDIA Riva, OpenAI, and other backends; records sessions with full config snapshots; and provides a real-time timeline and latency analysis (TTFA, turn-taking) to compare and optimize setups.
 
 ## 🌟 Key Features
 
 ### Multi-modal Support
-- **Voice Input/Output**: Streaming ASR and TTS via Riva or OpenAI
-- **Text Chat**: Traditional text-based conversation
-- **Video**: Camera feed for vision-enabled models (future)
-- **Mixed Modes**: Voice-to-text, text-to-voice, or text-only
+- **Voice**: Streaming ASR and TTS (Riva, OpenAI, or other backends)
+- **Text**: Chat-only mode or combined with voice
+- **Video**: Camera feed for vision-language models (VLM); browser WebRTC or server USB webcam
+- **Mixed modes**: Voice-to-text, text-to-voice, voice-to-voice, or text-only
 
 ### Multi-backend Architecture
-- **NVIDIA Riva**: gRPC streaming ASR/TTS
-- **OpenAI**: REST API (Whisper, TTS) and Realtime API
-- **Azure Speech**: Coming soon
-- **Custom backends**: Extensible plugin system
+- Speech
+  - **NVIDIA Riva**: gRPC streaming ASR/TTS (Jetson/ARM64)
+  - **OpenAI-compatible Realtime API**: Realtime API
+- LLM: **OpenAI-compatible** REST API, to works with many inference engines for various LLM/VLM models
+- **Extensible**: Plugin-style backends; Azure Speech and others can be added
 
 ### Session Management
-- **Configuration Snapshots**: Every session saves ASR/LLM/TTS configs
-- **Timeline Recording**: Store performance data for offline analysis
-- **Preset System**: Save and load configuration presets
-- **Export/Import**: Generate CLI commands or YAML configs from WebUI
+- **Config snapshots**: Every session stores ASR/LLM/TTS and device settings
+- **Timeline recording**: Performance data for offline analysis
+- **Presets**: Save and load configuration presets
 
 ### Performance Analysis
-- **Real-time Timeline**: Multi-lane visualization (Audio, Speech, LLM, TTS)
-- **Latency Metrics**: TTFA (Time to First Audio), turn-taking analysis
-- **Comparison Mode**: Compare multiple sessions to optimize configs
-- **Session Replay**: Analyze recorded timeline data
+- **Real-time timeline**: Multi-lane view (Audio, Speech, LLM, TTS)
+- **Latency metrics**: TTFA (Time to First Audio), turn-taking
 
-### Flexible Deployment
-- **WebUI Mode**: Rich browser interface (default)
-- **Headless Mode**: CLI-only for production/automation (not yet implemented)
-- **Audio/Video devices**: **Currently supported:** browser devices via WebRTC (mic, speaker, camera through the browser). **Not yet supported:** local USB microphone, USB speaker, or USB webcam attached to the server machine.
+### UI & Devices
+- **Chat-style UI**: Familiar layout, video full-screen mode, keyboard shortcuts. Most settings are exposed in the UI (ASR/LLM/TTS, models, devices) so you can tweak and switch backends without editing config files or code.
+- **Devices**: Client-side (browser WebRTC) and server-side (Linux USB mic, USB speaker, USB webcam); choose in the Devices tab.
+- **Headless** (experimental, not well tested): CLI with config file or args; see [INSTALL.md](INSTALL.md).
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.8+
-- **Audio/video**: Use the app in a browser; mic, speaker, and camera are accessed via WebRTC (browser devices). Local USB mic/speaker/webcam on the server are not supported yet.
-- NVIDIA Riva (for Riva backend) - see [INSTALL.md](INSTALL.md#nvidia-riva-setup-for-voice-asrtts)
-- OpenAI API key (for OpenAI backend) - optional
-- **Optional**: `jq` (e.g. `apt install jq` or `brew install jq`) for pretty-formatted LLM request/response logs in the server console; without it, logs use plain JSON
+- **Python 3.8+**
+- **Audio/video**: Browser (WebRTC) for mic, speaker, and camera. On Linux, server **USB microphone**, **USB speaker**, and **USB webcam** are also supported; see [INSTALL.md](INSTALL.md).
+- **Backends (as needed)**: [NVIDIA Riva](INSTALL.md#nvidia-riva-setup-for-voice-asrtts) for ASR/TTS; OpenAI API key for OpenAI/Realtime backends (optional).
+- **Optional**: `jq` for pretty-printed LLM logs in the console (`apt install jq` or `brew install jq`).
 
 ### Installation
 
@@ -72,27 +69,9 @@ Full steps and troubleshooting: [INSTALL.md](INSTALL.md)
 ```bash
 # View sessions and timeline (no backend required)
 python -m multi_modal_ai_studio --port 8092
-
-# With Riva ASR/TTS (use --asr-server and --tts-server)
-python -m multi_modal_ai_studio \
-  --port 8092 \
-  --asr-server localhost:50051 \
-  --tts-server localhost:50051 \
-  --llm-api-base http://localhost:11434/v1 \
-  --llm-model llama3.2:3b
-
-# With OpenAI Realtime API
-python -m multi_modal_ai_studio \
-  --port 8092 \
-  --asr-scheme openai-realtime \
-  --tts-scheme openai-realtime \
-  --llm-api-key sk-...
-
-# With preset
-python -m multi_modal_ai_studio --preset low-latency
 ```
 
-Open **http://localhost:8092** in your browser.
+Open **http://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
 
 ### Kill a Running Server
 
@@ -107,30 +86,31 @@ lsof -i :8092
 kill <PID>
 ```
 
-**Sessions and sample data**
-By default the app loads and saves sessions in `sessions/`. To view or use the sample/mock session JSONs (e.g. in `mock_sessions/`), run with `--session-dir mock_sessions`. Open the app, then click a session in the sidebar to view its config and timeline.
+### Sessions and sample data
 
-### Run Headless
+Sessions are stored in `sessions/` by default. To try sample timelines, run with `--session-dir mock_sessions` and open a session from the sidebar.
+
+### Run headless (experimental)
+
+CLI-only mode for automation or local audio devices. Requires the `[audio]` extra and device setup; see [INSTALL.md](INSTALL.md).
 
 ```bash
-# From config file
 python -m multi_modal_ai_studio --mode headless --config my-config.yaml
 
-# From CLI args
-python -m multi_modal_ai_studio \
-  --mode headless \
-  --audio-input alsa:hw:0,0 \
-  --audio-output alsa:hw:1,0 \
-  --asr-scheme riva \
-  --llm-model llama3.2:3b
+# Or with CLI args (e.g. ALSA devices)
+python -m multi_modal_ai_studio --mode headless \
+  --audio-input alsa:hw:0,0 --audio-output alsa:hw:1,0 \
+  --asr-scheme riva --llm-model llama3.2:3b
 ```
 
 ## 📖 Documentation
 
-- [VLM Guide](docs/vlm_guide.md) — Vision-Language Model setup, input modes, frame capture, and tuning
-- [Riva Setup](docs/setup_riva.md) — NVIDIA Riva ASR/TTS installation and configuration
-- [Architecture](docs/architecture.md) — System design and component overview
-- [Installation](INSTALL.md) — Full installation steps and troubleshooting
+| Doc | Description |
+|-----|-------------|
+| [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
+| [Riva Setup](docs/setup_riva.md) | NVIDIA Riva ASR/TTS (Jetson/ARM64) |
+| [VLM Guide](docs/vlm_guide.md) | Vision-language models, frame capture, tuning |
+| [Architecture](docs/architecture.md) | System design and components |
 
 ## 🤝 Contributing
 
@@ -140,6 +120,3 @@ This project is under active development. Issues, pull requests, and feedback ar
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-Built on top of proven concepts from [Live RIVA WebUI](https://github.com/yourusername/live-riva-webui).
