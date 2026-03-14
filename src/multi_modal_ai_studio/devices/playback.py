@@ -18,6 +18,9 @@ CHANNELS = 1
 PLAYBACK_RETRIES = 3
 PLAYBACK_RETRY_DELAY = 0.3  # seconds between retries
 
+_RED = "\033[91m"
+_RESET = "\033[0m"
+
 
 def start_server_speaker_playback(
     device: str,
@@ -71,30 +74,30 @@ def start_server_speaker_playback(
             if proc.poll() is not None:
                 last_err = (proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else "") or "(no stderr)"
                 if attempt < PLAYBACK_RETRIES:
-                    logger.warning(
-                        "aplay exited immediately for %s (attempt %d/%d): %s — retrying in %.1fs",
-                        device, attempt, PLAYBACK_RETRIES, last_err, PLAYBACK_RETRY_DELAY,
+                    logger.error(
+                        "%saplay exited immediately for %s (attempt %d/%d): %s — retrying in %.1fs%s",
+                        _RED, device, attempt, PLAYBACK_RETRIES, last_err, PLAYBACK_RETRY_DELAY, _RESET,
                     )
                     time.sleep(PLAYBACK_RETRY_DELAY)
                     continue
-                logger.warning("aplay exited immediately for %s after %d attempts: %s", device, attempt, last_err)
+                logger.error("%saplay exited immediately for %s after %d attempts: %s%s", _RED, device, attempt, last_err, _RESET)
                 return None
             if proc_holder is not None:
                 proc_holder.append(proc)
             return proc
         except FileNotFoundError:
-            logger.warning("aplay not found; cannot play to ALSA device %s", device)
+            logger.error("%saplay not found; cannot play to ALSA device %s%s", _RED, device, _RESET)
             return None
         except Exception as e:
             last_err = str(e)
             if attempt < PLAYBACK_RETRIES:
-                logger.warning(
-                    "Failed to start aplay for %s (attempt %d/%d): %s — retrying in %.1fs",
-                    device, attempt, PLAYBACK_RETRIES, e, PLAYBACK_RETRY_DELAY,
+                logger.error(
+                    "%sFailed to start aplay for %s (attempt %d/%d): %s — retrying in %.1fs%s",
+                    _RED, device, attempt, PLAYBACK_RETRIES, e, PLAYBACK_RETRY_DELAY, _RESET,
                 )
                 time.sleep(PLAYBACK_RETRY_DELAY)
                 continue
-            logger.warning("Failed to start aplay for %s after %d attempts: %s", device, attempt, e)
+            logger.error("%sFailed to start aplay for %s after %d attempts: %s%s", _RED, device, attempt, e, _RESET)
             return None
     return None
 

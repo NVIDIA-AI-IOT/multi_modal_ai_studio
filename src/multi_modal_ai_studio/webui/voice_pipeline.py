@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from aiohttp import web
 
-from multi_modal_ai_studio.devices.capture import start_server_mic_capture
+from multi_modal_ai_studio.devices.capture import start_server_mic_capture, is_capture_event
 
 try:
     from multi_modal_ai_studio.devices.playback import (
@@ -64,6 +64,9 @@ from multi_modal_ai_studio.backends.realtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+_RED = "\033[91m"
+_RESET = "\033[0m"
 
 
 def _format_llm_error_for_user(exc: Exception) -> str:
@@ -686,18 +689,20 @@ async def _run_voice_pipeline(
     capture_queue: Optional[queue.Queue] = queue.Queue() if use_server_mic else None
     stop_capture: Optional[threading.Event] = threading.Event() if use_server_mic else None
     capture_thread: Optional[threading.Thread] = None
+    capture_health_holder: list = []
     if use_server_mic and capture_queue is not None and stop_capture is not None:
         capture_thread = start_server_mic_capture(
             config.devices.audio_input_source,
             config.devices.audio_input_device,
             capture_queue,
             stop_capture,
+            health_out=capture_health_holder,
         )
         if not capture_thread:
-            logger.warning(
-                "Server mic capture could not start (source=%s device=%s); no voice input from server device",
-                getattr(config.devices, "audio_input_source", None),
-                getattr(config.devices, "audio_input_device", None),
+            logger.error(
+                "%sServer mic capture could not start (source=%s device=%s); no voice input from server device%s",
+                _RED, getattr(config.devices, "audio_input_source", None),
+                getattr(config.devices, "audio_input_device", None), _RESET,
             )
             use_server_mic = False
         else:
@@ -1419,9 +1424,9 @@ async def _run_voice_pipeline(
                             server_speaker_proc = start_server_speaker_playback(_out_device, chunk.sample_rate)
                             if server_speaker_proc is None:
                                 _speaker_fail_until = time.time() + 3.0
-                                logger.warning(
-                                    "Server speaker playback could not start for %s; check aplay and device (suppressing retries for 3s)",
-                                    _out_device,
+                                logger.error(
+                                    "%sServer speaker playback could not start for %s; check aplay and device (suppressing retries for 3s)%s",
+                                    _RED, _out_device, _RESET,
                                 )
                         if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                             try:
@@ -1819,7 +1824,8 @@ async def _run_voice_pipeline(
     _user_amplitude_sent = False
 
     async def server_capture_consumer() -> None:
-        """Read PCM from server mic capture queue. Preview: _feed_pcm_preview_only. Live: _feed_pcm_to_pipeline."""
+        """Read PCM from server mic capture queue. Preview: _feed_pcm_preview_only. Live: _feed_pcm_to_pipeline.
+        Also handles capture health events (dropped/recovered) and emits them to the timeline."""
         nonlocal _user_amplitude_sent
         if capture_queue is None:
             return
@@ -1835,12 +1841,53 @@ async def _run_voice_pipeline(
                 break
             if chunk is None:
                 if first_get:
-                    logger.warning(
-                        "Server mic capture sent None on first get (capture failed to produce any PCM); check arecord and device"
+                    logger.error(
+                        "%sServer mic capture sent None on first get (capture failed to produce any PCM); check arecord and device%s",
+                        _RED, _RESET,
                     )
                 else:
                     logger.info("Server mic capture ended (None received)")
                 break
+            # Handle capture health events (not PCM bytes)
+            if is_capture_event(chunk):
+                ev = chunk.get("event", "")
+                if pipeline_live.is_set() and session.timeline.start_time is not None:
+                    ts = time.time() - session.timeline.start_time
+                    if ev == "dropped":
+                        session.timeline.add_event("capture_dropped", Lane.SYSTEM, data={
+                            "device": chunk.get("device", ""),
+                            "retry": chunk.get("retry", 0),
+                            "max_retries": chunk.get("max_retries", 8),
+                        })
+                        await send_event({
+                            "event_type": "capture_dropped",
+                            "lane": "system",
+                            "data": {"device": chunk.get("device", ""), "retry": chunk.get("retry", 0)},
+                            "timestamp": ts,
+                        })
+                    elif ev == "recovered":
+                        session.timeline.add_event("capture_recovered", Lane.SYSTEM, data={
+                            "device": chunk.get("device", ""),
+                            "outage_s": chunk.get("outage_s", 0),
+                        })
+                        await send_event({
+                            "event_type": "capture_recovered",
+                            "lane": "system",
+                            "data": {"device": chunk.get("device", ""), "outage_s": chunk.get("outage_s", 0)},
+                            "timestamp": ts,
+                        })
+                    elif ev == "gave_up":
+                        session.timeline.add_event("capture_gave_up", Lane.SYSTEM, data={
+                            "device": chunk.get("device", ""),
+                            "retries": chunk.get("retries", 0),
+                        })
+                        await send_event({
+                            "event_type": "capture_gave_up",
+                            "lane": "system",
+                            "data": {"device": chunk.get("device", ""), "retries": chunk.get("retries", 0)},
+                            "timestamp": ts,
+                        })
+                continue
             first_get = False
             if pipeline_live.is_set():
                 if last_amplitude_time > 1.0:
@@ -2002,6 +2049,24 @@ async def _run_voice_pipeline(
             await asyncio.wait_for(_generate_title(), timeout=15.0)
         except (asyncio.TimeoutError, Exception) as e:
             logger.warning("Could not generate session title: %s", e)
+
+    # Attach capture health metrics to session for quantitative USB bus contention analysis
+    if capture_health_holder:
+        ch = capture_health_holder[0]
+        health_dict = ch.to_dict()
+        if not hasattr(session, "capture_health"):
+            session.capture_health = health_dict
+        else:
+            session.capture_health = health_dict
+        if health_dict.get("total_drops", 0) > 0:
+            logger.warning(
+                "[capture_health] Session %s: drops=%d recoveries=%d downtime=%.2fs gave_up=%s",
+                session.session_id,
+                health_dict["total_drops"],
+                health_dict["total_recoveries"],
+                health_dict["total_downtime_s"],
+                health_dict["gave_up"],
+            )
 
     session_dir.mkdir(parents=True, exist_ok=True)
     path = session_dir / f"{session.session_id}.json"
