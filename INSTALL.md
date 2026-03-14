@@ -397,6 +397,11 @@ The second volume `-v ${HOME}/.cache/vllm:/root/.cache/vllm` persists vLLM’s *
 >
 > **Memory tuning**: On shared-memory systems (Jetson), lower `--gpu-memory-utilization` to leave room for the OS, Riva, and the application. On discrete GPUs with dedicated VRAM, `0.8` is safe.
 >
+> **GPU memory cleanup**: If vLLM fails to start with an OOM error after stopping another GPU container, free cached memory first:
+> ```bash
+> sudo sysctl -w vm.drop_caches=3
+> ```
+>
 > **Desktop GPU / x86_64**: Use `vllm/vllm-openai:latest` or `nvcr.io/nvidia/vllm:latest` instead of the Jetson image.
 
 ### vLLM troubleshooting
