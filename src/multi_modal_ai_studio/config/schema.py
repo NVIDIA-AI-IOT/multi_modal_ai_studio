@@ -161,7 +161,7 @@ class LLMConfig:
     vision_buffer_fps: float = 3.0  # Ring buffer capture rate (fps)
     vision_api_format: Literal["openai", "tensorrt_edge"] = "openai"
     vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
-    enable_reasoning: bool = False  # True to allow <think> chain-of-thought; filtered from TTS
+    enable_reasoning: bool = False  # Append reasoning prompt to every user message; <think> output filtered from TTS
     reasoning_prompt: str = (
         "\n\nThink step-by-step inside <think> tags, then write your final answer "
         "immediately after </think>. The final answer MUST be exactly one descriptive "
