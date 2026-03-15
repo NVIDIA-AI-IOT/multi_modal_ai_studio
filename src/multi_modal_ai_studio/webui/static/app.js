@@ -1443,14 +1443,14 @@ function renderLLMConfig(config, readonly = false) {
                 <label class="checkbox-label">
                     <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
                            onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
-                    Enable reasoning (chain-of-thought) through system prompt
+                    Enable reasoning (chain-of-thought) through user prompt
                 </label>
-                ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to the system prompt. Reasoning text is stripped before TTS.</span>' : ''}
+                ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to every user message. Reasoning text is stripped before TTS.</span>' : ''}
                 <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
                     <label>Reasoning Prompt</label>
                     <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;" placeholder="e.g. Think step-by-step in <think>...</think> then your final answer."
                               onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt ?? defaultConfig.llm.reasoning_prompt ?? '')}</textarea>
-                    ${!readonly ? '<span class="input-hint">Appended to system prompt when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
+                    ${!readonly ? '<span class="input-hint">Appended to every user message when reasoning is enabled. Customise for your model\'s format.</span>' : ''}
                 </div>
             </div>
 

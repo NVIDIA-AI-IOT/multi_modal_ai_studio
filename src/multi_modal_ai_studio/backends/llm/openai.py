@@ -481,16 +481,21 @@ class OpenAILLMBackend(LLMBackend):
         if self.config.minimal_output:
             suffix = " Answer with only a number or minimal tokens. No reasoning or explanation."
             sys_prompt = (sys_prompt or "") + suffix
-        elif getattr(self.config, "enable_reasoning", False):
-            reasoning_fmt = getattr(self.config, "reasoning_prompt", "") or ""
-            if reasoning_fmt:
-                sys_prompt = (sys_prompt or "") + reasoning_fmt
         if sys_prompt:
             messages.append({"role": "system", "content": sys_prompt})
 
         # Add history
         if history:
             messages.extend(history)
+
+        # Append reasoning prompt to user message when enabled
+        if (
+            not self.config.minimal_output
+            and getattr(self.config, "enable_reasoning", False)
+        ):
+            reasoning_fmt = getattr(self.config, "reasoning_prompt", "") or ""
+            if reasoning_fmt:
+                prompt = prompt + reasoning_fmt
 
         if image_data_urls and len(image_data_urls) > 0:
             user_content = self._build_vision_content(
