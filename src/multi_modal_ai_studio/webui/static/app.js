@@ -481,7 +481,7 @@ function applyConfigPanelCollapse() {
 function updateAutoHideConfigLabel() {
     const label = document.getElementById('auto-hide-config-label');
     const btn = document.getElementById('auto-hide-config-btn');
-    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide once session start \u2713' : 'Auto hide once session start';
+    if (label) label.textContent = state.autoHideConfigOnStart ? 'Auto hide \u2713' : 'Auto hide';
     if (btn) {
         if (state.autoHideConfigOnStart) btn.classList.add('config-auto-hide-btn--on');
         else btn.classList.remove('config-auto-hide-btn--on');
@@ -626,7 +626,7 @@ const defaultConfig = {
         vision_max_width: 640,
         vision_buffer_fps: 3.0,
         vision_video_encode: false,
-        enable_reasoning: false,
+        enable_reasoning_through_user_prompt: false,
         reasoning_prompt: '\n\nThink step-by-step inside <think> tags, then write your final answer immediately after </think>. The final answer MUST be exactly one descriptive sentence — no lists, no paragraphs, no tags.'
     },
     tts: {
@@ -750,21 +750,6 @@ function saveDefaultConfig() {
     }
 }
 
-/** Preset system prompts for voice AI. [1] [2] [3] in the UI apply these. */
-var SYSTEM_PROMPT_PRESETS = [
-    'You are a helpful voice assistant.',
-    'You are a helpful AI assistant.',
-    'You are a concise voice assistant. Keep replies brief and natural for conversation.'
-];
-
-function applySystemPromptPreset(index) {
-    var text = SYSTEM_PROMPT_PRESETS[index];
-    if (text == null) return;
-    updateConfig('llm', 'system_prompt', text);
-    var el = document.getElementById('llm-system-prompt');
-    if (el) el.value = text;
-}
-
 function _deepMerge(target, source) {
     const result = { ...target };
     for (const key of Object.keys(source)) {
@@ -793,6 +778,15 @@ function _normalizePresetToFrontend(preset) {
         out.llm.include_conversation_history = out.llm.vision_include_history;
         delete out.llm.vision_include_history;
     }
+    if (out.llm && out.llm.enable_reasoning !== undefined && out.llm.enable_reasoning_through_user_prompt === undefined) {
+        out.llm.enable_reasoning_through_user_prompt = out.llm.enable_reasoning;
+        delete out.llm.enable_reasoning;
+    }
+    if (out.devices) {
+        if (out.devices.video_source && !out.devices.camera) out.devices.camera = out.devices.video_source;
+        if (out.devices.audio_input_source && !out.devices.microphone) out.devices.microphone = out.devices.audio_input_source;
+        if (out.devices.audio_output_source && !out.devices.speaker) out.devices.speaker = out.devices.audio_output_source;
+    }
     return out;
 }
 
@@ -804,9 +798,11 @@ async function fetchAndApplyInitialConfig() {
         if (!preset || Object.keys(preset).length === 0) return;
 
         _serverPresetConfig = _normalizePresetToFrontend(preset);
-        console.log('[Preset] Server preset loaded:', _serverPresetConfig.name || '(unnamed)');
+        console.log('[Preset] Server preset loaded:', _serverPresetConfig.name || '(unnamed)',
+            _serverPresetConfig.app_version ? ('v' + _serverPresetConfig.app_version) : '');
 
         currentConfig = _deepMerge(currentConfig, _serverPresetConfig);
+        if (_serverPresetConfig.app_version) currentConfig.app_version = _serverPresetConfig.app_version;
         // Fill in defaults for any fields missing from the preset
         for (var _dk of Object.keys(defaultConfig)) {
             if (defaultConfig[_dk] && typeof defaultConfig[_dk] === 'object' && currentConfig[_dk]) {
@@ -821,6 +817,162 @@ async function fetchAndApplyInitialConfig() {
         }
     } catch (e) {
         console.warn('[Preset] Failed to fetch initial config:', e);
+    }
+}
+
+// ── Preset picker (dropdown + save modal) ──────────────────────────
+
+var _presetList = [];
+
+async function fetchPresetList() {
+    try {
+        var resp = await fetch(getApiBase() + '/api/presets');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        _presetList = data.presets || [];
+        _populatePresetDropdown();
+    } catch (e) {
+        console.warn('[Preset] Failed to fetch preset list:', e);
+    }
+}
+
+function _populatePresetDropdown() {
+    var select = document.getElementById('preset-select');
+    if (!select) return;
+    var currentVal = select.value;
+    select.innerHTML = '<option value="">----</option>';
+    for (var i = 0; i < _presetList.length; i++) {
+        var p = _presetList[i];
+        var opt = document.createElement('option');
+        opt.value = p.filename.replace(/\.yaml$/, '');
+        opt.textContent = p.name || p.filename;
+        opt.title = p.description || '';
+        select.appendChild(opt);
+    }
+    if (currentVal) {
+        try { select.value = currentVal; } catch (e) {}
+    }
+    _syncPresetDropdownToCurrentConfig();
+}
+
+function _syncPresetDropdownToCurrentConfig() {
+    var select = document.getElementById('preset-select');
+    if (!select) return;
+    var name = (currentConfig.name || '').trim();
+    if (!name || name === 'New Session') { select.value = ''; return; }
+    if (_serverPresetConfig && _serverPresetConfig.name) name = _serverPresetConfig.name;
+    for (var i = 0; i < select.options.length; i++) {
+        if (select.options[i].textContent === name) {
+            select.selectedIndex = i;
+            return;
+        }
+    }
+}
+
+async function onPresetSelected(slug) {
+    if (!slug) return;
+    try {
+        var resp = await fetch(getApiBase() + '/api/presets/' + encodeURIComponent(slug));
+        if (!resp.ok) return;
+        var preset = await resp.json();
+        var normalized = _normalizePresetToFrontend(preset);
+        currentConfig = _deepMerge(JSON.parse(JSON.stringify(defaultConfig)), normalized);
+        for (var _dk of Object.keys(defaultConfig)) {
+            if (defaultConfig[_dk] && typeof defaultConfig[_dk] === 'object' && currentConfig[_dk]) {
+                for (var _fk of Object.keys(defaultConfig[_dk])) {
+                    if (currentConfig[_dk][_fk] === undefined) currentConfig[_dk][_fk] = defaultConfig[_dk][_fk];
+                }
+            }
+        }
+        if (normalized.app_version) currentConfig.app_version = normalized.app_version;
+        _serverPresetConfig = normalized;
+        console.log('[Preset] Applied preset:', normalized.name || slug);
+        renderConfig();
+    } catch (e) {
+        console.warn('[Preset] Failed to load preset:', e);
+    }
+}
+
+function openPresetSaveModal() {
+    var modal = document.getElementById('preset-save-modal');
+    var input = document.getElementById('preset-save-name');
+    if (!modal || !input) return;
+    _presetOverwriteConfirmed = false;
+    var warningEl = document.getElementById('preset-save-overwrite-warning');
+    if (warningEl) warningEl.style.display = 'none';
+    input.value = (currentConfig.name && currentConfig.name !== 'New Session') ? currentConfig.name : '';
+    modal.style.display = '';
+    setTimeout(function () { input.focus(); input.select(); }, 50);
+}
+
+function closePresetSaveModal() {
+    var modal = document.getElementById('preset-save-modal');
+    if (modal) modal.style.display = 'none';
+    _presetOverwriteConfirmed = false;
+    var warningEl = document.getElementById('preset-save-overwrite-warning');
+    if (warningEl) warningEl.style.display = 'none';
+}
+
+function _presetSlug(name) {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+function _findExistingPreset(name) {
+    var slug = _presetSlug(name);
+    if (!slug) return null;
+    for (var i = 0; i < _presetList.length; i++) {
+        var fileSlug = _presetList[i].filename.replace(/\.yaml$/, '');
+        if (fileSlug === slug) return _presetList[i];
+    }
+    return null;
+}
+
+var _presetOverwriteConfirmed = false;
+
+async function confirmSavePreset() {
+    var input = document.getElementById('preset-save-name');
+    var name = (input ? input.value : '').trim();
+    if (!name) { if (input) input.focus(); return; }
+
+    var existing = _findExistingPreset(name);
+    var warningEl = document.getElementById('preset-save-overwrite-warning');
+    if (existing && !_presetOverwriteConfirmed) {
+        if (warningEl) {
+            warningEl.textContent = 'Preset "' + existing.name + '" already exists. Click Save again to overwrite.';
+            warningEl.style.display = '';
+        }
+        _presetOverwriteConfirmed = true;
+        return;
+    }
+
+    _presetOverwriteConfirmed = false;
+    if (warningEl) warningEl.style.display = 'none';
+
+    var configCopy = JSON.parse(JSON.stringify(currentConfig));
+    configCopy.name = name;
+    if (!configCopy.app_version) configCopy.app_version = '0.1.0';
+
+    try {
+        var resp = await fetch(getApiBase() + '/api/presets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, config: configCopy })
+        });
+        if (!resp.ok) {
+            var err = await resp.json().catch(function () { return {}; });
+            console.warn('[Preset] Save failed:', err.error || resp.statusText);
+            return;
+        }
+        var result = await resp.json();
+        console.log('[Preset] Saved:', result.filename);
+        closePresetSaveModal();
+        await fetchPresetList();
+        var select = document.getElementById('preset-select');
+        if (select && result.filename) {
+            select.value = result.filename.replace(/\.yaml$/, '');
+        }
+    } catch (e) {
+        console.warn('[Preset] Save error:', e);
     }
 }
 
@@ -1426,14 +1578,7 @@ function renderLLMConfig(config, readonly = false) {
             </div>
 
             <div class="form-group">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                    <label style="margin: 0;">System Prompt</label>
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        ${!readonly ? SYSTEM_PROMPT_PRESETS.map((_, i) => '<button type="button" class="system-prompt-preset-btn" onclick="applySystemPromptPreset(' + i + ')" title="Preset ' + (i + 1) + '">[' + (i + 1) + ']</button>').join('') : ''}
-                        ${!readonly ? '<span class="system-prompt-preset-sep" aria-hidden="true">|</span>' : ''}
-                        ${!readonly ? '<button type="button" class="icon-btn" onclick="var el = document.getElementById(\'llm-system-prompt\'); if(el) { updateConfig(\'llm\', currentConfig.llm.enable_vision ? \'vision_system_prompt\' : \'system_prompt\', el.value); pinLlmFieldToDefault(currentConfig.llm.enable_vision ? \'vision_system_prompt\' : \'system_prompt\'); }" title="Pin to use in other sessions"><i data-lucide="pin" class="lucide-inline"></i></button>' : ''}
-                    </div>
-                </div>
+                <label>System Prompt</label>
                 <textarea id="llm-system-prompt" ${disabled} rows="3"
                           onchange="updateConfig('llm', currentConfig.llm.enable_vision ? 'vision_system_prompt' : 'system_prompt', this.value)">${escapeHtml(config.enable_vision ? (config.vision_system_prompt || 'You are a vision assistant. Give ONE short sentence answers only. Be direct. No explanations.') : (config.system_prompt || ''))}</textarea>
                 ${!readonly ? `<span class="input-hint">${config.enable_vision ? 'Vision system prompt (used when Enable Vision is checked)' : 'Text LLM system prompt'}</span>` : ''}
@@ -1441,12 +1586,12 @@ function renderLLMConfig(config, readonly = false) {
 
             <div class="form-group">
                 <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning ? 'checked' : ''}
-                           onchange="updateConfig('llm', 'enable_reasoning', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
+                    <input type="checkbox" ${disabled} id="llm-enable-reasoning" ${config.enable_reasoning_through_user_prompt ? 'checked' : ''}
+                           onchange="updateConfig('llm', 'enable_reasoning_through_user_prompt', this.checked); var grp = document.getElementById('reasoning-prompt-group'); grp.style.display = this.checked ? 'block' : 'none'; if (this.checked &amp;&amp; !currentConfig.llm.reasoning_prompt) { var ta = document.getElementById('llm-reasoning-prompt'); if (ta) updateConfig('llm', 'reasoning_prompt', ta.value); }">
                     Enable reasoning (chain-of-thought) through user prompt
                 </label>
                 ${!readonly ? '<span class="input-hint">Appends the reasoning prompt below to every user message. Reasoning text is stripped before TTS.</span>' : ''}
-                <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning ? 'block' : 'none'}; margin-top: 8px;">
+                <div id="reasoning-prompt-group" style="display: ${config.enable_reasoning_through_user_prompt ? 'block' : 'none'}; margin-top: 8px;">
                     <label>Reasoning Prompt</label>
                     <textarea id="llm-reasoning-prompt" ${disabled} rows="4" style="font-family: var(--font-mono); font-size: 0.85rem;" placeholder="e.g. Think step-by-step in <think>...</think> then your final answer."
                               onchange="updateConfig('llm', 'reasoning_prompt', this.value)">${escapeHtml(config.reasoning_prompt ?? defaultConfig.llm.reasoning_prompt ?? '')}</textarea>
@@ -7617,6 +7762,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Fetch server-side preset config (from --preset CLI arg) and apply before warmup
     fetchAndApplyInitialConfig().then(() => {
+        fetchPresetList();
         console.log('Scheduling LLM warmup...');
         setTimeout(() => {
             warmupLLM();
@@ -7631,6 +7777,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         ro.observe(pipelineEl);
     }
+
+    // Preset picker event listeners
+    var _presetSelect = document.getElementById('preset-select');
+    if (_presetSelect) _presetSelect.addEventListener('change', function () { onPresetSelected(this.value); });
+    var _presetSaveBtn = document.getElementById('preset-save-btn');
+    if (_presetSaveBtn) _presetSaveBtn.addEventListener('click', openPresetSaveModal);
+    var _presetSaveCancel = document.getElementById('preset-save-cancel');
+    if (_presetSaveCancel) _presetSaveCancel.addEventListener('click', closePresetSaveModal);
+    var _presetSaveConfirm = document.getElementById('preset-save-confirm');
+    if (_presetSaveConfirm) _presetSaveConfirm.addEventListener('click', confirmSavePreset);
+    var _presetSaveNameInput = document.getElementById('preset-save-name');
+    if (_presetSaveNameInput) {
+        _presetSaveNameInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') confirmSavePreset(); if (e.key === 'Escape') closePresetSaveModal(); });
+        _presetSaveNameInput.addEventListener('input', function () {
+            _presetOverwriteConfirmed = false;
+            var w = document.getElementById('preset-save-overwrite-warning');
+            if (w) w.style.display = 'none';
+        });
+    }
+    var _presetModalOverlay = document.getElementById('preset-save-modal');
+    if (_presetModalOverlay) _presetModalOverlay.addEventListener('click', function (e) { if (e.target === _presetModalOverlay) closePresetSaveModal(); });
 
     console.log('Setting up modal handlers...');
     try {

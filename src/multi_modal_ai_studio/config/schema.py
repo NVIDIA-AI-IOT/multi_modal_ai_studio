@@ -118,11 +118,14 @@ class LLMConfig:
             "tensorrt_edge" — TensorRT Edge LLM format ({"type": "image", "image": "<base64>"})
         vision_video_encode: If True, encode frames as MP4 video for temporal understanding
             (e.g. Cosmos-Reason models). Must be set explicitly in preset/config.
-        enable_reasoning: If True, append reasoning_prompt to the system prompt so the model
-            uses chain-of-thought (e.g. <think>...</think>). The reasoning text is stripped
-            before TTS playback.
-        reasoning_prompt: The prompt text appended to the system prompt when enable_reasoning
-            is True. Users can customise this to match their model's reasoning format.
+        enable_reasoning_through_user_prompt: If True, append reasoning_prompt to the user
+            message so the model uses chain-of-thought (e.g. <think>...</think>).  The
+            reasoning text is stripped before TTS playback.  Named explicitly because some
+            models (e.g. Nemotron 3 Nano) enable reasoning via chat-template kwargs or other
+            mechanisms rather than a user-prompt suffix.
+        reasoning_prompt: The prompt text appended to the user message when
+            enable_reasoning_through_user_prompt is True. Users can customise this to match
+            their model's reasoning format.
         history_turns: Number of previous turns to include as context (0=no history)
         include_conversation_history: If True (default), send last N turns as context for all LLM turns.
             If False, no history is sent (stateless). For vision turns we still send history as text-only
@@ -161,7 +164,7 @@ class LLMConfig:
     vision_buffer_fps: float = 3.0  # Ring buffer capture rate (fps)
     vision_api_format: Literal["openai", "tensorrt_edge"] = "openai"
     vision_video_encode: bool = False  # True for models with video input (e.g. Cosmos-Reason)
-    enable_reasoning: bool = False  # Append reasoning prompt to every user message; <think> output filtered from TTS
+    enable_reasoning_through_user_prompt: bool = False  # Append reasoning prompt to every user message; <think> output filtered from TTS
     reasoning_prompt: str = (
         "\n\nThink step-by-step inside <think> tags, then write your final answer "
         "immediately after </think>. The final answer MUST be exactly one descriptive "
@@ -376,6 +379,7 @@ class SessionConfig:
     """
     name: str = "New Session"
     description: str = ""
+    app_version: Optional[str] = None  # Preset/app version that created this config (e.g. "0.1.0")
     asr: ASRConfig = field(default_factory=ASRConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
@@ -444,6 +448,8 @@ class SessionConfig:
         # Backward compat: presets/frontend may send vision_include_history
         if "include_conversation_history" not in llm_data and "vision_include_history" in llm_data:
             llm_data["include_conversation_history"] = llm_data.pop("vision_include_history")
+        if "enable_reasoning_through_user_prompt" not in llm_data and "enable_reasoning" in llm_data:
+            llm_data["enable_reasoning_through_user_prompt"] = llm_data.pop("enable_reasoning")
         if 'ollama_url' in llm_data and 'api_base' not in llm_data:
             base = (llm_data.get('ollama_url') or '').rstrip('/')
             llm_data['api_base'] = f"{base}/v1" if base else "http://localhost:11434/v1"
@@ -499,6 +505,7 @@ class SessionConfig:
         return cls(
             name=data.get('name', 'New Session'),
             description=data.get('description', ''),
+            app_version=data.get('app_version'),
             asr=ASRConfig(**{k: v for k, v in asr_data.items() if k in ASRConfig.__dataclass_fields__}),
             llm=LLMConfig(**llm_data),
             tts=TTSConfig(**tts_data),

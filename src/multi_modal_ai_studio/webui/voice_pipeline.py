@@ -2070,7 +2070,7 @@ async def _run_voice_pipeline(
                 config=replace(
                     llm.config,
                     model=title_model,
-                    enable_reasoning=False,
+                    enable_reasoning_through_user_prompt=False,
                 )
             )
             async for token in title_llm.generate_stream(

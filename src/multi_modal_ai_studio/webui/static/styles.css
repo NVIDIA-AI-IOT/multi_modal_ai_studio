@@ -816,6 +816,153 @@ code, pre {
     height: 14px;
 }
 
+/* ── Preset picker (config header row) ──────────────────────────── */
+.preset-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+@media (max-width: 900px) {
+    .preset-label { display: none; }
+}
+.preset-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 1;
+    min-width: 0;
+}
+.preset-select {
+    font-size: 0.85rem;
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, #1e1e1e);
+    color: var(--text-primary);
+    max-width: 160px;
+    min-width: 60px;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+.preset-select:focus {
+    border-color: var(--nvidia-green, #76b900);
+    outline: none;
+}
+.preset-save-btn {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, #1e1e1e);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.preset-save-btn:hover {
+    background: var(--bg-tertiary, #2a2a2a);
+    color: var(--nvidia-green, #76b900);
+    border-color: var(--nvidia-green, #76b900);
+}
+.preset-save-btn .lucide-inline {
+    width: 14px;
+    height: 14px;
+}
+
+/* ── Preset save modal ──────────────────────────────────────────── */
+.preset-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.preset-modal {
+    background: var(--bg-primary, #121212);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md, 8px);
+    padding: var(--space-lg);
+    min-width: 340px;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.preset-modal-header {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: var(--space-md);
+    color: var(--text-primary);
+}
+.preset-modal-body {
+    margin-bottom: var(--space-lg);
+}
+.preset-modal-body label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+}
+.preset-save-name-input {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    font-size: 0.9rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary, #1e1e1e);
+    color: var(--text-primary);
+    box-sizing: border-box;
+}
+.preset-save-name-input:focus {
+    border-color: var(--nvidia-green, #76b900);
+    outline: none;
+}
+.preset-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--space-sm);
+}
+.preset-modal-btn {
+    padding: var(--space-sm) var(--space-lg);
+    border-radius: var(--radius-md, 6px);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    transition: all 0.15s ease;
+}
+.preset-modal-btn--cancel {
+    background: var(--bg-secondary, #1e1e1e);
+    color: var(--text-primary);
+}
+.preset-modal-btn--cancel:hover {
+    background: var(--bg-tertiary, #2a2a2a);
+    border-color: var(--text-secondary);
+}
+.preset-modal-btn--save {
+    background: var(--nvidia-green, #76b900);
+    color: #fff;
+    border-color: var(--nvidia-green, #76b900);
+    font-weight: 600;
+}
+.preset-modal-btn--save:hover {
+    filter: brightness(1.1);
+}
+.preset-overwrite-warning {
+    margin-top: var(--space-sm, 6px);
+    padding: var(--space-xs, 4px) var(--space-sm, 8px);
+    font-size: 0.8rem;
+    color: #f5a623;
+    background: rgba(245, 166, 35, 0.1);
+    border: 1px solid rgba(245, 166, 35, 0.3);
+    border-radius: var(--radius-sm, 4px);
+}
+
 .config-save-default-btn {
     flex-shrink: 0;
     font-size: 0.75rem;
@@ -3172,31 +3319,6 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     min-width: 36px;
     padding: 0 10px;
     gap: 6px;
-}
-
-/* System prompt preset buttons [1] [2] [3] */
-.system-prompt-preset-btn {
-    min-width: 32px;
-    height: 28px;
-    padding: 0 6px;
-    font-size: 0.8rem;
-    font-weight: 500;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-.system-prompt-preset-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent-primary);
-    color: var(--accent-primary);
-}
-.system-prompt-preset-sep {
-    color: var(--text-tertiary);
-    font-size: 0.85rem;
-    user-select: none;
 }
 
 /* API Base URL presets (Live RIVA WebUI-style) */

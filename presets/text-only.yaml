@@ -1,7 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Text-only chat — no microphone, no speaker, no camera.
+# Useful for testing LLM connectivity or text-based workflows.
+#
+# Prerequisites:
+#   - Any OpenAI-compatible LLM endpoint (default: Ollama on localhost:11434)
+
 name: "Text Only"
-description: "Traditional text chat without voice"
+description: "Text chat without voice or vision — for testing and development"
+app_version: "0.1.0"
 
 asr:
   scheme: none
@@ -12,19 +20,20 @@ llm:
   model: llama3.2:3b
   temperature: 0.7
   max_tokens: 512
-  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
+  system_prompt: >-
+    You are a helpful AI assistant.
+    Plain text only, no markdown, no bullet points, no emojis.
 
 tts:
   scheme: none
 
 devices:
   video_source: none
-  audio_input_source: none  # Text input
-  audio_output_source: none  # Text output
+  audio_input_source: none
+  audio_output_source: none
 
 app:
   barge_in_enabled: false
-  timeline_position: hidden  # No timeline needed for text-only
+  timeline_position: hidden
   session_auto_save: true
   session_output_dir: ./sessions
-  theme: dark

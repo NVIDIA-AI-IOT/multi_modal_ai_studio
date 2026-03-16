@@ -56,8 +56,30 @@
                     <div class="config-header">
                         <h3>Configuration</h3>
                         <div class="config-header-actions">
-                            <button type="button" id="auto-hide-config-btn" class="config-auto-hide-btn" title="When on, Configuration pane collapses when you start the session"><i data-lucide="panel-left-close" class="lucide-inline config-auto-hide-icon"></i> <span id="auto-hide-config-label">Auto hide once session start &lt;&lt;</span></button>
+                            <span class="preset-label">Preset:</span>
+                            <div class="preset-picker">
+                                <select id="preset-select" class="preset-select" title="Load a preset configuration">
+                                    <option value="">----</option>
+                                </select>
+                                <button type="button" id="preset-save-btn" class="preset-save-btn" title="Save current config as a named preset"><i data-lucide="plus" class="lucide-inline"></i></button>
+                            </div>
+                            <button type="button" id="auto-hide-config-btn" class="config-auto-hide-btn" title="When on, Configuration pane collapses when you start the session"><i data-lucide="panel-left-close" class="lucide-inline config-auto-hide-icon"></i> <span id="auto-hide-config-label">Auto hide</span></button>
                             <button type="button" id="config-collapse-btn" class="config-collapse-btn" style="display: none;" title="Collapse Configuration pane"><i data-lucide="panel-left-close" class="lucide-inline"></i></button>
+                        </div>
+                    </div>
+                    <!-- Save Preset Modal -->
+                    <div id="preset-save-modal" class="preset-modal-overlay" style="display:none;">
+                        <div class="preset-modal">
+                            <div class="preset-modal-header">Save as Preset</div>
+                            <div class="preset-modal-body">
+                                <label for="preset-save-name">Save the current config as:</label>
+                                <input type="text" id="preset-save-name" class="preset-save-name-input" placeholder="e.g. Robot Hand by CR2" autocomplete="off">
+                                <div id="preset-save-overwrite-warning" class="preset-overwrite-warning" style="display:none;"></div>
+                            </div>
+                            <div class="preset-modal-footer">
+                                <button type="button" id="preset-save-cancel" class="preset-modal-btn preset-modal-btn--cancel">Cancel</button>
+                                <button type="button" id="preset-save-confirm" class="preset-modal-btn preset-modal-btn--save">Save</button>
+                            </div>
                         </div>
                     </div>
                     <div class="config-content" id="config-content">

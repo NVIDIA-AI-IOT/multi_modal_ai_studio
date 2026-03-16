@@ -27,7 +27,7 @@ from aiohttp import web
 load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
-from multi_modal_ai_studio.config.schema import LLMConfig
+from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.riva import list_riva_tts_voices_sync
@@ -224,6 +224,11 @@ class WebUIServer:
         self.app.router.add_get('/api/devices/audio-outputs', self.handle_list_audio_outputs)
         self.app.router.add_get('/api/camera/stream', self.handle_camera_stream)
         self.app.router.add_get('/api/config/initial', self.handle_initial_config)
+        self.app.router.add_get('/api/config/defaults', self.handle_config_defaults)
+        self.app.router.add_get('/api/presets', self.handle_list_presets)
+        self.app.router.add_post('/api/presets', self.handle_save_preset)
+        self.app.router.add_delete('/api/presets/{name}', self.handle_delete_preset)
+        self.app.router.add_get('/api/presets/{name}', self.handle_get_preset)
         self.app.router.add_get('/api/videos/list', self.handle_list_videos)
         self.app.router.add_get('/api/videos/file', self.handle_serve_video)
         self.app.router.add_get('/api/app/session-dir', self.handle_get_session_dir)
@@ -394,6 +399,116 @@ class WebUIServer:
         if self.initial_config:
             return web.json_response(self.initial_config)
         return web.json_response({})
+
+    async def handle_config_defaults(self, request: web.Request) -> web.Response:
+        """GET /api/config/defaults: return a full SessionConfig with all schema defaults.
+
+        This is the single source of truth for default values.  The frontend
+        can use this to seed its config object instead of maintaining a
+        duplicate hardcoded ``defaultConfig`` in JavaScript.
+        """
+        from dataclasses import asdict
+        return web.json_response(asdict(SessionConfig()))
+
+    # ── Preset management ────────────────────────────────────────────────
+
+    def _get_presets_dir(self) -> Path:
+        """Return the presets/ folder (repo root or next to session_dir)."""
+        candidates = [
+            Path(__file__).resolve().parents[3] / "presets",
+            self.session_dir.parent / "presets",
+            Path("presets"),
+        ]
+        for d in candidates:
+            if d.is_dir():
+                return d
+        return candidates[0]
+
+    async def handle_list_presets(self, request: web.Request) -> web.Response:
+        """GET /api/presets — list available preset YAML files with name/description/app_version."""
+        import yaml as _yaml
+        presets_dir = self._get_presets_dir()
+        if not presets_dir.is_dir():
+            return web.json_response({"presets": [], "presets_dir": str(presets_dir)})
+
+        result = []
+        for f in sorted(presets_dir.iterdir()):
+            if f.suffix.lower() in (".yaml", ".yml") and f.is_file():
+                try:
+                    data = _yaml.safe_load(f.read_text()) or {}
+                except Exception:
+                    data = {}
+                result.append({
+                    "filename": f.name,
+                    "name": data.get("name", f.stem),
+                    "description": data.get("description", ""),
+                    "app_version": data.get("app_version"),
+                })
+        return web.json_response({"presets": result, "presets_dir": str(presets_dir)})
+
+    async def handle_get_preset(self, request: web.Request) -> web.Response:
+        """GET /api/presets/{name} — return full preset config by filename (without .yaml extension)."""
+        import yaml as _yaml
+        name = request.match_info["name"].removesuffix(".yaml")
+        presets_dir = self._get_presets_dir()
+        preset_path = presets_dir / f"{name}.yaml"
+        if not preset_path.is_file():
+            return web.json_response({"error": f"Preset '{name}' not found"}, status=404)
+        try:
+            data = _yaml.safe_load(preset_path.read_text()) or {}
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=500)
+        return web.json_response(data)
+
+    async def handle_save_preset(self, request: web.Request) -> web.Response:
+        """POST /api/presets — save current config as a named preset YAML file.
+
+        Body: {"name": "My Preset", "config": { ... full config dict ... }}
+        The filename is derived from the name (slugified).
+        """
+        import yaml as _yaml
+        import re
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+        preset_name = (body.get("name") or "").strip()
+        config = body.get("config")
+        if not preset_name or not config:
+            return web.json_response({"error": "name and config are required"}, status=400)
+
+        slug = re.sub(r'[^a-z0-9]+', '-', preset_name.lower()).strip('-')
+        if not slug:
+            return web.json_response({"error": "Invalid preset name"}, status=400)
+
+        presets_dir = self._get_presets_dir()
+        presets_dir.mkdir(parents=True, exist_ok=True)
+
+        config["name"] = preset_name
+        if "app_version" not in config or not config["app_version"]:
+            config["app_version"] = "0.1.0"
+
+        preset_path = presets_dir / f"{slug}.yaml"
+        header = (
+            "# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\n"
+            "# SPDX-License-Identifier: Apache-2.0\n"
+        )
+        yaml_content = _yaml.dump(config, default_flow_style=False, sort_keys=False)
+        preset_path.write_text(header + yaml_content)
+        logger.info("Saved preset '%s' to %s", preset_name, preset_path)
+        return web.json_response({"filename": preset_path.name, "name": preset_name, "path": str(preset_path)})
+
+    async def handle_delete_preset(self, request: web.Request) -> web.Response:
+        """DELETE /api/presets/{name} — delete a preset YAML file."""
+        name = request.match_info["name"].removesuffix(".yaml")
+        presets_dir = self._get_presets_dir()
+        preset_path = presets_dir / f"{name}.yaml"
+        if not preset_path.is_file():
+            return web.json_response({"error": f"Preset '{name}' not found"}, status=404)
+        preset_path.unlink()
+        logger.info("Deleted preset '%s' at %s", name, preset_path)
+        return web.json_response({"deleted": name})
 
     async def handle_llm_models(self, request: web.Request) -> web.Response:
         """List available LLM models at the given API base URL (Ollama, vLLM, OpenAI, etc.)."""

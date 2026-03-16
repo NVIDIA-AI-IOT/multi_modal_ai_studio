@@ -1,7 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Cosmos-Reason2 on TensorRT Edge LLM — fast edge inference with video input.
+# Reasoning is disabled (TensorRT Edge LLM does not support <think> output).
+#
+# Prerequisites:
+#   - Riva ASR/TTS server on localhost:50051
+#   - TensorRT Edge LLM serving Cosmos-Reason2 on localhost:58010
+
 name: "Cosmos-Reason2 (TensorRT Edge LLM)"
-description: "Cosmos-Reason2 on TensorRT Edge LLM backend — optimized edge inference with video input"
+description: "Riva ASR/TTS + Cosmos-Reason2 via TensorRT Edge LLM with vision, no reasoning. All browser devices."
+app_version: "0.1.0"
 
 asr:
   scheme: riva
@@ -16,21 +25,29 @@ asr:
 llm:
   scheme: openai
   api_base: http://localhost:58010/v1
-  model: /workspace/cosmos_onnx/visual-fp16
+  model: /workspace/cosmos_reason2_8b
   temperature: 0.3
   max_tokens: 512
   history_turns: 0
-  enable_reasoning: false
+  include_conversation_history: false
+  enable_reasoning_through_user_prompt: false
   extra_request_body: '{"chat_template_kwargs": {"enable_thinking": false}}'
-  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Plain text only, no markdown, no bullet points, no emojis.
   enable_vision: true
-  vision_system_prompt: "You are a helpful voice and vision assistant. Give ONE short sentence answers only. Be direct. Plain text only, no markdown, no bullet points, no emojis."
+  vision_system_prompt: >-
+    You are a helpful voice and vision assistant.
+    Give ONE short sentence answers only. Be direct.
+    Plain text only, no markdown, no bullet points, no emojis.
   vision_frames: 30
   vision_detail: auto
   vision_quality: 0.8
   vision_max_width: 768
   vision_buffer_fps: 5.0
   vision_video_encode: true
+  vision_api_format: openai
+  vision_omit_last_assistant: true
 
 tts:
   scheme: riva
@@ -40,6 +57,7 @@ tts:
   stream_tts: true
 
 devices:
+  video_source: browser
   audio_input_source: browser
   audio_output_source: browser
 
@@ -48,4 +66,3 @@ app:
   timeline_position: right
   session_auto_save: true
   session_output_dir: ./sessions
-  theme: dark

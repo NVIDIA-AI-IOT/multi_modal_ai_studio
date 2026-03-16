@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Voice-only assistant — no camera, no vision.
+# Simple voice conversation: Riva ASR → LLM → Riva TTS.
+#
+# Prerequisites:
+#   - Riva ASR/TTS server on localhost:50051
+#   - Any OpenAI-compatible LLM endpoint (default: Ollama on localhost:11434)
+
+name: "Voice Only"
+description: "Voice assistant without vision — Riva ASR/TTS + LLM text conversation"
+app_version: "0.1.0"
+
+asr:
+  scheme: riva
+  server: localhost:50051
+  model: parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer
+  language: en-US
+  vad_start_threshold: 0.5
+  vad_stop_threshold: 0.3
+  speech_pad_ms: 500
+  speech_timeout_ms: 700
+
+llm:
+  scheme: openai
+  api_base: http://localhost:11434/v1
+  model: llama3.2:3b
+  temperature: 0.7
+  max_tokens: 512
+  include_conversation_history: true
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Plain text only, no markdown, no bullet points, no emojis.
+  enable_vision: false
+
+tts:
+  scheme: riva
+  server: localhost:50051
+  voice: ""
+  sample_rate: 22050
+  stream_tts: true
+
+devices:
+  video_source: none
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  timeline_position: right
+  session_auto_save: true
+  session_output_dir: ./sessions
