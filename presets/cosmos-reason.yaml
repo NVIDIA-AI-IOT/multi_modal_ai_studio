@@ -1,35 +1,52 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-name: "Cosmos-Reason2 VLM"
-description: "Optimized for Cosmos-Reason2 vision model with temporal video encoding"
+#
+# Cosmos-Reason2 VLM served by vLLM — vision + chain-of-thought reasoning.
+# Flagship Jetson configuration: Riva ASR → vLLM (Cosmos-Reason2) → Riva TTS.
+#
+# Prerequisites:
+#   - Riva ASR/TTS server on localhost:50051
+#   - vLLM serving Cosmos-Reason2 on localhost:8010
+
+name: "Cosmos-Reason2 VLM (vLLM)"
+description: "Riva ASR/TTS + Cosmos-Reason2 via vLLM with vision and reasoning"
+app_version: "0.1.0"
 
 asr:
   scheme: riva
   server: localhost:50051
   model: parakeet-1.1b-en-US-asr-streaming-silero-vad-sortformer
   language: en-US
-  vad_start_threshold: 0.5      # Balanced — 0.6 was too high, missed onsets of soft speech
-  vad_stop_threshold: 0.3       # Standard stop threshold
-  speech_pad_ms: 600            # Pre-speech padding to capture leading words (400 was too low)
-  speech_timeout_ms: 1200       # Silence before end-of-speech
+  vad_start_threshold: 0.5
+  vad_stop_threshold: 0.3
+  speech_pad_ms: 600
+  speech_timeout_ms: 1200
 
 llm:
   scheme: openai
   api_base: http://localhost:8010/v1
-  model: /model
-  temperature: 0.3          # Low temp — critical for precise, consistent vision responses
-  max_tokens: 512           # Hard cap on reasoning+answer combined; model uses ~150-275 total
-  history_turns: 0           # Disabled — text-only history anchors VLM to prior answers
-  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
+  model: nvidia/cosmos-reason2-8b-fp8
+  temperature: 0.3
+  max_tokens: 512
+  history_turns: 0
+  include_conversation_history: false
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Plain text only, no markdown, no bullet points, no emojis.
   enable_vision: true
-  vision_system_prompt: "You are a helpful voice and vision assistant. Give ONE short sentence answers only. Be direct. Plain text only, no markdown, no bullet points, no emojis."
-  vision_frames: 30         # Video mode: request many frames for temporal video encoding
+  vision_system_prompt: >-
+    You are a helpful voice and vision assistant.
+    Give ONE short sentence answers only. Be direct.
+    Plain text only, no markdown, no bullet points, no emojis.
+  vision_frames: 30
   vision_detail: auto
   vision_quality: 0.8
   vision_max_width: 768
   vision_buffer_fps: 5.0
-  vision_video_encode: true      # Encode frames as MP4 video for temporal understanding
-  enable_reasoning: true         # Allow <think> chain-of-thought (filtered from TTS, shown in UI)
+  vision_video_encode: true
+  vision_api_format: openai
+  vision_omit_last_assistant: true
+  enable_reasoning_through_user_prompt: true
 
 tts:
   scheme: riva
@@ -48,6 +65,3 @@ app:
   timeline_position: right
   session_auto_save: true
   session_output_dir: ./sessions
-  theme: dark
-
-

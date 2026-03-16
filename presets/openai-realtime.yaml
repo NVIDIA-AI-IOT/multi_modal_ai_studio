@@ -1,12 +1,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# OpenAI Realtime API — ultra-low-latency voice via WebSocket.
+# All ASR/LLM/TTS handled by OpenAI's realtime endpoint.
+#
+# Prerequisites:
+#   - OPENAI_API_KEY environment variable set
+
 name: "OpenAI Realtime"
-description: "OpenAI Realtime API for low-latency voice interaction"
+description: "OpenAI Realtime API for low-latency cloud-based voice interaction"
+app_version: "0.1.0"
 
 asr:
   scheme: openai-realtime
   api_base: wss://api.openai.com/v1/realtime
-  # api_key: set via environment variable OPENAI_API_KEY
   model: gpt-4o-realtime-preview
   vad_start_threshold: 0.5
   vad_stop_threshold: 0.3
@@ -19,11 +26,12 @@ llm:
   model: gpt-4o-realtime-preview
   temperature: 0.7
   max_tokens: 512
-  system_prompt: "You are a helpful voice AI assistant. Plain text only, no markdown, no bullet points, no emojis."
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Plain text only, no markdown, no bullet points, no emojis.
 
 tts:
   scheme: openai-realtime
-  # Uses same WebSocket connection as ASR
   voice: alloy
   sample_rate: 24000
 
@@ -37,4 +45,3 @@ app:
   timeline_position: right
   session_auto_save: true
   session_output_dir: ./sessions
-  theme: dark

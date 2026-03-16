@@ -491,7 +491,7 @@ class OpenAILLMBackend(LLMBackend):
         # Append reasoning prompt to user message when enabled
         if (
             not self.config.minimal_output
-            and getattr(self.config, "enable_reasoning", False)
+            and getattr(self.config, "enable_reasoning_through_user_prompt", False)
         ):
             reasoning_fmt = getattr(self.config, "reasoning_prompt", "") or ""
             if reasoning_fmt:
