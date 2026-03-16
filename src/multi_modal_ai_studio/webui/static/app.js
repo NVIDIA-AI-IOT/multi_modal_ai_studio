@@ -888,6 +888,9 @@ async function onPresetSelected(slug) {
         _serverPresetConfig = normalized;
         console.log('[Preset] Applied preset:', normalized.name || slug);
         renderConfig();
+        refreshPipelineDisplay();
+        setTimeout(function () { startPreviewStream(); }, 100);
+        scheduleWarmup();
     } catch (e) {
         console.warn('[Preset] Failed to load preset:', e);
     }
