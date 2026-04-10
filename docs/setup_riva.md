@@ -212,7 +212,7 @@ You'll be prompted for:
 
 ```bash
 # List available Riva resources
-ngc registry resource list nvidia/riva
+ngc registry resource list nvidia/riva/*
 
 # Should show empty table if not entitled, or list resources if access granted
 ```
@@ -324,7 +324,7 @@ Preparing model repository...
 
 **Troubleshooting**:
 - **403 errors**: NGC credentials expired or no entitlement
-  - Verify: `ngc registry resource list nvidia/riva`
+  - Verify: `ngc registry resource list nvidia/riva/*`
   - Fix: Reconfigure with correct team: `ngc config set`
 - **Out of disk space**: Models are 5-20 GB; ensure sufficient space on Jetson
   - Check: `df -h`

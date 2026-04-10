@@ -202,7 +202,7 @@ NGC API keys are different from NVIDIA API keys (`nvapi-...`). If `riva_init.sh`
 3. **Verify access**:
 
 ```bash
-ngc registry resource list nvidia/riva
+ngc registry resource list nvidia/riva/*
 ```
 
 You should see resources listed. Empty table usually means no Riva entitlement for that org/team.

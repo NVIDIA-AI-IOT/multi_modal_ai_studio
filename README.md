@@ -35,6 +35,10 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 - **Devices**: Client-side (browser WebRTC) and server-side (Linux USB mic, USB speaker, USB webcam); choose in the Devices tab.
 - **Headless** (experimental, not well tested): CLI with config file or args; see [INSTALL.md](INSTALL.md).
 
+## 🏗️ Architecture
+
+![Multi Modal AI Studio Architecture](./docs/images/MMAS-arch.png)
+
 ## 🚀 Quick Start
 
 ### Prerequisites
