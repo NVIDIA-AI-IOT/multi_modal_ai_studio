@@ -52,6 +52,11 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
 
+> **Note:** If `python3 -m venv` fails with "No module named venv", install the venv package for your Python version:
+> ```bash
+> sudo apt install python3-venv   # or python3.X-venv, e.g. python3.10-venv, python3.12-venv
+> ```
+
 ```bash
 # Clone repository
 git clone https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio.git
@@ -75,7 +80,7 @@ Full steps and troubleshooting: [INSTALL.md](INSTALL.md)
 python -m multi_modal_ai_studio --port 8092
 ```
 
-Open **http://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
+Open **https://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
 
 ### Kill a Running Server
 
