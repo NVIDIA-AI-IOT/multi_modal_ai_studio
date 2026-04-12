@@ -1,0 +1,41 @@
+# Multi-modal AI Studio - Agent Skills
+# Published to the NVIDIA Skills Catalog: https://github.com/NVIDIA/skills
+# Follows the Agent Skills specification: https://agentskills.io/specification
+
+skills:
+  - name: voice-vision-session
+    path: .agents/skills/voice-vision-session/SKILL.md
+    version: "1.0.0"
+    category: voice-vision
+    description: Deploy and run a live voice + vision AI session (ASR → VLM → TTS) with camera or video input
+
+  - name: visual-question-answering
+    path: .agents/skills/visual-question-answering/SKILL.md
+    version: "1.1.0"
+    category: vision
+    description: Send images or video to a VLM and get text answers, with reasoning control, speech-synchronized video encoding, and UI configuration
+
+  - name: riva-speech
+    path: .agents/skills/riva-speech/SKILL.md
+    version: "1.0.0"
+    category: speech
+    description: Set up and configure NVIDIA Riva for speech-to-text (ASR) and text-to-speech (TTS)
+
+  - name: llm-backend-setup
+    path: .agents/skills/llm-backend-setup/SKILL.md
+    version: "1.0.0"
+    category: infrastructure
+    description: Configure and connect to an LLM/VLM backend (vLLM, Ollama, OpenAI)
+
+  - name: preset-configuration
+    path: .agents/skills/preset-configuration/SKILL.md
+    version: "1.0.0"
+    category: configuration
+    description: Create, load, and manage YAML presets defining the full ASR + LLM + TTS stack
+
+  - name: device-management
+    path: .agents/skills/device-management/SKILL.md
+    version: "1.0.0"
+    category: infrastructure
+    description: Enumerate and configure server-side USB cameras, microphones, and speakers
+
