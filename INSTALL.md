@@ -124,7 +124,7 @@ multi-modal-ai-studio --help
 
 ## NVIDIA Riva Setup (for voice ASR/TTS)
 
-To use **voice input/output** with the Riva backend, you need a running Riva server. This app does not install or start Riva; it connects to an existing Riva gRPC endpoint (typically `localhost:50051`).
+To use **voice input/output** with the Riva backend, you need a running Riva server. Riva is NVIDIA's GPU-accelerated speech SDK; it deploys NVIDIA Nemotron Speech models (e.g. **Parakeet** for ASR, **Magpie** for TTS) behind a gRPC API. This app does not install or start Riva; it connects to an existing Riva gRPC endpoint (typically `localhost:50051`).
 
 ### Platform support (as of 2025)
 

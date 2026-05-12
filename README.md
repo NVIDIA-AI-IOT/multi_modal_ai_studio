@@ -4,7 +4,7 @@
 
 **Voice, text, and video conversational AI with session analysis and latency metrics**
 
-Multi-modal AI Studio is a conversational AI interface for building and tuning voice AI systems. It supports NVIDIA Riva, OpenAI, and other backends; records sessions with full config snapshots; and provides a real-time timeline and latency analysis (TTFA, turn-taking) to compare and optimize setups.
+Multi-modal AI Studio is a conversational AI interface for building and tuning voice AI systems. It supports NVIDIA Riva (the GPU-accelerated speech SDK, running NVIDIA Nemotron Speech models such as Parakeet for ASR and Magpie for TTS), OpenAI, and other backends; records sessions with full config snapshots; and provides a real-time timeline and latency analysis (TTFA, turn-taking) to compare and optimize setups.
 
 ## 🌟 Key Features
 
@@ -16,7 +16,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 ### Multi-backend Architecture
 - Speech
-  - **NVIDIA Riva**: gRPC streaming ASR/TTS (Jetson/ARM64)
+  - **NVIDIA Riva**: gRPC streaming ASR/TTS SDK (Jetson/ARM64) — deploys NVIDIA Nemotron Speech models (Parakeet ASR, Magpie TTS)
   - **OpenAI-compatible Realtime API**: Realtime API
 - LLM: **OpenAI-compatible** REST API, to works with many inference engines for various LLM/VLM models
 - **Extensible**: Plugin-style backends; Azure Speech and others can be added

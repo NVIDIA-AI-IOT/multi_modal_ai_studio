@@ -2,6 +2,8 @@
 
 This guide walks through setting up NVIDIA Riva locally for voice (ASR/TTS). It is shared by **Multi-modal AI Studio** and **Live RIVA WebUI**.
 
+**Riva vs. Nemotron Speech**: Riva is NVIDIA's GPU-accelerated speech SDK — the gRPC server, container, and tooling described in this guide. The models it deploys (e.g. **Parakeet** for streaming ASR, **Magpie** for TTS) are part of NVIDIA's **Nemotron Speech** model family. Throughout this guide, "Riva" refers to the SDK/server; model-specific names (Parakeet, Magpie, Silero VAD) refer to what runs inside it.
+
 ## ⚠️ IMPORTANT CHANGE (January 2025)
 
 **NVIDIA Riva SDK platform support has changed significantly:**
@@ -276,8 +278,8 @@ tts_language_code=("multi")           # TTS language
 
 ### Model Selection Notes for Jetson
 
-**Riva 2.24.0 ARM64 defaults to Parakeet 1.1b:**
-- **Parakeet 1.1b**: Newer model, optimized for low latency, excellent quality
+**Riva 2.24.0 ARM64 defaults to Parakeet 1.1b (Nemotron Speech ASR):**
+- **Parakeet 1.1b**: Part of NVIDIA's Nemotron Speech model family; optimized for low latency, excellent quality
 - Language codes available: `en-US`, `multi` (multilingual)
 - Pre-optimized for Jetson GPUs (no build step required)
 
@@ -316,8 +318,8 @@ bash riva_init.sh
 ```
 Pulling Docker images...
 Downloading models from NGC...
-- Parakeet 1.1b English (US) ASR model
-- HiFiGAN English (US) TTS model
+- Parakeet 1.1b English (US) ASR model (Nemotron Speech)
+- Magpie Multilingual TTS model (Nemotron Speech)
 Preparing model repository...
 ✓ Initialization complete!
 ```
