@@ -2,8 +2,6 @@
 
 This guide walks through setting up NVIDIA Riva locally for voice (ASR/TTS). It is shared by **Multi-modal AI Studio** and **Live RIVA WebUI**.
 
-**Riva vs. Nemotron Speech**: Riva is NVIDIA's GPU-accelerated speech SDK — the gRPC server, container, and tooling described in this guide. The models it deploys (e.g. **Parakeet** for streaming ASR, **Magpie** for TTS) are part of NVIDIA's **Nemotron Speech** model family. Throughout this guide, "Riva" refers to the SDK/server; model-specific names (Parakeet, Magpie, Silero VAD) refer to what runs inside it.
-
 ## ⚠️ IMPORTANT CHANGE (January 2025)
 
 **NVIDIA Riva SDK platform support has changed significantly:**
