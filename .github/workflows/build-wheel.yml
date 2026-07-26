@@ -32,6 +32,11 @@ jobs:
       - name: Run unit tests
         run: pytest tests/unit -v -m "not slow"
 
+      - name: Run speech service contract tests
+        run: |
+          pip install -e "./services/openai_speech[dev]"
+          pytest services/openai_speech/tests -v
+
       - name: Install build tools
         run: pip install build twine
 
