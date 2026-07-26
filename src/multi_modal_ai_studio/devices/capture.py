@@ -22,6 +22,10 @@ CHANNELS = 1
 # Chunk size matching browser: 2048 samples = 4096 bytes @ 16-bit
 CHUNK_SAMPLES = 2048
 CHUNK_BYTES = CHUNK_SAMPLES * 2
+# Keep at most about two seconds of captured audio.  A server-side capture
+# thread must never build an unbounded backlog when the asyncio consumer is
+# delayed by model loading, a slow client, or a stalled backend.
+CAPTURE_QUEUE_MAX_CHUNKS = 16
 
 
 MAX_CAPTURE_RETRIES = 8
@@ -57,6 +61,7 @@ class CaptureHealth:
     device: str = ""
     total_drops: int = 0
     total_recoveries: int = 0
+    total_queue_overflows: int = 0
     outages: List[Dict[str, float]] = field(default_factory=list)
     gave_up: bool = False
 
@@ -66,10 +71,62 @@ class CaptureHealth:
             "device": self.device,
             "total_drops": self.total_drops,
             "total_recoveries": self.total_recoveries,
+            "total_queue_overflows": self.total_queue_overflows,
             "total_downtime_s": round(total_downtime, 3),
             "outages": self.outages,
             "gave_up": self.gave_up,
         }
+
+
+def create_capture_queue(
+    max_chunks: int = CAPTURE_QUEUE_MAX_CHUNKS,
+) -> "queue.Queue[Any]":
+    """Create the bounded queue shared by server-mic capture consumers."""
+    return queue.Queue(maxsize=max(1, int(max_chunks)))
+
+
+def put_capture_item(
+    out_queue: "queue.Queue[Any]",
+    item: Any,
+    health: Optional[CaptureHealth] = None,
+) -> bool:
+    """Put an item without ever blocking the real-time capture thread.
+
+    When the consumer falls behind, discard the oldest queued item and retain
+    the newest audio/control item.  This bounds latency and memory instead of
+    replaying stale microphone audio seconds later.
+
+    Returns True when an older item had to be discarded.
+    """
+    try:
+        out_queue.put_nowait(item)
+        return False
+    except queue.Full:
+        pass
+
+    try:
+        out_queue.get_nowait()
+    except queue.Empty:
+        pass
+
+    overflowed = True
+    if health is not None:
+        health.total_queue_overflows += 1
+        count = health.total_queue_overflows
+        if count == 1 or count % 50 == 0:
+            logger.warning(
+                "[capture_health] Capture queue overflow for %s; "
+                "discarding stale audio (total=%d)",
+                health.device or "unknown device",
+                count,
+            )
+    try:
+        out_queue.put_nowait(item)
+    except queue.Full:
+        # Another producer is not expected, but do not block capture if one
+        # exists.  The next chunk will try again.
+        logger.warning("Capture queue remained full after discarding one item")
+    return overflowed
 
 
 def _capture_alsa(
@@ -115,7 +172,14 @@ def _capture_alsa(
                 proc_holder.append(proc)
         except FileNotFoundError:
             logger.warning("arecord not found; cannot capture from ALSA device %s", device)
-            out_queue.put(None)
+            if health is not None:
+                health.gave_up = True
+            put_capture_item(
+                out_queue,
+                _make_capture_event("gave_up", device=device, retries=retries, reason="arecord_not_found"),
+                health,
+            )
+            put_capture_item(out_queue, None, health)
             return
         except Exception as e:
             logger.warning("Failed to start arecord for %s: %s", device, e)
@@ -123,7 +187,12 @@ def _capture_alsa(
                 logger.error("ALSA capture giving up after %d retries for %s", retries, device)
                 if health is not None:
                     health.gave_up = True
-                out_queue.put(None)
+                put_capture_item(
+                    out_queue,
+                    _make_capture_event("gave_up", device=device, retries=retries, reason="start_failed"),
+                    health,
+                )
+                put_capture_item(out_queue, None, health)
                 return
             retries += 1
             delay = min(RETRY_BACKOFF_BASE * (2 ** (retries - 1)), RETRY_BACKOFF_MAX)
@@ -161,13 +230,20 @@ def _capture_alsa(
                             health.total_recoveries += 1
                             if health.outages:
                                 health.outages[-1]["duration_s"] = round(recovery_dur, 3)
-                        out_queue.put(_make_capture_event(
-                            "recovered", device=device, outage_s=round(recovery_dur, 3), retry=retries,
-                        ))
+                        put_capture_item(
+                            out_queue,
+                            _make_capture_event(
+                                "recovered",
+                                device=device,
+                                outage_s=round(recovery_dur, 3),
+                                retry=retries,
+                            ),
+                            health,
+                        )
                         drop_time = None
                     retries = 0
                     ever_produced_chunk = True
-                out_queue.put(chunk)
+                put_capture_item(out_queue, chunk, health)
 
             # arecord exited on its own (proc.poll() != None) while we didn't ask it to stop
             if not died_unexpectedly and not stop_event.is_set() and proc.poll() is not None:
@@ -211,9 +287,16 @@ def _capture_alsa(
                 "%s[capture_health] DROPPED device %s; retry %d/%d in %.1fs%s",
                 _RED, device, retries, MAX_CAPTURE_RETRIES, delay, _RESET,
             )
-            out_queue.put(_make_capture_event(
-                "dropped", device=device, retry=retries, max_retries=MAX_CAPTURE_RETRIES,
-            ))
+            put_capture_item(
+                out_queue,
+                _make_capture_event(
+                    "dropped",
+                    device=device,
+                    retry=retries,
+                    max_retries=MAX_CAPTURE_RETRIES,
+                ),
+                health,
+            )
             stop_event.wait(delay)
             continue
 
@@ -223,7 +306,11 @@ def _capture_alsa(
                 health.gave_up = True
                 if health.outages:
                     health.outages[-1]["duration_s"] = round(time.time() - drop_time, 3) if drop_time else 0
-            out_queue.put(_make_capture_event("gave_up", device=device, retries=retries))
+            put_capture_item(
+                out_queue,
+                _make_capture_event("gave_up", device=device, retries=retries),
+                health,
+            )
         elif first_chunk_this_run and not ever_produced_chunk:
             try:
                 err = proc.stderr.read().decode("utf-8", errors="replace").strip() if proc.stderr else ""
@@ -244,26 +331,43 @@ def _capture_alsa(
             summary["total_downtime_s"], summary["gave_up"], _RESET,
         )
 
-    out_queue.put(None)
+    put_capture_item(out_queue, None, health)
 
 
 def _capture_pyaudio(
     device_index_str: str,
     out_queue: "queue.Queue[Optional[bytes]]",
     stop_event: threading.Event,
+    health: Optional[CaptureHealth] = None,
 ) -> None:
     """Capture from PyAudio device by index; put PCM chunks in out_queue. Runs in thread."""
+    if health is not None:
+        health.device = device_index_str
     try:
         import pyaudio
     except ImportError:
         logger.warning("PyAudio not installed; cannot capture from USB device %s", device_index_str)
-        out_queue.put(None)
+        put_capture_item(
+            out_queue,
+            _make_capture_event("gave_up", device=device_index_str, reason="pyaudio_not_installed"),
+            health,
+        )
+        if health is not None:
+            health.gave_up = True
+        put_capture_item(out_queue, None, health)
         return
     try:
         device_index = int(device_index_str)
     except ValueError:
         logger.warning("Invalid pyaudio device index: %s", device_index_str)
-        out_queue.put(None)
+        put_capture_item(
+            out_queue,
+            _make_capture_event("gave_up", device=device_index_str, reason="invalid_device"),
+            health,
+        )
+        if health is not None:
+            health.gave_up = True
+        put_capture_item(out_queue, None, health)
         return
     pa = pyaudio.PyAudio()
     try:
@@ -278,22 +382,32 @@ def _capture_pyaudio(
     except Exception as e:
         logger.warning("Failed to open PyAudio device %s: %s", device_index, e)
         pa.terminate()
-        out_queue.put(None)
+        put_capture_item(
+            out_queue,
+            _make_capture_event("gave_up", device=device_index_str, reason="open_failed"),
+            health,
+        )
+        if health is not None:
+            health.gave_up = True
+        put_capture_item(out_queue, None, health)
         return
     first_chunk = True
+    terminal_reason: Optional[str] = None
     try:
         while not stop_event.is_set():
             try:
                 data = stream.read(CHUNK_SAMPLES, exception_on_overflow=False)
                 if not data:
+                    terminal_reason = "empty_read"
                     break
                 if first_chunk:
                     first_chunk = False
                     logger.info("PyAudio first PCM chunk from device %s (%d bytes); pipeline will get amplitude", device_index_str, len(data))
-                out_queue.put(data)
+                put_capture_item(out_queue, data, health)
             except Exception as e:
                 if not stop_event.is_set():
                     logger.warning("PyAudio read error for device %s: %s", device_index_str, e)
+                    terminal_reason = "read_failed"
                 break
     finally:
         try:
@@ -302,7 +416,19 @@ def _capture_pyaudio(
         except Exception:
             pass
         pa.terminate()
-        out_queue.put(None)
+        if terminal_reason and not stop_event.is_set():
+            if health is not None:
+                health.gave_up = True
+            put_capture_item(
+                out_queue,
+                _make_capture_event(
+                    "gave_up",
+                    device=device_index_str,
+                    reason=terminal_reason,
+                ),
+                health,
+            )
+        put_capture_item(out_queue, None, health)
         if first_chunk:
             logger.warning("PyAudio capture ended without sending any chunks (device %s)", device_index_str)
 
@@ -338,7 +464,7 @@ def start_server_mic_capture(
         args = (device, out_queue, stop_event, proc_holder, health)
     elif source == "usb":
         target = _capture_pyaudio
-        args = (device, out_queue, stop_event)
+        args = (device, out_queue, stop_event, health)
     else:
         return None
     if health_out is not None:
@@ -347,3 +473,46 @@ def start_server_mic_capture(
     t.start()
     logger.info("Server mic capture started: %s device %s", source, device)
     return t
+
+
+def stop_server_mic_capture(
+    stop_event: Optional[threading.Event],
+    capture_thread: Optional[threading.Thread] = None,
+    proc_holder: Optional[list] = None,
+    join_timeout: float = 2.0,
+) -> bool:
+    """Stop a server capture and release its device deterministically.
+
+    ALSA's ``read()`` can remain blocked after merely setting the stop event,
+    so terminate the owned ``arecord`` process before joining the thread.
+    Returns True when no capture thread remains alive.
+    """
+    if stop_event is not None:
+        stop_event.set()
+
+    proc = proc_holder[0] if proc_holder else None
+    if proc is not None:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+            proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=1.0)
+            except Exception:
+                logger.debug("Could not kill server microphone capture process", exc_info=True)
+        except Exception:
+            logger.debug("Could not terminate server microphone capture process", exc_info=True)
+        finally:
+            try:
+                proc_holder.clear()
+            except Exception:
+                pass
+
+    if capture_thread is not None and capture_thread.is_alive():
+        capture_thread.join(timeout=max(0.0, join_timeout))
+    alive = bool(capture_thread is not None and capture_thread.is_alive())
+    if alive:
+        logger.warning("Server microphone capture thread did not stop within %.1fs", join_timeout)
+    return not alive

@@ -9,6 +9,8 @@ from multi_modal_ai_studio.config.schema import (
     LLMConfig,
     TTSConfig,
     AppConfig,
+    DeviceConfig,
+    SessionConfig,
 )
 
 
@@ -56,5 +58,38 @@ def test_app_config_minimal():
     """AppConfig can be constructed with defaults."""
     cfg = AppConfig()
     assert hasattr(cfg, "barge_in_enabled")
+    assert cfg.barge_in_trigger == "final"
+    assert cfg.barge_in_partial_count == 3
     assert hasattr(cfg, "timeline_position")
     assert hasattr(cfg, "session_output_dir")
+
+
+def test_app_config_validates_partial_barge_in_count():
+    assert AppConfig(barge_in_partial_count=1).validate() == []
+    assert AppConfig(barge_in_partial_count=20).validate() == []
+    assert AppConfig(barge_in_partial_count=0).validate()
+    assert AppConfig(barge_in_partial_count=21).validate()
+
+
+@pytest.mark.parametrize("source", ["alsa", "usb"])
+def test_server_audio_device_config_round_trip(source):
+    config = SessionConfig(
+        devices=DeviceConfig(
+            audio_input_source=source,
+            audio_input_device="hw:2,0" if source == "alsa" else "2",
+            audio_input_device_name="USB microphone",
+            audio_output_source=source,
+            audio_output_device="hw:3,0" if source == "alsa" else "3",
+            audio_output_device_name="USB speaker",
+        ),
+        app=AppConfig(
+            barge_in_enabled=True,
+            barge_in_trigger="partial",
+            barge_in_partial_count=4,
+        ),
+    )
+
+    restored = SessionConfig.from_dict(config.to_dict())
+
+    assert restored.devices == config.devices
+    assert restored.app == config.app
