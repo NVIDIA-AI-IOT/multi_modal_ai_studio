@@ -2,9 +2,18 @@
 
 This document traces how microphone PCM flows through the pipeline for **Browser** and **Server USB** input, with file/line references. For high-level flow and system context, see [architecture.md](architecture.md).
 
-**Refactor status (current implementation):** Server-side duplicate logic has been unified. A single **live** path (`_feed_pcm_to_pipeline`) and single **preview** path (`_feed_pcm_preview_only`) are used by both browser and server mic. Sections **§4.1**, **§4.2**, and **§5** describe the refactored flow; line numbers below refer to the current `voice_pipeline.py` (and `devices/capture.py` where noted).
+**Refactor status (current implementation):** Server-side duplicate logic has been unified. A single **live** path (`_feed_pcm_to_pipeline`) and single **preview** path (`_feed_pcm_preview_only`) are used by both browser and server mic in the classic cascade. Realtime keeps its required 16-to-24 kHz conversion inline, but follows the same preview → `start_session` → live lifecycle for both sources.
 
-**Classic Riva path only** (ASR + LLM + TTS). Realtime path has analogous structure but different entry points.
+The classic cascade supports both Riva and OpenAI-compatible REST ASR/TTS services. Realtime speech-to-speech is covered in §7.
+
+### Hardened server-audio guarantees
+
+- The capture queue is bounded to about two seconds. If the async consumer falls behind, the oldest PCM is discarded so stale audio is not replayed later and memory cannot grow without bound.
+- ALSA capture owns its `arecord` process. Stop, disconnect, validation failure, and backend connection failure all terminate the process and join the capture thread.
+- Capture drop/recovery/give-up records are control events, not PCM. The classic, Realtime, and microphone-preview consumers report them to the browser and terminate a dead session instead of waiting silently.
+- Odd-length or empty PCM is aligned before RMS and resampling, preventing malformed device chunks from reaching NumPy/`struct`.
+- Browser and Server Mic sessions begin only on `start_session`. Preview audio is amplitude-only and never reaches ASR/Realtime.
+- Server Speaker playback is stopped by backend barge-in. Both final-transcript and configurable N-partial triggers are supported.
 
 ---
 
@@ -53,8 +62,8 @@ This document traces how microphone PCM flows through the pipeline for **Browser
 |------|----------|--------------|
 | 1 | `voice_pipeline.py` ~191–198 | `use_server_mic = True`; creates `capture_queue`, `stop_capture`; **`start_server_mic_capture(source, device, capture_queue, stop_capture)`** starts a **thread**. |
 | 2 | `devices/capture.py` ~160–195 `start_server_mic_capture()` | Dispatches to **`_capture_alsa(device, ...)`** or **`_capture_pyaudio(device_index_str, ...)`**. |
-| 3 | `_capture_alsa` ~23–82 | Runs **`arecord -D plughw:X,Y -f S16_LE -r 16000 -c 1 -t raw`**; reads **CHUNK_BYTES (4096)** in a loop; **`out_queue.put(chunk)`**. On stop or error, **`out_queue.put(None)`**. |
-| 4 | `_capture_pyaudio` ~99–157 | **PyAudio** `open(..., rate=16000, frames_per_buffer=CHUNK_SAMPLES=2048)`; **`stream.read(CHUNK_SAMPLES)`** → **`out_queue.put(data)`**. Same chunk size as browser (2048 samples = 4096 bytes). |
+| 3 | `_capture_alsa` | Runs **`arecord -D plughw:X,Y -f S16_LE -r 16000 -c 1 -t raw`**; reads **CHUNK_BYTES (4096)** in a loop; uses non-blocking `put_capture_item`. On transient failure it reports drop/recovery events and retries. On stop or terminal error it reports status and enqueues **`None`**. |
+| 4 | `_capture_pyaudio` | **PyAudio** `open(..., rate=16000, frames_per_buffer=CHUNK_SAMPLES=2048)`; **`stream.read(CHUNK_SAMPLES)`** → bounded capture queue. Same chunk size as browser (2048 samples = 4096 bytes). |
 
 **Summary**: ALSA or PyAudio thread produces **16 kHz, 16-bit mono** chunks into **capture_queue**. Same format and size as browser chunks.
 
@@ -83,7 +92,7 @@ This document traces how microphone PCM flows through the pipeline for **Browser
 | **LLM + TTS** | Same `turn_executor()` | Same |
 | **TTS output** | Same (browser base64 and/or server speaker) | Same |
 
-The **only** difference is **who produces the bytes** (browser vs capture thread). Both paths feed the **same** helpers: `_feed_pcm_preview_only` (preview) and `_feed_pcm_to_pipeline` (live).
+The intentional difference is **who produces the bytes** (browser vs capture thread). Server capture additionally owns queue backpressure, device-health events, retry, and process cleanup. After valid PCM reaches the classic pipeline, both paths feed the **same** helpers: `_feed_pcm_preview_only` (preview) and `_feed_pcm_to_pipeline` (live).
 
 ---
 
@@ -129,10 +138,10 @@ We did not previously document the full set of message types in one place. Here 
 | Message | When sent | Purpose |
 |--------|-----------|--------|
 | `{ "type": "config", "config": { ... } }` | **First message** after the WebSocket opens (in both Browser and Server Mic). Client sends this in `ws.onopen` using `buildVoiceConfig()`. | Server requires this to initialize the session (devices, ASR/TTS/LLM settings). Server merges into `session.config`. |
-| `{ "type": "start_session", "config": { ... } }` | When the user clicks **START**. Config is optional but usually included so the saved session has the latest devices (e.g. speaker changed after preview). | Server merges config if present, calls `session.start()`, and (Server Mic only) sets `pipeline_live`. |
+| `{ "type": "start_session", "config": { ... } }` | When the user clicks **START**. Config is optional but usually included so the saved session has the latest devices (e.g. speaker changed after preview). | Server merges config if present, calls `session.start()`, and sets `pipeline_live` for either Browser or Server Mic. |
 | `{ "type": "stop", ... }` | When the user clicks **STOP**. May include `system_stats`, `tts_playback_segments`, `audio_amplitude_history`, `ttl_bands`, etc. | Server saves payload onto session and closes the pipeline. |
 
-**Client → server (BINARY):** PCM chunks (Int16, 16 kHz) — **only in Browser Mic mode**, and only after START. In Server Mic mode the client never sends binary.
+**Client → server (BINARY):** PCM chunks (Int16, 16 kHz) — **only in Browser Mic mode**. Before START they drive preview amplitude only; after START they feed the selected speech backend. In Server Mic mode the client never sends binary.
 
 **When is config sent?** Config is **not** pushed on every UI change. It is sent (1) **once** when the voice WebSocket opens (`type: 'config'`), and (2) **again** when the user clicks START, inside the `start_session` payload. So if you change mic or speaker in the UI and then click START, the server gets the updated config with start_session. If you change something mid-session without reconnecting, the server does not see it until the next START or reconnect.
 
@@ -236,7 +245,7 @@ After **`_feed_pcm_preview_only`** / **`_feed_pcm_to_pipeline`**, the pipeline i
 | **backends/asr/riva.py** | `send_audio` (called from `_feed_pcm_to_pipeline`) | Same |
 | **voice_pipeline.py** (shared) | `asr_consumer`, `turn_executor` | Same |
 
-Browser and Server USB differ only by **source of PCM** (WebSocket vs capture_queue). Per-chunk handling is unified in `_feed_pcm_preview_only` and `_feed_pcm_to_pipeline` (**refactored**). A separate **/ws/mic-preview** WebSocket (server mic level only, no ASR/LLM/TTS) uses its own inline amplitude in `handle_mic_preview_ws` (~982–1006) and does not use the shared helpers.
+Browser and Server USB differ intentionally at the PCM producer and device-lifecycle layer (WebSocket vs bounded capture queue + health events + process ownership). Per-chunk classic handling is unified in `_feed_pcm_preview_only` and `_feed_pcm_to_pipeline`. A separate **/ws/mic-preview** WebSocket (server mic level only, no ASR/LLM/TTS) uses its own inline amplitude in `handle_mic_preview_ws`; it shares the same bounded capture and cleanup helpers.
 
 ---
 
@@ -257,8 +266,8 @@ When ASR is **OpenAI Realtime** (`asr.scheme == "openai-realtime"`, `realtime_se
 
 | Step | Location | What happens |
 |------|----------|--------------|
-| 1 | `app.js` | Same as classic Browser Mic: client sends **config** then **start_session**; after that it sends **binary PCM** (Int16, 16 kHz) over /ws/voice. No change in client behavior for Realtime. |
-| 2 | `voice_pipeline.py` ~411–430 `receive_loop()` | On **BINARY** message (and `not use_server_mic`): **`await session_ready.wait()`** (do not send until Realtime session is ready). **`pcm_24 = pcm_for_realtime(msg.data)`** (~413): resamples 16 kHz → 24 kHz via **`_resample_pcm_to_24k(msg.data, INPUT_SAMPLE_RATE_FOR_REALTIME)`** (~247–248; `INPUT_SAMPLE_RATE_FOR_REALTIME = 16000` ~162). Optional debug: **`_write_debug_pcm(pcm_24)`**. **`await client.send_audio(pcm_24)`** (~415): pushes base64-encoded PCM to the Realtime client's input buffer; client sends to OpenAI. |
+| 1 | `app.js` | Same lifecycle as classic Browser Mic: client sends **config**, binary preview PCM may drive the waveform, and **start_session** switches that PCM to the live backend path. |
+| 2 | `voice_pipeline.py` `receive_loop()` | On Browser **BINARY** before START, computes preview amplitude only. Once `pipeline_live` is set it waits for `session_ready`, resamples 16 kHz → 24 kHz via **`_resample_pcm_to_24k`**, then calls **`client.send_audio(pcm_24)`** when the mic is unmuted. |
 | 3 | `voice_pipeline.py` ~416–429 | User amplitude (green waveform): **`amp = _pcm_rms_to_amplitude(msg.data)`** on the **original 16 kHz** chunk; throttled at **`amplitude_interval = 0.05`** (~219); **`session.timeline.add_audio_amplitude(amplitude=amp, source="user")`**; **`ws.send_str({"type": "user_amplitude", "timestamp": ..., "amplitude": ...})`** to browser. Smoothed with a 3-sample buffer. **Realtime does not use** `_feed_pcm_preview_only` or `_feed_pcm_to_pipeline`; it has its own inline amplitude logic. |
 
 **Summary:** Browser → 16 kHz binary on /ws/voice → server resamples to 24 kHz → Realtime client → OpenAI. User amplitude is computed on the 16 kHz chunk and sent to the browser at 50 Hz; same timeline and message shape as classic for the green waveform.
@@ -268,7 +277,7 @@ When ASR is **OpenAI Realtime** (`asr.scheme == "openai-realtime"`, `realtime_se
 | Step | Location | What happens |
 |------|----------|--------------|
 | 1 | `voice_pipeline.py` ~438–482 `server_capture_consumer()` | Same **capture_queue** as classic: 16 kHz chunks from `devices/capture.py` (ALSA or PyAudio). **`chunk = await loop.run_in_executor(None, capture_queue.get)`** (~447). When **`pipeline_live.is_set()`** (~453): **`pcm_24 = pcm_for_realtime(chunk)`** (~455), **`_write_debug_pcm(pcm_24)`**, **`await client.send_audio(pcm_24)`** (~456); then user amplitude from **`_pcm_rms_to_amplitude(chunk)`** (16 kHz), throttle 0.05 s, timeline + **user_amplitude** to browser (~468–471). When not live (~474–482): preview-only **user_amplitude** (no timeline, no send_audio). **Realtime does not use** `_feed_pcm_preview_only` or `_feed_pcm_to_pipeline`; server_capture_consumer has its own branch. |
-| 2 | Session start | For server mic, **`pipeline_live`** is cleared initially (~214). When the browser sends **start_session**, receive_loop (~392–396) sets **`session.start()`**, **`send_event(session_start)`**, **`pipeline_live.set()`**. After that, server_capture_consumer sends PCM to the Realtime client and records user amplitude. |
+| 2 | Session start | `pipeline_live` is cleared initially for both input sources. When the browser sends **start_session**, `receive_loop` calls **`session.start()`**, emits `session_start`, and sets **`pipeline_live`**. After that, `server_capture_consumer` sends PCM to the Realtime client and records user amplitude. |
 
 **Summary:** Capture thread → 16 kHz → server_capture_consumer → resample to 24 kHz → Realtime client; user amplitude from 16 kHz chunk, same 50 Hz and timeline/user_amplitude as browser mic Realtime path.
 

@@ -39,6 +39,8 @@ const state = {
 
     /** Voice pipeline WebSocket (live session) */
     voiceWs: null,
+    /** JSON fingerprint of the config used to open a Server Mic preview voiceWs. */
+    voicePreviewConfigSignature: null,
     /** WebRTC peer connection and signaling WS for server camera (preview) */
     cameraWebrtcPc: null,
     cameraWebrtcWs: null,
@@ -1915,7 +1917,7 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
     return `
         <div class="config-form ${roClass}">
             ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
-            <p class="input-hint" style="margin-bottom: 1rem;">Select the device for your chat session. Select &#128683;None if you don&apos;t plan to use the device or go text based. <strong>Microphone:</strong> (Browser) = mic on this PC; Server USB = mic attached to the server (e.g. EMEET). <strong>Speaker:</strong> Server USB not yet wired; use (Browser) for playback.</p>
+            <p class="input-hint" style="margin-bottom: 1rem;">Select the device for your chat session. Select &#128683;None if you don&apos;t plan to use the device or go text based. <strong>Microphone:</strong> (Browser) = mic on this PC; Server USB = mic attached to the server (e.g. EMEET). <strong>Speaker:</strong> (Browser) plays on this PC; Server USB plays through the selected ALSA device on the server.</p>
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                     <label style="margin: 0;"><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
@@ -4904,6 +4906,7 @@ function stopMicWaveform() {
     if (state.voiceWs && state.sessionState === 'setup') {
         try { state.voiceWs.close(); } catch (e) {}
         state.voiceWs = null;
+        state.voicePreviewConfigSignature = null;
     }
     if (state.micWaveformAnimId != null) {
         cancelAnimationFrame(state.micWaveformAnimId);
@@ -5143,6 +5146,15 @@ function buildVoiceConfig() {
     return config;
 }
 
+/** Compare preview/live configs without logging or persisting their API keys. */
+function voiceConfigSignature(config) {
+    try {
+        return JSON.stringify(config || {});
+    } catch (e) {
+        return null;
+    }
+}
+
 /** Start preview waveform for Server USB mic: open /ws/voice and use user_amplitude for the green bar (same connection used for live). */
 function startMicWaveformFromServer() {
     if (state.voiceWs && (state.voiceWs.readyState === WebSocket.OPEN || state.voiceWs.readyState === WebSocket.CONNECTING)) {
@@ -5176,6 +5188,7 @@ function startMicWaveformFromServer() {
     state.voiceWs = ws;
     ws.onopen = function () {
         var config = buildVoiceConfig();
+        state.voicePreviewConfigSignature = voiceConfigSignature(config);
         ws.send(JSON.stringify({ type: 'config', config: config }));
         if (window._micWaveformDebug) console.log('[MicWaveform] Voice config sent (preview); server will stream user_amplitude at 50 Hz');
     };
@@ -5183,7 +5196,10 @@ function startMicWaveformFromServer() {
     ws.onclose = handleVoiceWsClose;
     ws.onerror = function () {
         console.error('[Voice] WebSocket error');
-        if (state.voiceWs === ws) state.voiceWs = null;
+        if (state.voiceWs === ws) {
+            state.voiceWs = null;
+            state.voicePreviewConfigSignature = null;
+        }
     };
 }
 
@@ -6327,7 +6343,12 @@ function captureAndSendVideoFrame() {
 
 function handleVoiceWsClose(ev) {
         console.log('[Voice] WebSocket closed: code=' + (ev && ev.code) + ' reason=' + (ev && ev.reason) + ' clean=' + (ev && ev.wasClean));
+        if (ev && ev.target && state.voiceWs && ev.target !== state.voiceWs) {
+            console.log('[Voice] Ignoring close from a superseded WebSocket');
+            return;
+        }
         state.voiceWs = null;
+        state.voicePreviewConfigSignature = null;
         stopVoiceMicStream();
     vlmStopCapture();  // Stop VLM frame capture
         if (state.sessionState === 'live') {
@@ -6362,10 +6383,19 @@ function startSessionRecording() {
         return;
     }
 
-    // Server USB: we may already have the voice WS open for preview. Reuse it only if current config matches
-    // what the server started with (first message = config). Realtime full-voice requires the first message
-    // to be Realtime config, so if user switched to Realtime after opening preview, close and reopen.
-    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN && isServerMicSelected() && !isRealtimeFullVoiceLock()) {
+    // Server USB: reuse the preview voice WS only when its complete config still
+    // matches. Backends are created from the first config message, so merging
+    // start_session alone cannot safely change ASR/LLM/TTS after preview opened.
+    var startConfig = buildVoiceConfig();
+    var startConfigSignature = voiceConfigSignature(startConfig);
+    var serverPreviewOpen = state.voiceWs &&
+        state.voiceWs.readyState === WebSocket.OPEN &&
+        isServerMicSelected();
+    var canReuseServerPreview = serverPreviewOpen &&
+        !isRealtimeFullVoiceLock() &&
+        startConfigSignature !== null &&
+        startConfigSignature === state.voicePreviewConfigSignature;
+    if (canReuseServerPreview) {
         console.log('[Voice] Already connected (Server USB preview); sending start_session');
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
@@ -6402,7 +6432,7 @@ function startSessionRecording() {
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
         /* Use current state.micMuted (may have been toggled in preview); do not overwrite from config */
-        state.voiceWs.send(JSON.stringify({ type: 'start_session', config: buildVoiceConfig() }));
+        state.voiceWs.send(JSON.stringify({ type: 'start_session', config: startConfig }));
         state.voiceWs.send(JSON.stringify({ type: 'mic_mute', muted: state.micMuted }));
         updateMicMutePreviewButton();
         updateVoiceDebugPanel();
@@ -6421,6 +6451,14 @@ function startSessionRecording() {
         state.micPreviewWs = null;
     }
     var delayMs = 0;
+    if (state.voiceWs && isServerMicSelected()) {
+        // Let the server-side close handler terminate arecord and join its
+        // capture thread before opening the replacement connection.
+        try { state.voiceWs.close(); } catch (e) {}
+        state.voiceWs = null;
+        state.voicePreviewConfigSignature = null;
+        delayMs = 300;
+    }
     function connectVoiceAndStart() {
         if (state.voiceWs) {
             try { state.voiceWs.close(); } catch (e) {}
@@ -6469,6 +6507,7 @@ function startSessionRecording() {
         else console.log('[Voice] Connecting to', wsUrl);
         const ws = new WebSocket(wsUrl);
         state.voiceWs = ws;
+        state.voicePreviewConfigSignature = null;
 
     ws.onopen = function () {
         console.log('[Voice] WebSocket connected, sending config and start_session');

@@ -28,7 +28,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from aiohttp import web
 
-from multi_modal_ai_studio.devices.capture import start_server_mic_capture, is_capture_event
+from multi_modal_ai_studio.devices.capture import (
+    create_capture_queue,
+    is_capture_event,
+    start_server_mic_capture,
+    stop_server_mic_capture,
+)
 
 try:
     from multi_modal_ai_studio.devices.playback import (
@@ -70,6 +75,94 @@ logger = logging.getLogger(__name__)
 
 _RED = "\033[91m"
 _RESET = "\033[0m"
+
+
+class BargeInController:
+    """Backend barge-in state shared by browser and server-speaker paths."""
+
+    def __init__(
+        self,
+        enabled: bool,
+        trigger: str = "final",
+        partial_count: int = 3,
+    ) -> None:
+        self.enabled = bool(enabled)
+        self.trigger = "partial" if trigger == "partial" else "final"
+        self.partial_count = max(1, min(20, int(partial_count or 3)))
+        self.requested = asyncio.Event()
+        self.tts_active = False
+        self._partials_seen = 0
+
+    def begin_turn(self) -> None:
+        self.requested.clear()
+        self.tts_active = False
+        self._partials_seen = 0
+
+    def start_tts(self) -> None:
+        self.tts_active = True
+        self._partials_seen = 0
+
+    def finish_tts(self) -> None:
+        self.tts_active = False
+        self._partials_seen = 0
+
+    def observe_asr(self, *, is_final: bool, text: str) -> bool:
+        """Observe ASR activity and return True when it requests interruption."""
+        if not self.enabled or not self.tts_active or not (text or "").strip():
+            return False
+        if self.trigger == "partial":
+            if is_final:
+                self._partials_seen = 0
+                return False
+            self._partials_seen += 1
+            if self._partials_seen < self.partial_count:
+                return False
+        elif not is_final:
+            return False
+        self.requested.set()
+        return True
+
+
+async def _wait_for_task_or_barge_in(
+    task: "asyncio.Task[Any]",
+    requested: asyncio.Event,
+) -> bool:
+    """Wait for a TTS task; cancel it when backend barge-in wins.
+
+    Returns True when the task completed normally and False when it was
+    cancelled because ``requested`` became set.
+    """
+    if requested.is_set():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return False
+
+    waiter = asyncio.create_task(requested.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {task, waiter},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if waiter in done and requested.is_set():
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            return False
+        await task
+        return True
+    finally:
+        if not waiter.done():
+            waiter.cancel()
+            try:
+                await waiter
+            except asyncio.CancelledError:
+                pass
 
 
 def _format_llm_error_for_user(exc: Exception) -> str:
@@ -234,13 +327,22 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _pcm16_aligned_bytes(pcm_bytes: Any) -> bytes:
+    """Return complete little-endian PCM16 frames from a bytes-like object."""
+    if not isinstance(pcm_bytes, (bytes, bytearray, memoryview)):
+        return b""
+    data = bytes(pcm_bytes)
+    return data[: len(data) - (len(data) % 2)]
+
+
 def _pcm_rms_to_amplitude(pcm_bytes: bytes) -> float:
     """Compute RMS of 16-bit LE PCM and scale to 0-100 for timeline."""
+    pcm_bytes = _pcm16_aligned_bytes(pcm_bytes)
     if len(pcm_bytes) < 2:
         return 0.0
     try:
         n = len(pcm_bytes) // 2
-        samples = struct.unpack(f"{n}h", pcm_bytes)
+        samples = struct.unpack(f"<{n}h", pcm_bytes)
         sum_sq = sum(s * s for s in samples)
         rms = math.sqrt(sum_sq / n) if n else 0
         # Normalize by int16 range; scale to 0-100, cap at 100
@@ -256,10 +358,11 @@ def _pcm_rms_slices(
 ) -> List[float]:
     """Compute RMS per fixed-time window (e.g. 25ms) so timeline gets one amplitude per bar.
     Returns list of 0-100 amplitudes, one per window. Matches client tStep=0.025 (~40 Hz)."""
+    pcm_bytes = _pcm16_aligned_bytes(pcm_bytes)
     if len(pcm_bytes) < 2:
         return []
     try:
-        samples = struct.unpack(f"{len(pcm_bytes) // 2}h", pcm_bytes)
+        samples = struct.unpack(f"<{len(pcm_bytes) // 2}h", pcm_bytes)
     except Exception:
         return []
     samples_per_window = max(1, int(sample_rate * window_s))
@@ -277,15 +380,36 @@ def _pcm_rms_slices(
 
 def _resample_pcm_to_24k(pcm_bytes: bytes, from_rate: int) -> bytes:
     """Resample 16-bit mono PCM to 24 kHz for Realtime API."""
+    pcm_bytes = _pcm16_aligned_bytes(pcm_bytes)
+    if not pcm_bytes or from_rate <= 0:
+        return b""
     if from_rate == REALTIME_SAMPLE_RATE:
         return pcm_bytes
-    samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    samples = np.frombuffer(pcm_bytes, dtype="<i2")
     n_old = len(samples)
     n_new = int(round(n_old * REALTIME_SAMPLE_RATE / from_rate))
     x_old = np.arange(n_old)
     x_new = np.linspace(0, n_old - 1, n_new)
     resampled = np.interp(x_new, x_old, samples.astype(np.float64)).astype(np.int16)
     return resampled.tobytes()
+
+
+def _capture_event_details(item: Any) -> Optional[Tuple[str, Dict[str, Any], bool]]:
+    """Map an internal capture event to its public timeline/WebSocket form."""
+    if not is_capture_event(item):
+        return None
+    event = str(item.get("event") or "")
+    event_type = {
+        "dropped": "capture_dropped",
+        "recovered": "capture_recovered",
+        "gave_up": "capture_gave_up",
+    }.get(event, "capture_status")
+    data = {
+        key: value
+        for key, value in item.items()
+        if key not in {"__type__", "event", "ts"}
+    }
+    return event_type, data, event == "gave_up"
 
 
 # Browser sends 16 kHz PCM (TARGET_SAMPLE_RATE in app.js).
@@ -302,6 +426,8 @@ async def _run_realtime_loop(
     capture_queue: Optional[queue.Queue],
     stop_capture: Optional[threading.Event],
     capture_thread: Optional[threading.Thread],
+    capture_proc_holder: Optional[list],
+    capture_health_holder: Optional[list],
 ) -> Optional[str]:
     """
     Run OpenAI Realtime WebSocket loop: PCM in -> Realtime client -> TTS audio + events out.
@@ -340,8 +466,10 @@ async def _run_realtime_loop(
         turn_detection=turn_detection,
         input_audio_transcription=input_transcription,
     )
+    # Keep Browser WebRTC and Server USB capture on the same lifecycle:
+    # preview first, then feed the Realtime backend only after start_session.
     pipeline_live = asyncio.Event()
-    pipeline_live.set() if not use_server_mic else pipeline_live.clear()
+    pipeline_live.clear()
     stopped = asyncio.Event()
     session_ready = asyncio.Event()  # Set when Realtime session.updated received; must wait before send_audio
     _user_amplitude_sent = False
@@ -373,6 +501,11 @@ async def _run_realtime_loop(
         await client.connect()
     except Exception as e:
         logger.exception("Realtime connect failed: %s", e)
+        stop_server_mic_capture(
+            stop_capture,
+            capture_thread,
+            capture_proc_holder,
+        )
         return None
 
     def pcm_for_realtime(pcm_bytes: bytes) -> bytes:
@@ -415,9 +548,18 @@ async def _run_realtime_loop(
     last_output_transcript = ""
     # Cursor for TTS amplitude timestamps: anchored to tts_start so saved-session purple spans tts_start..tts_complete
     tts_amplitude_cursor: Optional[float] = None
+    realtime_barge_in = BargeInController(
+        enabled=getattr(config.app, "barge_in_enabled", False),
+        trigger=getattr(config.app, "barge_in_trigger", "final"),
+        partial_count=getattr(config.app, "barge_in_partial_count", 3),
+    )
+    realtime_barge_in.begin_turn()
+    realtime_tts_cancelled = False
 
     async def realtime_event_consumer() -> None:
-        nonlocal server_speaker_proc, tts_start_sent, tts_first_audio_sent, last_output_transcript, tts_amplitude_cursor
+        nonlocal server_speaker_proc, tts_start_sent, tts_first_audio_sent
+        nonlocal last_output_transcript, tts_amplitude_cursor
+        nonlocal realtime_tts_cancelled
         try:
             async for ev in client.events():
                 if ev is None or stopped.is_set():
@@ -440,12 +582,24 @@ async def _run_realtime_loop(
                         session.timeline.add_event("asr_partial", Lane.SPEECH, data={"text": ev.text, "confidence": 1.0})
                         await send_event({"event_type": "asr_partial", "lane": "speech", "data": {"text": ev.text, "confidence": 1.0}, "timestamp": ts})
                         logger.info("[asr] asr_partial @ %.2fs: %r", ts, (ev.text[:60] + "..." if len(ev.text) > 60 else ev.text))
+                        if realtime_barge_in.observe_asr(is_final=False, text=ev.text):
+                            realtime_tts_cancelled = True
+                            if server_speaker_proc is not None:
+                                stop_server_speaker_playback(server_speaker_proc)
+                                server_speaker_proc = None
+                            logger.info("[barge_in] Realtime Server speaker stopped by partial ASR")
                 if ev.kind == "transcript_completed":
                     if ev.text and session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
                         session.timeline.add_event("asr_final", Lane.SPEECH, data={"text": ev.text, "confidence": 1.0})
                         await send_event({"event_type": "asr_final", "lane": "speech", "data": {"text": ev.text, "confidence": 1.0}, "timestamp": ts})
                         logger.info("[asr] asr_final @ %.2fs: %r", ts, (ev.text[:80] + "..." if len(ev.text) > 80 else ev.text))
+                        if realtime_barge_in.observe_asr(is_final=True, text=ev.text):
+                            realtime_tts_cancelled = True
+                            if server_speaker_proc is not None:
+                                stop_server_speaker_playback(server_speaker_proc)
+                                server_speaker_proc = None
+                            logger.info("[barge_in] Realtime Server speaker stopped by final ASR")
                 if ev.kind == "output_transcript_delta":
                     if ev.text and session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
@@ -466,6 +620,8 @@ async def _run_realtime_loop(
                         ts = time.time() - session.timeline.start_time
                         if not tts_start_sent:
                             tts_start_sent = True
+                            realtime_tts_cancelled = False
+                            realtime_barge_in.start_tts()
                             session.timeline.add_event("tts_start", Lane.TTS)
                             await send_event({"event_type": "tts_start", "lane": "tts", "data": {}, "timestamp": ts})
                             await ws.send_str(json.dumps({"type": "tts_start"}))
@@ -498,7 +654,11 @@ async def _run_realtime_loop(
                                     "amplitude": round(a, 2),
                                 })
                                 tts_amplitude_cursor = t_end
-                    if use_server_speaker and config.devices.audio_output_device:
+                    if (
+                        use_server_speaker
+                        and not realtime_tts_cancelled
+                        and config.devices.audio_output_device
+                    ):
                         if server_speaker_proc is None:
                             server_speaker_proc = start_server_speaker_playback(
                                 config.devices.audio_output_device,
@@ -509,6 +669,7 @@ async def _run_realtime_loop(
                                 server_speaker_proc.stdin.write(ev.audio)
                                 server_speaker_proc.stdin.flush()
                             except (BrokenPipeError, OSError):
+                                stop_server_speaker_playback(server_speaker_proc)
                                 server_speaker_proc = None
                     b64 = base64.b64encode(ev.audio).decode("ascii")
                     payload = {
@@ -521,14 +682,19 @@ async def _run_realtime_loop(
                         payload["amplitude_segments"] = amplitude_segments
                     await ws.send_str(json.dumps(payload))
                 if ev.kind == "response_done":
+                    complete_data: Dict[str, Any] = {"text": last_output_transcript}
+                    if realtime_tts_cancelled:
+                        complete_data.update({"cancelled": True, "reason": "barge_in"})
                     if session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
-                        session.timeline.add_event("tts_complete", Lane.TTS, data={"text": last_output_transcript})
-                        await send_event({"event_type": "tts_complete", "lane": "tts", "data": {"text": last_output_transcript}, "timestamp": ts})
+                        session.timeline.add_event("tts_complete", Lane.TTS, data=complete_data)
+                        await send_event({"event_type": "tts_complete", "lane": "tts", "data": complete_data, "timestamp": ts})
                         logger.info("[tts] tts_complete @ %.2fs: %r", ts, last_output_transcript)
                     # Reset so next response sends tts_start/tts_first_audio again (TTS lane rectangles for 2nd+ turns)
+                    realtime_barge_in.finish_tts()
                     tts_start_sent = False
                     tts_first_audio_sent = False
+                    realtime_tts_cancelled = False
         except asyncio.CancelledError:
             pass
         finally:
@@ -539,6 +705,7 @@ async def _run_realtime_loop(
         nonlocal _user_amplitude_sent, mic_muted
         last_amplitude_time = 0.0
         user_amp_buf: list = []  # last 3 raw amplitudes for smoothing green waveform (16 kHz PCM)
+        was_live = False
         try:
             async for msg in ws:
                 if msg.type == web.WSMsgType.TEXT:
@@ -555,11 +722,14 @@ async def _run_realtime_loop(
                                     logger.debug("PTT Realtime: inject silence failed %s", e)
                             logger.debug("PTT Realtime: mic_muted=%s", mic_muted)
                         if obj.get("type") == "start_session":
-                            if use_server_mic and not pipeline_live.is_set():
+                            if not pipeline_live.is_set():
                                 session.start()
                                 await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
                                 pipeline_live.set()
-                                logger.info("Realtime: start_session received; capture now feeds Realtime")
+                                logger.info(
+                                    "Realtime: start_session received; %s capture now feeds Realtime",
+                                    "server" if use_server_mic else "browser",
+                                )
                         if obj.get("type") == "stop":
                             for key, attr in [("system_stats", "system_stats"), ("tts_playback_segments", "tts_playback_segments"), ("audio_amplitude_history", "audio_amplitude_history"), ("ttl_bands", "ttl_bands")]:
                                 val = obj.get(key)
@@ -574,12 +744,19 @@ async def _run_realtime_loop(
                         pass
                     continue
                 if msg.type == web.WSMsgType.BINARY and not use_server_mic:
-                    await session_ready.wait()
-                    pcm_24 = pcm_for_realtime(msg.data)
-                    _write_debug_pcm(pcm_24)
-                    if not mic_muted:
-                        await client.send_audio(pcm_24)
-                    if session.timeline.start_time is not None:
+                    is_live = pipeline_live.is_set()
+                    if is_live and not was_live:
+                        last_amplitude_time = 0.0
+                        user_amp_buf.clear()
+                    was_live = is_live
+                    if is_live:
+                        await session_ready.wait()
+                        pcm_24 = pcm_for_realtime(msg.data)
+                        if not pcm_24:
+                            continue
+                        _write_debug_pcm(pcm_24)
+                        if not mic_muted:
+                            await client.send_audio(pcm_24)
                         now = time.time() - session.timeline.start_time
                         if now - last_amplitude_time >= amplitude_interval:
                             amp = _pcm_rms_to_amplitude(msg.data)
@@ -591,6 +768,20 @@ async def _run_realtime_loop(
                             smoothed = sum(user_amp_buf) / len(user_amp_buf)
                             try:
                                 await ws.send_str(json.dumps({"type": "user_amplitude", "timestamp": round(now, 3), "amplitude": round(smoothed, 2)}))
+                                _user_amplitude_sent = True
+                            except Exception:
+                                pass
+                    else:
+                        now = time.time() - preview_start_time
+                        if now - last_amplitude_time >= amplitude_interval:
+                            amp = _pcm_rms_to_amplitude(msg.data)
+                            last_amplitude_time = now
+                            try:
+                                await ws.send_str(json.dumps({
+                                    "type": "user_amplitude",
+                                    "timestamp": round(now, 3),
+                                    "amplitude": round(amp, 2),
+                                }))
                                 _user_amplitude_sent = True
                             except Exception:
                                 pass
@@ -609,16 +800,58 @@ async def _run_realtime_loop(
         loop = asyncio.get_event_loop()
         last_amplitude_time = 0.0
         user_amp_buf: list = []
+        was_live = False
+        terminal_event_seen = False
         while not stopped.is_set():
             try:
                 chunk = await loop.run_in_executor(None, capture_queue.get)
-            except Exception:
-                break
+            except Exception as e:
+                logger.warning("Realtime server capture queue failed: %s", e)
+                stopped.set()
+                return
             if chunk is None:
-                break
-            if pipeline_live.is_set():
+                if not terminal_event_seen:
+                    await ws.send_str(json.dumps({
+                        "type": "error",
+                        "error": "Server microphone capture ended; check the selected device",
+                    }))
+                stopped.set()
+                return
+            event_details = _capture_event_details(chunk)
+            if event_details is not None:
+                event_type, data, terminal = event_details
+                if session.timeline.start_time is not None:
+                    ts = time.time() - session.timeline.start_time
+                    session.timeline.add_event(event_type, Lane.SYSTEM, data=data)
+                    await send_event({
+                        "event_type": event_type,
+                        "lane": "system",
+                        "data": data,
+                        "timestamp": ts,
+                    })
+                else:
+                    await ws.send_str(json.dumps({
+                        "type": "capture_status",
+                        "event": event_type,
+                        "data": data,
+                    }))
+                if terminal:
+                    terminal_event_seen = True
+                    await ws.send_str(json.dumps({
+                        "type": "error",
+                        "error": "Server microphone capture failed; check the selected device",
+                    }))
+                continue
+            is_live = pipeline_live.is_set()
+            if is_live and not was_live:
+                last_amplitude_time = 0.0
+                user_amp_buf.clear()
+            was_live = is_live
+            if is_live:
                 await session_ready.wait()
                 pcm_24 = pcm_for_realtime(chunk)
+                if not pcm_24:
+                    continue
                 _write_debug_pcm(pcm_24)
                 if not mic_muted:
                     await client.send_audio(pcm_24)
@@ -648,27 +881,26 @@ async def _run_realtime_loop(
                     except Exception:
                         pass
 
-    if not use_server_mic:
-        session.start()
-        await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
-
     event_task = asyncio.create_task(realtime_event_consumer())
     recv_task = asyncio.create_task(receive_loop())
     server_capture_task: Optional[asyncio.Task] = None
     if use_server_mic and capture_queue is not None:
         server_capture_task = asyncio.create_task(server_capture_consumer())
 
-    if use_server_mic:
-        await asyncio.wait(
-            [asyncio.create_task(stopped.wait()), asyncio.create_task(pipeline_live.wait())],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        # If pipeline_live was set, receive_loop already called session.start() and send_event on start_session
+    await asyncio.wait(
+        [asyncio.create_task(stopped.wait()), asyncio.create_task(pipeline_live.wait())],
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    # If pipeline_live was set, receive_loop already called session.start()
+    # and emitted session_start for either capture source.
 
     await stopped.wait()
 
-    if stop_capture is not None:
-        stop_capture.set()
+    stop_server_mic_capture(
+        stop_capture,
+        capture_thread,
+        capture_proc_holder,
+    )
     if server_capture_task is not None:
         server_capture_task.cancel()
     recv_task.cancel()
@@ -707,6 +939,8 @@ async def _run_realtime_loop(
     if session.timeline.start_time is None:
         return None
 
+    if capture_health_holder:
+        session.capture_health = capture_health_holder[0].to_dict()
     session_dir.mkdir(parents=True, exist_ok=True)
     path = session_dir / f"{session.session_id}.json"
     session.save(path)
@@ -744,9 +978,10 @@ async def _run_voice_pipeline(
     tts_config = config.tts
 
     # Device capture for server mic (used by both Realtime and classic paths)
-    capture_queue: Optional[queue.Queue] = queue.Queue() if use_server_mic else None
+    capture_queue: Optional[queue.Queue] = create_capture_queue() if use_server_mic else None
     stop_capture: Optional[threading.Event] = threading.Event() if use_server_mic else None
     capture_thread: Optional[threading.Thread] = None
+    capture_proc_holder: list = []
     capture_health_holder: list = []
     if use_server_mic and capture_queue is not None and stop_capture is not None:
         capture_thread = start_server_mic_capture(
@@ -754,6 +989,7 @@ async def _run_voice_pipeline(
             config.devices.audio_input_device,
             capture_queue,
             stop_capture,
+            proc_holder=capture_proc_holder if config.devices.audio_input_source == "alsa" else None,
             health_out=capture_health_holder,
         )
         if not capture_thread:
@@ -766,6 +1002,13 @@ async def _run_voice_pipeline(
         else:
             logger.info("Server mic capture thread started; waiting for first PCM chunk and user_amplitude")
 
+    def _release_server_capture() -> None:
+        stop_server_mic_capture(
+            stop_capture,
+            capture_thread,
+            capture_proc_holder,
+        )
+
     # Realtime full voice (WebSocket): one client, no Riva ASR/LLM/TTS
     if (
         asr_config.scheme == "openai-realtime"
@@ -775,12 +1018,15 @@ async def _run_voice_pipeline(
         url = (asr_config.realtime_url or asr_config.api_base or "").strip()
         if not url:
             await ws.send_str(json.dumps({"type": "error", "error": "OpenAI Realtime requires realtime_url or api_base"}))
+            _release_server_capture()
             return None
         if not (asr_config.model or "").strip():
             await ws.send_str(json.dumps({"type": "error", "error": "OpenAI Realtime requires model"}))
+            _release_server_capture()
             return None
         if "localhost" not in url.split("//")[-1].split("/")[0].lower() and not (asr_config.api_key or "").strip():
             await ws.send_str(json.dumps({"type": "error", "error": "OpenAI Realtime (non-localhost) requires API key"}))
+            _release_server_capture()
             return None
         try:
             return await _run_realtime_loop(
@@ -793,9 +1039,12 @@ async def _run_voice_pipeline(
                 capture_queue=capture_queue,
                 stop_capture=stop_capture,
                 capture_thread=capture_thread,
+                capture_proc_holder=capture_proc_holder,
+                capture_health_holder=capture_health_holder,
             )
         except Exception as e:
             logger.exception("Realtime loop error: %s", e)
+            _release_server_capture()
             try:
                 await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
             except Exception:
@@ -817,25 +1066,31 @@ async def _run_voice_pipeline(
                 }
             )
         )
+        _release_server_capture()
         return None
     if asr_config.scheme == "riva" and not asr_config.server:
         await ws.send_str(json.dumps({"type": "error", "error": "Riva ASR server required"}))
+        _release_server_capture()
         return None
     if tts_config.scheme == "riva" and not tts_config.server:
         await ws.send_str(json.dumps({"type": "error", "error": "Riva TTS server required"}))
+        _release_server_capture()
         return None
     if asr_config.scheme == "openai-rest" and not asr_config.api_base:
         await ws.send_str(
             json.dumps({"type": "error", "error": "OpenAI REST ASR api_base required"})
         )
+        _release_server_capture()
         return None
     if tts_config.scheme == "openai-rest" and not tts_config.api_base:
         await ws.send_str(
             json.dumps({"type": "error", "error": "OpenAI REST TTS api_base required"})
         )
+        _release_server_capture()
         return None
     if not llm_config.api_base:
         await ws.send_str(json.dumps({"type": "error", "error": "LLM api_base required"}))
+        _release_server_capture()
         return None
 
     try:
@@ -851,6 +1106,7 @@ async def _run_voice_pipeline(
     except Exception as e:
         logger.exception("Failed to create backends")
         await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
+        _release_server_capture()
         return None
 
     # ASR starts only after client sends start_session (both mics). Avoids Riva timeout during preview and keeps logic identical.
@@ -861,6 +1117,11 @@ async def _run_voice_pipeline(
     pipeline_live = asyncio.Event()  # set when client sends start_session; then we start ASR and feed pipeline
     pipeline_live.clear()
     mic_muted = True  # push-to-talk: session starts muted; server gates ASR, waveform always sent
+    barge_in = BargeInController(
+        enabled=getattr(config.app, "barge_in_enabled", False),
+        trigger=getattr(config.app, "barge_in_trigger", "final"),
+        partial_count=getattr(config.app, "barge_in_partial_count", 3),
+    )
 
     logger.info(
         "Voice pipeline devices: audio_input_source=%s audio_input_device=%s use_server_mic=%s",
@@ -1332,6 +1593,12 @@ async def _run_voice_pipeline(
                         logger.debug("[asr] Skipping phantom asr_partial (same utterance as last final): %r", text[:50])
                         continue
 
+                if barge_in.observe_asr(is_final=is_final, text=text):
+                    logger.info(
+                        "[barge_in] Backend interruption requested by %s ASR",
+                        "final" if is_final else "partial",
+                    )
+
                 if not is_final:
                     # VLM: Track speech start time for frame synchronization.
                     # Detect "ghost partial" gaps — if the previous partial was
@@ -1475,6 +1742,7 @@ async def _run_voice_pipeline(
                 if not text:
                     continue
 
+                barge_in.begin_turn()
                 turn_index += 1
                 logger.info("[timing] turn #%d start (asr_final received): %r", turn_index, text[:80])
                 session.start_turn(user_transcript=text)
@@ -1584,6 +1852,8 @@ async def _run_voice_pipeline(
 
                 async def _send_tts_audio(chunk):
                     nonlocal tts_first_sent, ts_tts_first, last_tts_amplitude_time, server_speaker_proc, _speaker_fail_until
+                    if barge_in.requested.is_set():
+                        raise asyncio.CancelledError
                     if not tts_first_sent:
                         ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                         ref_label = "llm_first_token" if use_stream_tts else "llm_complete"
@@ -1611,6 +1881,7 @@ async def _run_voice_pipeline(
                                 server_speaker_proc.stdin.flush()
                             except (BrokenPipeError, OSError) as e:
                                 logger.debug("Server speaker write failed: %s", e)
+                                stop_server_speaker_playback(server_speaker_proc)
                                 server_speaker_proc = None
                     if session.timeline.start_time is not None and chunk.audio:
                         now = time.time() - session.timeline.start_time
@@ -1801,6 +2072,7 @@ async def _run_voice_pipeline(
                                     if ready and not _is_punctuation_or_empty(ready):
                                         if not tts_started:
                                             tts_started = True
+                                            barge_in.start_tts()
                                             tts_q = asyncio.Queue()
                                             tts_task = asyncio.create_task(_tts_consumer(tts_q))
                                             session.timeline.add_event("tts_start", Lane.TTS)
@@ -1840,11 +2112,15 @@ async def _run_voice_pipeline(
                         "timestamp": ts_abort,
                     })
                     if tts_started and tts_q is not None:
-                        await tts_q.put(None)
                         if tts_task is not None:
-                            await tts_task
+                            tts_task.cancel()
+                            try:
+                                await tts_task
+                            except asyncio.CancelledError:
+                                pass
                     if server_speaker_proc is not None:
                         stop_server_speaker_playback(server_speaker_proc)
+                    barge_in.finish_tts()
                     session.end_turn()
                     continue
 
@@ -1862,12 +2138,14 @@ async def _run_voice_pipeline(
                     session.end_turn()
                     continue
 
+                tts_interrupted = False
                 try:
                     if use_stream_tts:
                         remainder = chunk_buf.flush()
                         if remainder and not _is_punctuation_or_empty(remainder):
                             if not tts_started:
                                 tts_started = True
+                                barge_in.start_tts()
                                 tts_q = asyncio.Queue()
                                 tts_task = asyncio.create_task(_tts_consumer(tts_q))
                                 session.timeline.add_event("tts_start", Lane.TTS)
@@ -1877,10 +2155,14 @@ async def _run_voice_pipeline(
                         if tts_q is not None:
                             await tts_q.put(None)
                         if tts_task is not None:
-                            await tts_task
+                            tts_interrupted = not await _wait_for_task_or_barge_in(
+                                tts_task,
+                                barge_in.requested,
+                            )
                         if tts_consumer_error:
                             raise tts_consumer_error
                     else:
+                        barge_in.start_tts()
                         ts_tts_start = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                         session.timeline.add_event("tts_start", Lane.TTS)
                         await send_event({
@@ -1895,7 +2177,8 @@ async def _run_voice_pipeline(
                         tts_amplitude_next_t = 0.0
                         server_speaker_proc = None
                         async for chunk in tts.synthesize_stream(full_response):
-                            if stopped.is_set():
+                            if stopped.is_set() or barge_in.requested.is_set():
+                                tts_interrupted = barge_in.requested.is_set()
                                 break
                             if not tts_first_sent:
                                 ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
@@ -1930,6 +2213,7 @@ async def _run_voice_pipeline(
                                         server_speaker_proc.stdin.flush()
                                     except (BrokenPipeError, OSError) as e:
                                         logger.debug("Server speaker write failed (aplay may have exited): %s", e)
+                                        stop_server_speaker_playback(server_speaker_proc)
                                         server_speaker_proc = None
                             amplitude_segments: List[Dict[str, Any]] = []
                             if session.timeline.start_time is not None and chunk.audio:
@@ -1962,9 +2246,10 @@ async def _run_voice_pipeline(
                                 payload["amplitude_segments"] = amplitude_segments
                             await ws.send_str(json.dumps(payload))
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                    logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0)
-                    session.timeline.add_event("tts_complete", Lane.TTS)
-                    await send_event({"event_type": "tts_complete", "lane": "tts", "data": {}, "timestamp": ts_tts_complete})
+                    logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs, cancelled=%s)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0, tts_interrupted)
+                    complete_data = {"cancelled": True, "reason": "barge_in"} if tts_interrupted else {}
+                    session.timeline.add_event("tts_complete", Lane.TTS, data=complete_data)
+                    await send_event({"event_type": "tts_complete", "lane": "tts", "data": complete_data, "timestamp": ts_tts_complete})
                 except Exception as e:
                     logger.exception("TTS error: %s", e)
                 finally:
@@ -1976,6 +2261,12 @@ async def _run_voice_pipeline(
                             pass
                     if server_speaker_proc is not None:
                         stop_server_speaker_playback(server_speaker_proc)
+                    barge_in.finish_tts()
+
+                if tts_interrupted:
+                    logger.info("[barge_in] TTS stopped; processing queued utterance")
+                    session.end_turn()
+                    continue
 
                 # Append this turn to conversation history (text-only).
                 if max_history > 0 and full_response.strip():
@@ -2010,12 +2301,15 @@ async def _run_voice_pipeline(
         last_amplitude_time = 0.0
         amplitude_interval = 0.025
         first_get = True
+        was_live = False
+        terminal_event_seen = False
         while not stopped.is_set():
             try:
                 chunk = await loop.run_in_executor(None, capture_queue.get)
             except Exception as e:
                 logger.warning("Server capture consumer get failed: %s", e)
-                break
+                stopped.set()
+                return
             if chunk is None:
                 if first_get:
                     logger.error(
@@ -2024,51 +2318,45 @@ async def _run_voice_pipeline(
                     )
                 else:
                     logger.info("Server mic capture ended (None received)")
-                break
+                if not terminal_event_seen:
+                    await ws.send_str(json.dumps({
+                        "type": "error",
+                        "error": "Server microphone capture ended; check the selected device",
+                    }))
+                stopped.set()
+                return
             # Handle capture health events (not PCM bytes)
-            if is_capture_event(chunk):
-                ev = chunk.get("event", "")
+            event_details = _capture_event_details(chunk)
+            if event_details is not None:
+                event_type, data, terminal = event_details
                 if pipeline_live.is_set() and session.timeline.start_time is not None:
                     ts = time.time() - session.timeline.start_time
-                    if ev == "dropped":
-                        session.timeline.add_event("capture_dropped", Lane.SYSTEM, data={
-                            "device": chunk.get("device", ""),
-                            "retry": chunk.get("retry", 0),
-                            "max_retries": chunk.get("max_retries", 8),
-                        })
-                        await send_event({
-                            "event_type": "capture_dropped",
-                            "lane": "system",
-                            "data": {"device": chunk.get("device", ""), "retry": chunk.get("retry", 0)},
-                            "timestamp": ts,
-                        })
-                    elif ev == "recovered":
-                        session.timeline.add_event("capture_recovered", Lane.SYSTEM, data={
-                            "device": chunk.get("device", ""),
-                            "outage_s": chunk.get("outage_s", 0),
-                        })
-                        await send_event({
-                            "event_type": "capture_recovered",
-                            "lane": "system",
-                            "data": {"device": chunk.get("device", ""), "outage_s": chunk.get("outage_s", 0)},
-                            "timestamp": ts,
-                        })
-                    elif ev == "gave_up":
-                        session.timeline.add_event("capture_gave_up", Lane.SYSTEM, data={
-                            "device": chunk.get("device", ""),
-                            "retries": chunk.get("retries", 0),
-                        })
-                        await send_event({
-                            "event_type": "capture_gave_up",
-                            "lane": "system",
-                            "data": {"device": chunk.get("device", ""), "retries": chunk.get("retries", 0)},
-                            "timestamp": ts,
-                        })
+                    session.timeline.add_event(event_type, Lane.SYSTEM, data=data)
+                    await send_event({
+                        "event_type": event_type,
+                        "lane": "system",
+                        "data": data,
+                        "timestamp": ts,
+                    })
+                else:
+                    await ws.send_str(json.dumps({
+                        "type": "capture_status",
+                        "event": event_type,
+                        "data": data,
+                    }))
+                if terminal:
+                    terminal_event_seen = True
+                    await ws.send_str(json.dumps({
+                        "type": "error",
+                        "error": "Server microphone capture failed; check the selected device",
+                    }))
                 continue
             first_get = False
-            if pipeline_live.is_set():
-                if last_amplitude_time > 1.0:
-                    last_amplitude_time = 0.0
+            is_live = pipeline_live.is_set()
+            if is_live and not was_live:
+                last_amplitude_time = 0.0
+            was_live = is_live
+            if is_live:
                 last_amplitude_time, did_send, amp, _ = await _feed_pcm_to_pipeline(
                     chunk, last_amplitude_time, amplitude_interval
                 )
@@ -2133,8 +2421,11 @@ async def _run_voice_pipeline(
         turn_task = asyncio.create_task(turn_executor())
         system_stats_task = asyncio.create_task(_system_stats_loop())
         await stopped.wait()
-    if stop_capture is not None:
-        stop_capture.set()
+    stop_server_mic_capture(
+        stop_capture,
+        capture_thread,
+        capture_proc_holder,
+    )
     if server_capture_task is not None:
         server_capture_task.cancel()
     if system_stats_task is not None:
@@ -2373,7 +2664,7 @@ async def handle_mic_preview_ws(request: web.Request) -> web.WebSocketResponse:
 
     lock_released = False
     try:
-        capture_queue = queue.Queue()
+        capture_queue = create_capture_queue()
         stop_capture = threading.Event()
         proc_holder: list = []  # ALSA: capture thread appends the arecord process so we can terminate it to release the device quickly
         capture_thread = start_server_mic_capture(
@@ -2393,18 +2684,42 @@ async def handle_mic_preview_ws(request: web.Request) -> web.WebSocketResponse:
         amplitude_interval = 0.025  # 40 Hz for preview waveform
         last_amplitude_time = 0.0
         _first_sent = False
+        terminal_event_seen = False
 
         async def capture_consumer() -> None:
-            nonlocal last_amplitude_time, _first_sent
+            nonlocal last_amplitude_time, _first_sent, terminal_event_seen
             while not stopped.is_set():
                 try:
                     chunk = await loop.run_in_executor(None, capture_queue.get)
                 except asyncio.CancelledError:
                     break
-                except Exception:
-                    break
+                except Exception as e:
+                    logger.warning("Mic preview capture queue failed: %s", e)
+                    stopped.set()
+                    return
                 if chunk is None:
-                    break
+                    if not terminal_event_seen:
+                        await ws.send_str(json.dumps({
+                            "type": "error",
+                            "error": "Server microphone preview ended; check the selected device",
+                        }))
+                    stopped.set()
+                    return
+                event_details = _capture_event_details(chunk)
+                if event_details is not None:
+                    event_type, data, terminal = event_details
+                    await ws.send_str(json.dumps({
+                        "type": "capture_status",
+                        "event": event_type,
+                        "data": data,
+                    }))
+                    if terminal:
+                        terminal_event_seen = True
+                        await ws.send_str(json.dumps({
+                            "type": "error",
+                            "error": "Server microphone preview failed; check the selected device",
+                        }))
+                    continue
                 now = time.time()
                 if now - last_amplitude_time >= amplitude_interval:
                     last_amplitude_time = now
@@ -2440,14 +2755,10 @@ async def handle_mic_preview_ws(request: web.Request) -> web.WebSocketResponse:
         recv_task = asyncio.create_task(receive_loop())
         cons_task = asyncio.create_task(capture_consumer())
         await stopped.wait()
-        stop_capture.set()
-        # Terminate arecord immediately so the capture thread exits and releases the ALSA device (otherwise voice pipeline gets "Device or resource busy")
-        if proc_holder and len(proc_holder) > 0:
-            try:
-                proc_holder[0].terminate()
-            except Exception as e:
-                logger.debug("Mic preview: terminate arecord: %s", e)
-            await asyncio.sleep(0.15)  # give OS time to release the device before we release the lock
+        stop_server_mic_capture(stop_capture, capture_thread, proc_holder)
+        # Give ALSA a short handoff window before another preview/session opens
+        # the same exclusive USB device.
+        await asyncio.sleep(0.15)
         _mic_preview_lock.release()  # release early so next preview or voice pipeline can acquire the device
         lock_released = True
         cons_task.cancel()
