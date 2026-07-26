@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:26.06-py3
+ARG NEMO_REF=2639d4bef8d1450782263a8f616242acfb6fecb9
+FROM ${BASE_IMAGE}
+
+ARG NEMO_REF
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        git \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/openai-speech
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# Magpie v2607 requires current NeMo Speech. Keep the qualified commit pinned;
+# NEMO_REF remains overridable for deliberate upgrade testing.
+RUN python -m pip install . kaldialign \
+    && python -m pip install \
+        "nemo_toolkit[tts] @ git+https://github.com/NVIDIA-NeMo/NeMo.git@${NEMO_REF}"
+
+ENV SPEECH_SERVICE_MODE=tts \
+    SPEECH_PORT=8082 \
+    SPEECH_MODEL_ID=nvidia/magpie_tts_multilingual_357m \
+    SPEECH_MODEL_REVISION=v2607
+
+EXPOSE 8082
+CMD ["python", "-m", "openai_speech"]

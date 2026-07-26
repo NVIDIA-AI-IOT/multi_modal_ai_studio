@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Public-model voice pipeline for qualified Jetson Thor and Orin systems:
+# Nemotron 3.5 ASR -> vLLM -> Magpie TTS
+
+services:
+  asr:
+    build:
+      context: ../services/openai_speech
+      dockerfile: Dockerfile.asr
+      args:
+        BASE_IMAGE: "${SPEECH_BASE_IMAGE:-nvcr.io/nvidia/pytorch:26.06-py3}"
+    image: mmas/nemotron-asr-openai:0.1.0
+    runtime: nvidia
+    network_mode: host
+    environment:
+      SPEECH_SERVICE_MODE: asr
+      SPEECH_PORT: "8081"
+      SPEECH_EAGER_LOAD: "${SPEECH_EAGER_LOAD:-1}"
+      SPEECH_MODEL_REVISION: "${ASR_REVISION:-f3d333391852ba876df169dcc9ba902d25b6ab0b}"
+      HF_HOME: /models/huggingface
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - hf-cache:/models/huggingface
+    restart: unless-stopped
+
+  llm:
+    image: "${LLM_IMAGE:-vllm/vllm-openai:v0.25.0}"
+    runtime: nvidia
+    network_mode: host
+    environment:
+      HF_HOME: /models/huggingface
+      HF_HUB_CACHE: /models/huggingface/hub
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - hf-cache:/models/huggingface
+    entrypoint:
+      - vllm
+      - serve
+    command:
+      - "${LLM_MODEL:-Qwen/Qwen3-4B}"
+      - --revision
+      - "${LLM_REVISION:-1cfa9a7208912126459214e8b04321603b3df60c}"
+      - --served-model-name
+      - "${LLM_SERVED_NAME:-Qwen/Qwen3-4B}"
+      - --port
+      - "8000"
+      - --dtype
+      - "${LLM_DTYPE:-bfloat16}"
+      - --max-model-len
+      - "${LLM_MAX_MODEL_LEN:-8192}"
+      - --max-num-seqs
+      - "${LLM_MAX_NUM_SEQS:-2}"
+      - --gpu-memory-utilization
+      - "${LLM_GPU_MEMORY_UTILIZATION:-0.30}"
+      - --kv-cache-memory-bytes
+      - "${LLM_KV_CACHE_MEMORY_BYTES:-2G}"
+    restart: unless-stopped
+
+  tts:
+    build:
+      context: ../services/openai_speech
+      dockerfile: Dockerfile.tts
+      args:
+        BASE_IMAGE: "${SPEECH_BASE_IMAGE:-nvcr.io/nvidia/pytorch:26.06-py3}"
+        NEMO_REF: "${TTS_NEMO_REF:-2639d4bef8d1450782263a8f616242acfb6fecb9}"
+    image: mmas/magpie-tts-openai:0.1.0
+    runtime: nvidia
+    network_mode: host
+    environment:
+      SPEECH_SERVICE_MODE: tts
+      SPEECH_PORT: "8082"
+      SPEECH_EAGER_LOAD: "${SPEECH_EAGER_LOAD:-1}"
+      SPEECH_MODEL_REVISION: "${MAGPIE_REVISION:-v2607}"
+      HF_HOME: /models/huggingface
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - hf-cache:/models/huggingface
+    restart: unless-stopped
+
+volumes:
+  hf-cache:

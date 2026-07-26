@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:26.06-py3
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/openai-speech
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+# PyTorch and CUDA are supplied by the NVIDIA base image.
+RUN python -m pip install . \
+    && python -m pip install \
+        "accelerate>=1.0" \
+        "librosa>=0.11" \
+        "transformers>=5.13.0"
+
+ENV SPEECH_SERVICE_MODE=asr \
+    SPEECH_PORT=8081 \
+    SPEECH_MODEL_ID=nvidia/nemotron-3.5-asr-streaming-0.6b
+
+EXPOSE 8081
+CMD ["python", "-m", "openai_speech"]

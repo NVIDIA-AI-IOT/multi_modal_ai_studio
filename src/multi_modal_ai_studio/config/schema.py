@@ -67,7 +67,12 @@ class ASRConfig:
                 warnings.append("Riva scheme requires server address")
 
         elif self.scheme in ["openai-rest", "openai-realtime"]:
-            if not self.api_key:
+            endpoint = self.realtime_url or self.api_base
+            is_local = bool(
+                endpoint
+                and any(host in endpoint for host in ("localhost", "127.0.0.1", "::1"))
+            )
+            if not self.api_key and not is_local:
                 warnings.append("OpenAI scheme requires API key")
 
         elif self.scheme == "azure":
@@ -217,11 +222,14 @@ class TTSConfig:
     voice: str = "English-US.Female-1"
     riva_model_name: Optional[str] = None
     model: Optional[str] = None
+    language: str = "en-US"
     sample_rate: int = 24000
     speed: float = 1.0
     response_format: str = "pcm"
     stream_tts: bool = True
-    tts_chunk_words: int = 10  # Words to buffer before first TTS chunk (5=fast, 20=smoother)
+    # Speech units buffered before the first TTS request: words in spaced
+    # languages, characters in Japanese/Chinese/Korean.
+    tts_chunk_words: int = 10
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -236,7 +244,11 @@ class TTSConfig:
                 warnings.append("Riva scheme requires server address")
 
         elif self.scheme in ["openai-rest", "openai-realtime"]:
-            if not self.api_key:
+            is_local = bool(
+                self.api_base
+                and any(host in self.api_base for host in ("localhost", "127.0.0.1", "::1"))
+            )
+            if not self.api_key and not is_local:
                 warnings.append("OpenAI scheme requires API key")
             if not (0.25 <= self.speed <= 4.0):
                 warnings.append("OpenAI speed must be between 0.25 and 4.0")
@@ -441,6 +453,12 @@ class SessionConfig:
     def from_dict(cls, data: Dict[str, Any]) -> 'SessionConfig':
         """Create from dictionary."""
         asr_data = dict(data.get('asr', {}))
+        if 'backend' in asr_data and 'scheme' not in asr_data:
+            asr_data['scheme'] = asr_data.pop('backend', 'riva')
+        if asr_data.get('scheme') == 'openai':
+            asr_data['scheme'] = 'openai-rest'
+        if 'openai_url' in asr_data and 'api_base' not in asr_data:
+            asr_data['api_base'] = asr_data.pop('openai_url')
         # Normalize frontend/legacy key for Riva server
         if 'riva_server' in asr_data and 'server' not in asr_data:
             asr_data['server'] = asr_data.pop('riva_server', None)
@@ -459,6 +477,10 @@ class SessionConfig:
             tts_data['server'] = tts_data.pop('riva_server', None)
         if 'backend' in tts_data and 'scheme' not in tts_data:
             tts_data['scheme'] = tts_data.pop('backend', 'riva')
+        if tts_data.get('scheme') == 'openai':
+            tts_data['scheme'] = 'openai-rest'
+        if 'openai_url' in tts_data and 'api_base' not in tts_data:
+            tts_data['api_base'] = tts_data.pop('openai_url')
         tts_data = {k: v for k, v in tts_data.items() if k in TTSConfig.__dataclass_fields__}
         devices_data = dict(data.get('devices', {}))
         if 'camera' in devices_data and 'video_source' not in devices_data:
