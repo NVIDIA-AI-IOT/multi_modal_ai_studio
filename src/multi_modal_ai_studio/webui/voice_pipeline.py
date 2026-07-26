@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import queue
+import re
 import struct
 import threading
 import time
@@ -53,8 +54,10 @@ from multi_modal_ai_studio.core.session import Session
 from multi_modal_ai_studio.core.timeline import Lane
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
+from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
+from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend
 from multi_modal_ai_studio.backends.realtime import (
     DISABLE_TURN_DETECTION,
@@ -104,6 +107,11 @@ class TTSChunkBuffer:
     """
 
     TTS_BREAKS = frozenset(".!?,;:\n\u2014-")
+    CJK_BREAKS = frozenset("。！？、，；：\n")
+    _CJK_CHAR_RE = re.compile(
+        r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff"
+        r"\uac00-\ud7af\uff66-\uff9f]"
+    )
 
     def __init__(self, first_chunk_words: int = 10) -> None:
         self._buf = ""
@@ -112,15 +120,57 @@ class TTSChunkBuffer:
         self._min_break_words = max(3, self._first_chunk_words // 2)
         self._max_chunk_words = max(self._first_chunk_words, self._first_chunk_words * 2)
 
+    @classmethod
+    def _speech_units(cls, text: str) -> int:
+        """Count words in spaced text and characters in CJK text.
+
+        Japanese, Chinese, and often Korean LLM output contains no spaces.
+        Treating the whole sentence as one word prevented interleaved TTS from
+        starting until the LLM completed.
+        """
+        cjk_count = len(cls._CJK_CHAR_RE.findall(text))
+        non_cjk = cls._CJK_CHAR_RE.sub(" ", text)
+        word_count = len(non_cjk.split())
+        return cjk_count + word_count
+
     def add(self, token: str) -> Optional[str]:
         """Add a token. Returns a chunk when one is ready to speak."""
         self._buf += token
-        words = len(self._buf.split())
+        units = self._speech_units(self._buf)
         limit = self._first_chunk_words if not self._first_sent else self._max_chunk_words
-        hit_break = any(c in token for c in self.TTS_BREAKS) and words >= self._min_break_words
-        if hit_break or words >= limit:
-            chunk = self._buf.strip()
-            self._buf = ""
+        break_chars = self.TTS_BREAKS | self.CJK_BREAKS
+
+        # Prefer the first natural phrase boundary after the minimum size.
+        cut_at = None
+        for index, char in enumerate(self._buf):
+            if char in break_chars:
+                candidate = self._buf[: index + 1]
+                if self._speech_units(candidate) >= self._min_break_words:
+                    cut_at = index + 1
+                    break
+
+        has_cjk = bool(self._CJK_CHAR_RE.search(self._buf))
+        if cut_at is None and units >= limit:
+            if has_cjk:
+                # Every CJK character is a safe orthographic boundary. The
+                # configured unit limit keeps latency bounded when punctuation
+                # has not arrived yet.
+                cut_at = len(self._buf)
+            else:
+                # LLM tokens can end in the middle of an English word. Wait
+                # until the following whitespace arrives, then cut before the
+                # next word instead of sending fragments such as "mode|rnity".
+                for index, char in enumerate(self._buf):
+                    if not char.isspace():
+                        continue
+                    candidate = self._buf[:index]
+                    if self._speech_units(candidate) >= limit:
+                        cut_at = index
+                        break
+
+        if cut_at is not None:
+            chunk = self._buf[:cut_at].strip()
+            self._buf = self._buf[cut_at:].lstrip()
             self._first_sent = True
             return chunk or None
         return None
@@ -143,6 +193,10 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         asr = dict(data["asr"])
         if "backend" in asr and "scheme" not in asr:
             asr["scheme"] = asr.pop("backend", "riva")
+        if asr.get("scheme") == "openai":
+            asr["scheme"] = "openai-rest"
+        if "openai_url" in asr and "api_base" not in asr:
+            asr["api_base"] = asr.pop("openai_url")
         if "riva_server" in asr and "server" not in asr:
             asr["server"] = asr.pop("riva_server")
         # Realtime: pass through realtime_url; derive from api_base when missing (e.g. preset)
@@ -160,6 +214,10 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         tts = dict(data["tts"])
         if "backend" in tts and "scheme" not in tts:
             tts["scheme"] = tts.pop("backend", "riva")
+        if tts.get("scheme") == "openai":
+            tts["scheme"] = "openai-rest"
+        if "openai_url" in tts and "api_base" not in tts:
+            tts["api_base"] = tts.pop("openai_url")
         if "riva_server" in tts and "server" not in tts:
             tts["server"] = tts.pop("riva_server")
         if data.get("tts_model_name") and "riva_model_name" not in tts:
@@ -744,21 +802,52 @@ async def _run_voice_pipeline(
                 pass
             return None
 
-    # Classic: Riva ASR + LLM + Riva TTS
-    if asr_config.scheme != "riva" or tts_config.scheme != "riva":
-        await ws.send_str(json.dumps({"type": "error", "error": "This pipeline requires ASR and TTS scheme 'riva'"}))
+    # Classic cascade: independently selectable ASR -> OpenAI-compatible LLM -> TTS.
+    supported_asr = {"riva", "openai-rest"}
+    supported_tts = {"riva", "openai-rest"}
+    if asr_config.scheme not in supported_asr or tts_config.scheme not in supported_tts:
+        await ws.send_str(
+            json.dumps(
+                {
+                    "type": "error",
+                    "error": (
+                        "Cascade pipeline supports ASR/TTS schemes "
+                        "'riva' and 'openai-rest'"
+                    ),
+                }
+            )
+        )
         return None
-    if not asr_config.server or not tts_config.server:
-        await ws.send_str(json.dumps({"type": "error", "error": "Riva server address required for ASR and TTS"}))
+    if asr_config.scheme == "riva" and not asr_config.server:
+        await ws.send_str(json.dumps({"type": "error", "error": "Riva ASR server required"}))
+        return None
+    if tts_config.scheme == "riva" and not tts_config.server:
+        await ws.send_str(json.dumps({"type": "error", "error": "Riva TTS server required"}))
+        return None
+    if asr_config.scheme == "openai-rest" and not asr_config.api_base:
+        await ws.send_str(
+            json.dumps({"type": "error", "error": "OpenAI REST ASR api_base required"})
+        )
+        return None
+    if tts_config.scheme == "openai-rest" and not tts_config.api_base:
+        await ws.send_str(
+            json.dumps({"type": "error", "error": "OpenAI REST TTS api_base required"})
+        )
         return None
     if not llm_config.api_base:
         await ws.send_str(json.dumps({"type": "error", "error": "LLM api_base required"}))
         return None
 
     try:
-        asr = RivaASRBackend(config=asr_config, timeline=session.timeline)
+        if asr_config.scheme == "riva":
+            asr = RivaASRBackend(config=asr_config, timeline=session.timeline)
+        else:
+            asr = OpenAIRestASRBackend(config=asr_config)
         llm = OpenAILLMBackend(config=llm_config)
-        tts = RivaTTSBackend(config=tts_config, timeline=session.timeline)
+        if tts_config.scheme == "riva":
+            tts = RivaTTSBackend(config=tts_config, timeline=session.timeline)
+        else:
+            tts = OpenAIRestTTSBackend(config=tts_config)
     except Exception as e:
         logger.exception("Failed to create backends")
         await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
@@ -1188,6 +1277,40 @@ async def _run_voice_pipeline(
                     ts = now_ts
                 ev_type = "asr_partial" if not is_final else "asr_final"
 
+                # File-style OpenAI REST ASR has no partial transcripts. Preserve
+                # its local VAD timing so the UI can still draw a truthful ASR
+                # ribbon: speech/VAD activity followed by REST finalization.
+                result_start = getattr(result, "start_time", None)
+                result_end = getattr(result, "end_time", None)
+                if (
+                    is_final
+                    and result_start is not None
+                    and result_end is not None
+                    and result_end >= result_start
+                ):
+                    session.timeline.add_event(
+                        "vad_start",
+                        Lane.SPEECH,
+                        timestamp=result_start,
+                    )
+                    session.timeline.add_event(
+                        "vad_end",
+                        Lane.SPEECH,
+                        timestamp=result_end,
+                    )
+                    await send_event({
+                        "event_type": "vad_start",
+                        "lane": "speech",
+                        "data": {"source": "openai-rest"},
+                        "timestamp": result_start,
+                    })
+                    await send_event({
+                        "event_type": "vad_end",
+                        "lane": "speech",
+                        "data": {"source": "openai-rest"},
+                        "timestamp": result_end,
+                    })
+
                 if is_final and last_asr_final_text is not None and text == last_asr_final_text:
                     if last_asr_final_ts is not None and abs(ts - last_asr_final_ts) < 2.0:
                         logger.debug("[asr] Skipping duplicate asr_final: %r", text[:50])
@@ -1239,6 +1362,18 @@ async def _run_voice_pipeline(
                         "timestamp": ts,
                     }))
                 else:
+                    # Keep saved/replay timelines equivalent to the live
+                    # WebSocket stream. REST ASR relies on this final event to
+                    # close the VAD-derived ribbon and attach the transcript.
+                    session.timeline.add_event(
+                        ev_type,
+                        Lane.SPEECH,
+                        data={
+                            "text": text,
+                            "confidence": getattr(result, "confidence", 1.0),
+                        },
+                        timestamp=ts,
+                    )
                     await send_event({
                         "event_type": ev_type,
                         "lane": "speech",
@@ -1522,8 +1657,8 @@ async def _run_voice_pipeline(
                         if first_text is None:
                             return
                         chunk_idx += 1
-                        logger.info("[stream_tts] TTS chunk #%d (%d words, %d chars)",
-                                    chunk_idx, len(first_text.split()), len(first_text))
+                        logger.info("[stream_tts] TTS chunk #%d (%d units, %d chars)",
+                                    chunk_idx, TTSChunkBuffer._speech_units(first_text), len(first_text))
 
                         async for audio_chunk in tts.synthesize_stream(first_text):
                             if stopped.is_set():
@@ -1536,8 +1671,8 @@ async def _run_voice_pipeline(
                                         stream_ended = True
                                     else:
                                         chunk_idx += 1
-                                        logger.info("[stream_tts] TTS chunk #%d (lookahead, %d words, %d chars)",
-                                                    chunk_idx, len(nxt.split()), len(nxt))
+                                        logger.info("[stream_tts] TTS chunk #%d (lookahead, %d units, %d chars)",
+                                                    chunk_idx, TTSChunkBuffer._speech_units(nxt), len(nxt))
                                         lookahead = asyncio.create_task(_collect_audio(nxt))
                                 except asyncio.QueueEmpty:
                                     pass
@@ -1552,8 +1687,8 @@ async def _run_voice_pipeline(
                                 if text_chunk is None:
                                     break
                                 chunk_idx += 1
-                                logger.info("[stream_tts] TTS chunk #%d (%d words, %d chars)",
-                                            chunk_idx, len(text_chunk.split()), len(text_chunk))
+                                logger.info("[stream_tts] TTS chunk #%d (%d units, %d chars)",
+                                            chunk_idx, TTSChunkBuffer._speech_units(text_chunk), len(text_chunk))
                                 current_audio = await _collect_audio(text_chunk)
 
                             # Pre-start next chunk synthesis before sending current audio
@@ -1564,8 +1699,8 @@ async def _run_voice_pipeline(
                                         stream_ended = True
                                     else:
                                         chunk_idx += 1
-                                        logger.info("[stream_tts] TTS chunk #%d (lookahead, %d words, %d chars)",
-                                                    chunk_idx, len(nxt.split()), len(nxt))
+                                        logger.info("[stream_tts] TTS chunk #%d (lookahead, %d units, %d chars)",
+                                                    chunk_idx, TTSChunkBuffer._speech_units(nxt), len(nxt))
                                         lookahead = asyncio.create_task(_collect_audio(nxt))
                                 except asyncio.QueueEmpty:
                                     pass
@@ -1584,8 +1719,8 @@ async def _run_voice_pipeline(
                                             stream_ended = True
                                         else:
                                             chunk_idx += 1
-                                            logger.info("[stream_tts] TTS chunk #%d (lookahead, %d words, %d chars)",
-                                                        chunk_idx, len(nxt.split()), len(nxt))
+                                            logger.info("[stream_tts] TTS chunk #%d (lookahead, %d units, %d chars)",
+                                                        chunk_idx, TTSChunkBuffer._speech_units(nxt), len(nxt))
                                             lookahead = asyncio.create_task(_collect_audio(nxt))
                                     except asyncio.QueueEmpty:
                                         pass
@@ -2041,6 +2176,9 @@ async def _run_voice_pipeline(
                 await turn_task
             except asyncio.CancelledError:
                 pass
+    close_tts = getattr(tts, "close", None)
+    if close_tts is not None:
+        await close_tts()
 
     # VLM: Stop browser frame capture and local video feeder
     await stop_vlm_capture()

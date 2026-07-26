@@ -17,6 +17,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 ### Multi-backend Architecture
 - Speech
   - **NVIDIA Riva**: gRPC streaming ASR/TTS (Jetson/ARM64)
+  - **OpenAI-compatible REST**: independent transcription and speech services
   - **OpenAI-compatible Realtime API**: Realtime API
 - LLM: **OpenAI-compatible** REST API, to works with many inference engines for various LLM/VLM models
 - **Extensible**: Plugin-style backends; Azure Speech and others can be added
@@ -45,7 +46,8 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 - **Python 3.8+**
 - **Audio/video**: Browser (WebRTC) for mic, speaker, and camera. On Linux, server **USB microphone**, **USB speaker**, and **USB webcam** are also supported; see [INSTALL.md](INSTALL.md).
-- **Backends (as needed)**: [NVIDIA Riva](INSTALL.md#nvidia-riva-setup-for-voice-asrtts) for ASR/TTS; OpenAI API key for OpenAI/Realtime backends (optional).
+- **Backends (as needed)**: Public local models, NVIDIA Riva, or hosted
+  OpenAI-compatible services.
 - **Optional**: `jq` for pretty-printed LLM logs in the console (`apt install jq` or `brew install jq`).
 
 ### Installation
@@ -82,6 +84,20 @@ python -m multi_modal_ai_studio --port 8092
 
 Open **https://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
 
+### Public voice stack on Jetson Thor and Orin
+
+Run Nemotron 3.5 ASR, an OpenAI-compatible LLM, and Magpie multilingual TTS
+locally without Riva setup or an NGC entitlement:
+
+```bash
+./scripts/nvidia_open_models_speech.sh build
+./scripts/nvidia_open_models_speech.sh start
+multi-modal-ai-studio --preset nvidia-open-models-speech-jetson --port 8092
+```
+
+See [Open speech models on Jetson](docs/setup_open_models_jetson.md) for
+verified API calls, Thor and Orin measurements, and model cache behavior.
+
 ### Kill a Running Server
 
 If the server is running in the background or the port is stuck with `address already in use`:
@@ -117,6 +133,8 @@ python -m multi_modal_ai_studio --mode headless \
 | Doc | Description |
 |-----|-------------|
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
+| [Open Models on Jetson](docs/setup_open_models_jetson.md) | Public Nemotron ASR + LLM + Magpie TTS |
+| [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
 | [Riva Setup](docs/setup_riva.md) | NVIDIA Riva ASR/TTS (Jetson/ARM64) |
 | [VLM Guide](docs/vlm_guide.md) | Vision-language models, frame capture, tuning |
 | [Architecture](docs/architecture.md) | System design and components |
@@ -128,4 +146,3 @@ This project is under active development. Issues, pull requests, and feedback ar
 ## 📄 License
 
 Apache License 2.0 - See [LICENSE](LICENSE) file for details.
-
