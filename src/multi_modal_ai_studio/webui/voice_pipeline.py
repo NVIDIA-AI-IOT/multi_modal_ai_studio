@@ -1844,18 +1844,18 @@ async def _run_voice_pipeline(
                 # ── Shared TTS state ──
                 tts_first_sent = False
                 ts_tts_first = 0.0
-                last_tts_amplitude_time = 0.0
-                tts_amplitude_interval = 0.05
+                tts_amplitude_next_t = 0.0
                 server_speaker_proc = None
                 _speaker_fail_until = 0.0  # backoff: skip aplay retries until this epoch
                 tts_consumer_error: Optional[Exception] = None
 
                 async def _send_tts_audio(chunk):
-                    nonlocal tts_first_sent, ts_tts_first, last_tts_amplitude_time, server_speaker_proc, _speaker_fail_until
+                    nonlocal tts_first_sent, ts_tts_first, tts_amplitude_next_t, server_speaker_proc, _speaker_fail_until
                     if barge_in.requested.is_set():
                         raise asyncio.CancelledError
                     if not tts_first_sent:
                         ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                        tts_amplitude_next_t = ts_tts_first
                         ref_label = "llm_first_token" if use_stream_tts else "llm_complete"
                         ref_ts = ts_first if use_stream_tts else ts_llm_complete
                         logger.info("[timing] tts_first_audio @ %.2fs (%.2fs after %s)", ts_tts_first, ts_tts_first - ref_ts, ref_label)
@@ -1883,19 +1883,39 @@ async def _run_voice_pipeline(
                                 logger.debug("Server speaker write failed: %s", e)
                                 stop_server_speaker_playback(server_speaker_proc)
                                 server_speaker_proc = None
+                    amplitude_segments: List[Dict[str, Any]] = []
                     if session.timeline.start_time is not None and chunk.audio:
-                        now = time.time() - session.timeline.start_time
-                        if now - last_tts_amplitude_time >= tts_amplitude_interval:
-                            amp = _pcm_rms_to_amplitude(chunk.audio)
-                            session.timeline.add_audio_amplitude(amplitude=amp, source="tts")
-                            last_tts_amplitude_time = now
+                        # Persist the actual PCM envelope at the same 25 ms
+                        # resolution used by the live canvas.  A single RMS per
+                        # HTTP chunk collapses multi-second Magpie responses to
+                        # one point and leaves no AI waveform during replay.
+                        amps = _pcm_rms_slices(
+                            chunk.audio,
+                            sample_rate=chunk.sample_rate,
+                            window_s=_amplitude_window_s,
+                        )
+                        for amp in amps:
+                            t_start = tts_amplitude_next_t
+                            t_end = t_start + _amplitude_window_s
+                            session.timeline.add_audio_amplitude(
+                                amplitude=amp, source="tts", timestamp=t_start
+                            )
+                            amplitude_segments.append({
+                                "startTime": round(t_start, 3),
+                                "endTime": round(t_end, 3),
+                                "amplitude": round(amp, 2),
+                            })
+                            tts_amplitude_next_t = t_end
                     b64 = base64.b64encode(chunk.audio).decode("ascii")
-                    await ws.send_str(json.dumps({
+                    payload = {
                         "type": "tts_audio",
                         "data": b64,
                         "sample_rate": chunk.sample_rate,
                         "is_final": chunk.is_final,
-                    }))
+                    }
+                    if amplitude_segments:
+                        payload["amplitude_segments"] = amplitude_segments
+                    await ws.send_str(json.dumps(payload))
 
                 async def _tts_consumer(tts_q: asyncio.Queue) -> None:
                     """Background task: pull text chunks from queue, synthesize, send audio.
