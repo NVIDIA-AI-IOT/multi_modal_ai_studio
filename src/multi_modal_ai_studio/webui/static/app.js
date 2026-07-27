@@ -3516,52 +3516,8 @@ function buildUserAmplitudeFromTimeline(timeline) {
     return out;
 }
 
-// Build coarse TTS playback segments from timeline.  Playback begins at
-// tts_first_audio, not tts_start (which includes synthesis time).  These are a
-// compatibility fallback for sessions recorded before dense 25 ms TTS RMS
-// samples were persisted.
-function buildTtsSegmentsFromTimeline(timeline) {
-    if (!timeline || !timeline.length) return [];
-    const starts = timeline.filter(function (e) { return e.event_type === 'tts_start'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
-    const firstAudios = timeline.filter(function (e) { return e.event_type === 'tts_first_audio'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
-    const completes = timeline.filter(function (e) { return e.event_type === 'tts_complete'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
-    if (!starts.length) return [];
-    return starts.map(function (s, i) {
-        const synthesisStart = s.timestamp != null ? Number(s.timestamp) : 0;
-        const nextSynthesisStart = starts[i + 1] && starts[i + 1].timestamp != null ? Number(starts[i + 1].timestamp) : Infinity;
-        const firstAudio = firstAudios.find(function (e) {
-            const t = e.timestamp != null ? Number(e.timestamp) : NaN;
-            return !isNaN(t) && t >= synthesisStart && t < nextSynthesisStart;
-        });
-        const endEvent = completes.find(function (e) {
-            const t = e.timestamp != null ? Number(e.timestamp) : NaN;
-            return !isNaN(t) && t >= synthesisStart && t < nextSynthesisStart;
-        });
-        const startTime = firstAudio && firstAudio.timestamp != null ? Number(firstAudio.timestamp) : synthesisStart;
-        const endTime = endEvent && endEvent.timestamp != null ? Math.max(startTime + 0.025, Number(endEvent.timestamp)) : startTime + 0.1;
-        return { startTime: startTime, endTime: endTime, amplitude: 50 };
-    });
-}
-
-// A legacy OpenAI-REST recording stored one RMS value per multi-second HTTP
-// chunk.  Treat that as sparse data and use the coarse playback fallback
-// above; otherwise interpolation produces only isolated purple pixels.
-function hasDenseTtsAmplitudeTimeline(timeline) {
-    if (!timeline || !timeline.length) return false;
-    const samples = timeline.filter(function (e) {
-        return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai');
-    }).map(function (e) {
-        return e.timestamp != null ? Number(e.timestamp) : NaN;
-    }).filter(function (t) {
-        return !isNaN(t);
-    }).sort(function (a, b) {
-        return a - b;
-    });
-    for (let i = 1; i < samples.length; i++) {
-        if (samples[i] - samples[i - 1] <= 0.1) return true;
-    }
-    return false;
-}
+const buildTtsSegmentsFromTimeline = window.MMASTimelineHelpers.buildTtsSegmentsFromTimeline;
+const hasDenseTtsAmplitudeTimeline = window.MMASTimelineHelpers.hasDenseTtsAmplitudeTimeline;
 
 // Get amplitude at time t from live history (nearest sample or linear interpolate).
 // If maxGapSec is set and t falls between two samples more than maxGapSec apart, return 0 (don't draw in gaps between turns).
@@ -6013,20 +5969,9 @@ function handleVoiceWsMessage(ev) {
             if (evt.event_type === 'error' && evt.data && evt.data.message) {
                 showVoiceErrorToast(evt.data.message);
             }
-            if (evt.event_type === 'vad_start' || evt.event_type === 'user_speech_start') {
-                state.voiceTurnActive = true;
-                state.voiceSilenceCandidate = null;
-                state.voiceSilenceConsecutiveCount = 0;
-            } else if (evt.event_type === 'vad_end' || evt.event_type === 'user_speech_end') {
-                // Start the live TTL overlay as soon as server VAD declares
-                // end-of-speech.  OpenAI REST ASR commonly emits only a final
-                // transcript, so waiting for asr_partial made the live band
-                // disappear on that path.
-                var vadEndT = evt.timestamp != null ? Number(evt.timestamp) : null;
-                if (vadEndT != null && !isNaN(vadEndT) && state.liveTtlBandStartTime == null) {
-                    state.liveTtlBandStartTime = vadEndT;
-                    state.voiceTurnActive = true;
-                }
+            var speechTimingHandled = window.MMASTimelineHelpers.applySpeechTimingEvent(state, evt);
+            if (speechTimingHandled) {
+                // VAD/user-speech timing state is fully handled by the shared helper.
             } else if (evt.event_type === 'asr_partial') {
                 state.voiceTurnActive = true;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
@@ -6056,13 +6001,6 @@ function handleVoiceWsMessage(ev) {
                     var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (finalTxt.length > 0) stopTtsPlayback();
                 }
-                        if (state.liveTtlBandStartTime == null) {
-                    var ft = evt.timestamp != null ? Number(evt.timestamp) : null;
-                            if (typeof ft === 'number' && !isNaN(ft)) {
-                                state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
-                                state.voiceTurnActive = true;
-                            }
-                        }
                         state.liveAsrInterimText = '';
                         syncFullscreenOverlays();
                 var userText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';

@@ -1,0 +1,147 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+"""Regression tests for desktop and Jetson GPU telemetry."""
+
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+
+from multi_modal_ai_studio.webui import system_stats
+
+
+@pytest.fixture(autouse=True)
+def reset_nvidia_smi_support_cache():
+    system_stats._nvidia_smi_gpu_supported = None
+    yield
+    system_stats._nvidia_smi_gpu_supported = None
+
+
+def test_nvidia_smi_numeric_utilization_is_used_and_cached(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="37\n", stderr="")
+
+    monkeypatch.setattr(system_stats.subprocess, "run", fake_run)
+
+    assert system_stats._read_nvidia_smi_gpu_percent() == 37.0
+    assert system_stats._nvidia_smi_gpu_supported is True
+    assert system_stats._read_nvidia_smi_gpu_percent() == 37.0
+    assert len(calls) == 2
+    assert calls[0][0] == [
+        "nvidia-smi",
+        "--query-gpu=utilization.gpu",
+        "--format=csv,noheader,nounits",
+    ]
+    assert calls[0][1]["timeout"] == 2
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        subprocess.CompletedProcess([], 0, stdout="[N/A]\n", stderr=""),
+        subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+        subprocess.CompletedProcess([], 1, stdout="42\n", stderr="failed"),
+        subprocess.CompletedProcess([], 0, stdout="101\n", stderr=""),
+    ],
+)
+def test_nvidia_smi_unsupported_results_are_disabled_after_one_probe(
+    monkeypatch,
+    result,
+):
+    calls = 0
+
+    def fake_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return result
+
+    monkeypatch.setattr(system_stats.subprocess, "run", fake_run)
+
+    assert system_stats._read_nvidia_smi_gpu_percent() is None
+    assert system_stats._read_nvidia_smi_gpu_percent() is None
+    assert system_stats._nvidia_smi_gpu_supported is False
+    assert calls == 1
+
+
+def test_nvidia_smi_missing_binary_is_disabled_after_one_probe(monkeypatch):
+    calls = 0
+
+    def missing_binary(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise FileNotFoundError
+
+    monkeypatch.setattr(system_stats.subprocess, "run", missing_binary)
+
+    assert system_stats._read_nvidia_smi_gpu_percent() is None
+    assert system_stats._read_nvidia_smi_gpu_percent() is None
+    assert calls == 1
+
+
+def test_jetson_sysfs_load_is_scaled_and_invalid_candidates_are_skipped(
+    monkeypatch,
+    tmp_path,
+):
+    invalid = tmp_path / "invalid-load"
+    valid = tmp_path / "valid-load"
+    invalid.write_text("[N/A]\n")
+    valid.write_text("735\n")
+
+    class FakeDevfreqRoot:
+        def glob(self, pattern):
+            if pattern == "*gpu*/device/load":
+                return [invalid, valid]
+            return []
+
+    monkeypatch.setattr(system_stats, "Path", lambda path: FakeDevfreqRoot())
+
+    assert system_stats._read_jetson_sysfs_gpu_percent() == 73.5
+
+
+def test_gather_system_stats_falls_back_to_jetson_sysfs(monkeypatch):
+    monkeypatch.setattr(
+        system_stats,
+        "psutil",
+        SimpleNamespace(cpu_percent=lambda interval: 12.34),
+    )
+    monkeypatch.setattr(
+        system_stats,
+        "_read_nvidia_smi_gpu_percent",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        system_stats,
+        "_read_jetson_sysfs_gpu_percent",
+        lambda: 56.7,
+    )
+
+    assert system_stats.gather_system_stats() == {
+        "cpu_percent": 12.3,
+        "gpu_percent": 56.7,
+    }
+
+
+def test_gather_system_stats_prefers_nvidia_smi(monkeypatch):
+    monkeypatch.setattr(system_stats, "psutil", None)
+    monkeypatch.setattr(
+        system_stats,
+        "_read_nvidia_smi_gpu_percent",
+        lambda: 41.0,
+    )
+
+    def unexpected_sysfs():
+        raise AssertionError("sysfs fallback should not run")
+
+    monkeypatch.setattr(
+        system_stats,
+        "_read_jetson_sysfs_gpu_percent",
+        unexpected_sysfs,
+    )
+
+    assert system_stats.gather_system_stats() == {
+        "cpu_percent": None,
+        "gpu_percent": 41.0,
+    }
