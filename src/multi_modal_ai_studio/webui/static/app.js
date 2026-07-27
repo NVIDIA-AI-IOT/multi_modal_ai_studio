@@ -3516,18 +3516,51 @@ function buildUserAmplitudeFromTimeline(timeline) {
     return out;
 }
 
-// Build TTS segments from timeline (tts_start / tts_complete pairs). Fallback to session.tts_playback_segments for old sessions.
+// Build coarse TTS playback segments from timeline.  Playback begins at
+// tts_first_audio, not tts_start (which includes synthesis time).  These are a
+// compatibility fallback for sessions recorded before dense 25 ms TTS RMS
+// samples were persisted.
 function buildTtsSegmentsFromTimeline(timeline) {
     if (!timeline || !timeline.length) return [];
     const starts = timeline.filter(function (e) { return e.event_type === 'tts_start'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+    const firstAudios = timeline.filter(function (e) { return e.event_type === 'tts_first_audio'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
     const completes = timeline.filter(function (e) { return e.event_type === 'tts_complete'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
     if (!starts.length) return [];
     return starts.map(function (s, i) {
-        const startTime = s.timestamp != null ? Number(s.timestamp) : 0;
-        const endEvent = completes[i];
-        const endTime = endEvent && endEvent.timestamp != null ? Number(endEvent.timestamp) : startTime + 0.1;
+        const synthesisStart = s.timestamp != null ? Number(s.timestamp) : 0;
+        const nextSynthesisStart = starts[i + 1] && starts[i + 1].timestamp != null ? Number(starts[i + 1].timestamp) : Infinity;
+        const firstAudio = firstAudios.find(function (e) {
+            const t = e.timestamp != null ? Number(e.timestamp) : NaN;
+            return !isNaN(t) && t >= synthesisStart && t < nextSynthesisStart;
+        });
+        const endEvent = completes.find(function (e) {
+            const t = e.timestamp != null ? Number(e.timestamp) : NaN;
+            return !isNaN(t) && t >= synthesisStart && t < nextSynthesisStart;
+        });
+        const startTime = firstAudio && firstAudio.timestamp != null ? Number(firstAudio.timestamp) : synthesisStart;
+        const endTime = endEvent && endEvent.timestamp != null ? Math.max(startTime + 0.025, Number(endEvent.timestamp)) : startTime + 0.1;
         return { startTime: startTime, endTime: endTime, amplitude: 50 };
     });
+}
+
+// A legacy OpenAI-REST recording stored one RMS value per multi-second HTTP
+// chunk.  Treat that as sparse data and use the coarse playback fallback
+// above; otherwise interpolation produces only isolated purple pixels.
+function hasDenseTtsAmplitudeTimeline(timeline) {
+    if (!timeline || !timeline.length) return false;
+    const samples = timeline.filter(function (e) {
+        return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai');
+    }).map(function (e) {
+        return e.timestamp != null ? Number(e.timestamp) : NaN;
+    }).filter(function (t) {
+        return !isNaN(t);
+    }).sort(function (a, b) {
+        return a - b;
+    });
+    for (let i = 1; i < samples.length; i++) {
+        if (samples[i] - samples[i - 1] <= 0.1) return true;
+    }
+    return false;
 }
 
 // Get amplitude at time t from live history (nearest sample or linear interpolate).
@@ -4207,7 +4240,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
         if (!inLive && !hasStoppedLiveData && !isUser) {
             // Replay: skip sparse TTS bars when we draw dense TTS from timeline amplitude (2b replay); avoids massive duplicate purple.
-            if (timeline && timeline.some(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); })) return;
+            if (hasDenseTtsAmplitudeTimeline(timeline)) return;
         }
 
         const x = PADDING_LEFT + (event.timestamp - timelineOffset) * timeScale;
@@ -4351,7 +4384,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const barWidthPx = 2;
             const tStep = 0.025;
             // Replay: prefer actual amplitude from timeline; only use segment fill when no timeline TTS amplitude (old sessions).
-            var hasTimelineTtsAmp = timeline && timeline.some(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); });
+            var hasTimelineTtsAmp = hasDenseTtsAmplitudeTimeline(timeline);
             if (hasTimelineTtsAmp) {
                 var ttsFromTimeline = [];
                 timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).forEach(function (e) {
@@ -4398,7 +4431,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     }
 
     // 2c. Replay fallback: when no dense TTS data and no timeline TTS amplitude, draw flat TTS blocks from tts_start→tts_complete.
-    var hasTimelineTts = timeline && timeline.some(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); });
+    var hasTimelineTts = hasDenseTtsAmplitudeTimeline(timeline);
     if (!inLive && !hasStoppedLiveData && !liveTtsSegments && (!replayTtsSegments || replayTtsSegments.length === 0) && !hasTimelineTts) {
         const laneIndex = lanes.indexOf('audio');
         if (laneIndex !== -1) {
@@ -5980,7 +6013,21 @@ function handleVoiceWsMessage(ev) {
             if (evt.event_type === 'error' && evt.data && evt.data.message) {
                 showVoiceErrorToast(evt.data.message);
             }
-            if (evt.event_type === 'asr_partial') {
+            if (evt.event_type === 'vad_start' || evt.event_type === 'user_speech_start') {
+                state.voiceTurnActive = true;
+                state.voiceSilenceCandidate = null;
+                state.voiceSilenceConsecutiveCount = 0;
+            } else if (evt.event_type === 'vad_end' || evt.event_type === 'user_speech_end') {
+                // Start the live TTL overlay as soon as server VAD declares
+                // end-of-speech.  OpenAI REST ASR commonly emits only a final
+                // transcript, so waiting for asr_partial made the live band
+                // disappear on that path.
+                var vadEndT = evt.timestamp != null ? Number(evt.timestamp) : null;
+                if (vadEndT != null && !isNaN(vadEndT) && state.liveTtlBandStartTime == null) {
+                    state.liveTtlBandStartTime = vadEndT;
+                    state.voiceTurnActive = true;
+                }
+            } else if (evt.event_type === 'asr_partial') {
                 state.voiceTurnActive = true;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
                         if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
@@ -6009,10 +6056,12 @@ function handleVoiceWsMessage(ev) {
                     var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (finalTxt.length > 0) stopTtsPlayback();
                 }
-                        if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+                        if (state.liveTtlBandStartTime == null) {
                     var ft = evt.timestamp != null ? Number(evt.timestamp) : null;
-                            if (typeof ft === 'number' && !isNaN(ft))
+                            if (typeof ft === 'number' && !isNaN(ft)) {
                                 state.liveTtlBandStartTime = state.lastAsrPartialTime != null ? state.lastAsrPartialTime : (ft - 0.2);
+                                state.voiceTurnActive = true;
+                            }
                         }
                         state.liveAsrInterimText = '';
                         syncFullscreenOverlays();
