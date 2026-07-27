@@ -378,6 +378,37 @@ def _pcm_rms_slices(
     return result
 
 
+def _pcm_amplitude_segments(
+    pcm_bytes: bytes,
+    sample_rate: int,
+    start_time: float,
+    window_s: float = 0.025,
+) -> Tuple[List[Dict[str, float]], float]:
+    """Build contiguous timeline segments for a PCM16 chunk.
+
+    The returned cursor is the start time for the next chunk. Keeping this
+    calculation independent from wall-clock send time prevents gaps and
+    overlaps when an HTTP TTS response is split into uneven chunks.
+    """
+    cursor = start_time
+    segments: List[Dict[str, float]] = []
+    for amplitude in _pcm_rms_slices(
+        pcm_bytes,
+        sample_rate=sample_rate,
+        window_s=window_s,
+    ):
+        end_time = cursor + window_s
+        segments.append(
+            {
+                "startTime": cursor,
+                "endTime": end_time,
+                "amplitude": amplitude,
+            }
+        )
+        cursor = end_time
+    return segments, cursor
+
+
 def _resample_pcm_to_24k(pcm_bytes: bytes, from_rate: int) -> bytes:
     """Resample 16-bit mono PCM to 24 kHz for Realtime API."""
     pcm_bytes = _pcm16_aligned_bytes(pcm_bytes)
@@ -1889,23 +1920,26 @@ async def _run_voice_pipeline(
                         # resolution used by the live canvas.  A single RMS per
                         # HTTP chunk collapses multi-second Magpie responses to
                         # one point and leaves no AI waveform during replay.
-                        amps = _pcm_rms_slices(
+                        raw_segments, tts_amplitude_next_t = _pcm_amplitude_segments(
                             chunk.audio,
                             sample_rate=chunk.sample_rate,
+                            start_time=tts_amplitude_next_t,
                             window_s=_amplitude_window_s,
                         )
-                        for amp in amps:
-                            t_start = tts_amplitude_next_t
-                            t_end = t_start + _amplitude_window_s
+                        for segment in raw_segments:
                             session.timeline.add_audio_amplitude(
-                                amplitude=amp, source="tts", timestamp=t_start
+                                amplitude=segment["amplitude"],
+                                source="tts",
+                                timestamp=segment["startTime"],
                             )
-                            amplitude_segments.append({
-                                "startTime": round(t_start, 3),
-                                "endTime": round(t_end, 3),
-                                "amplitude": round(amp, 2),
-                            })
-                            tts_amplitude_next_t = t_end
+                        amplitude_segments = [
+                            {
+                                "startTime": round(segment["startTime"], 3),
+                                "endTime": round(segment["endTime"], 3),
+                                "amplitude": round(segment["amplitude"], 2),
+                            }
+                            for segment in raw_segments
+                        ]
                     b64 = base64.b64encode(chunk.audio).decode("ascii")
                     payload = {
                         "type": "tts_audio",

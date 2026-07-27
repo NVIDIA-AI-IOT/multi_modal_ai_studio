@@ -11,6 +11,7 @@ from multi_modal_ai_studio.devices.capture import _make_capture_event
 from multi_modal_ai_studio.webui.voice_pipeline import (
     BargeInController,
     _capture_event_details,
+    _pcm_amplitude_segments,
     _pcm_rms_slices,
     _pcm_rms_to_amplitude,
     _resample_pcm_to_24k,
@@ -32,6 +33,43 @@ def test_pcm_helpers_report_signal_and_resample_to_24khz():
     assert _pcm_rms_slices(pcm_16k, sample_rate=16000, window_s=0.005)
     pcm_24k = _resample_pcm_to_24k(pcm_16k, 16000)
     assert len(pcm_24k) == 240 * 2
+
+
+def test_pcm_amplitude_segments_are_dense_contiguous_and_resume_at_cursor():
+    pcm_16k = struct.pack("<800h", *([16384] * 800))
+
+    first, next_cursor = _pcm_amplitude_segments(
+        pcm_16k,
+        sample_rate=16000,
+        start_time=1.25,
+        window_s=0.025,
+    )
+    second, final_cursor = _pcm_amplitude_segments(
+        pcm_16k,
+        sample_rate=16000,
+        start_time=next_cursor,
+        window_s=0.025,
+    )
+
+    assert len(first) == 2
+    assert first[0]["startTime"] == pytest.approx(1.25)
+    assert first[0]["endTime"] == pytest.approx(1.275)
+    assert first[1]["startTime"] == pytest.approx(first[0]["endTime"])
+    assert first[1]["endTime"] == pytest.approx(1.3)
+    assert all(49.0 <= segment["amplitude"] <= 51.0 for segment in first)
+    assert second[0]["startTime"] == pytest.approx(first[-1]["endTime"])
+    assert final_cursor == pytest.approx(1.35)
+
+
+def test_pcm_amplitude_segments_leave_cursor_unchanged_for_empty_audio():
+    segments, cursor = _pcm_amplitude_segments(
+        b"",
+        sample_rate=16000,
+        start_time=2.5,
+    )
+
+    assert segments == []
+    assert cursor == 2.5
 
 
 @pytest.mark.parametrize(
