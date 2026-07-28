@@ -2810,6 +2810,11 @@ async function fetchASRModels(server) {
         const models = (data && data.models) ? data.models : [];
         const defaultModel = (data && data.default_model) || (models[0] || '');
 
+        // Ignore a response started by the built-in Riva defaults if the
+        // asynchronous server preset has since selected OpenAI REST (or a
+        // different Riva server). Otherwise it can overwrite the REST model.
+        if (!window.MMASConfigHelpers.matchesRivaDiscovery(currentConfig.asr, server)) return;
+
         if (!r.ok) {
             const errMsg = (data && data.error) ? data.error : ('Request failed: ' + r.status);
             select.innerHTML = '<option value="">' + escapeHtml(errMsg) + '</option>';
@@ -2854,6 +2859,10 @@ async function fetchTTSVoices(server, language) {
         const r = await fetch('/api/tts/voices?server=' + encodeURIComponent(server) + '&language=' + encodeURIComponent(language));
         const data = await r.json().catch(function () { return {}; });
         const voices = (data && data.voices) ? data.voices : [];
+
+        // The active preset may have changed while Riva discovery was in
+        // flight. Never apply stale voices/models to an OpenAI REST config.
+        if (!window.MMASConfigHelpers.matchesRivaDiscovery(currentConfig.tts, server, language)) return;
 
         if (!r.ok) {
             const errMsg = (data && data.error) ? data.error : ('Request failed: ' + r.status);
@@ -2984,6 +2993,7 @@ async function preloadASRModelName() {
         var data = await r.json().catch(function () { return {}; });
         var models = (data && data.models) ? data.models : [];
         var defaultModel = (data && data.default_model) || (models[0] || '');
+        if (!window.MMASConfigHelpers.matchesRivaDiscovery(currentConfig.asr, server)) return;
         if (!r.ok || !models.length) return;
         var current = currentConfig.asr.model || '';
         if (!current || !models.includes(current)) {
@@ -3007,6 +3017,7 @@ async function preloadTTSModelName() {
         var r = await fetch('/api/tts/voices?server=' + encodeURIComponent(server) + '&language=' + encodeURIComponent(language));
         var data = await r.json().catch(function () { return {}; });
         var voices = (data && data.voices) ? data.voices : [];
+        if (!window.MMASConfigHelpers.matchesRivaDiscovery(currentConfig.tts, server, language)) return;
         if (!r.ok) return;
         var modelName = data.model_name != null ? data.model_name : (data.model_names && data.model_names[0]) || null;
         var modelNames = (data.model_names && data.model_names.length) ? data.model_names : (modelName ? [modelName] : []);

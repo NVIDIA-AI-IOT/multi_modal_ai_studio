@@ -3030,6 +3030,7 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--space-md);
     padding: var(--space-xs) 0;
     flex-shrink: 0;
 }
@@ -3047,6 +3048,8 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    margin-left: auto;
+    flex-shrink: 0;
 }
 
 .timeline-content {
@@ -3194,21 +3197,87 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 
 .timeline-legend {
     display: flex;
-    gap: 16px;
-    font-size: 11px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    min-width: 0;
+    font-size: 0.65rem;
 }
 
 .legend-item {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     color: var(--text-secondary);
+    white-space: nowrap;
 }
 
 .legend-color {
-    width: 12px;
-    height: 12px;
+    width: 11px;
+    height: 11px;
+    flex: 0 0 11px;
     border-radius: 2px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.legend-color-asr {
+    background: var(--timeline-asr);
+}
+
+.legend-color-vad {
+    background: var(--timeline-vad);
+}
+
+.legend-color-llm-prefill {
+    background: var(--timeline-llm-prefill);
+}
+
+.legend-color-llm-generate {
+    background: var(--timeline-llm-generate);
+}
+
+.legend-color-tts {
+    background: var(--timeline-tts);
+}
+
+.legend-waveform {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    width: 17px;
+    height: 12px;
+    color: var(--timeline-user);
+}
+
+.legend-waveform i {
+    display: block;
+    width: 2px;
+    border-radius: 1px;
+    background: currentColor;
+}
+
+.legend-waveform i:nth-child(1),
+.legend-waveform i:nth-child(5) {
+    height: 4px;
+}
+
+.legend-waveform i:nth-child(2),
+.legend-waveform i:nth-child(4) {
+    height: 8px;
+}
+
+.legend-waveform i:nth-child(3) {
+    height: 12px;
+}
+
+.legend-waveform-user {
+    color: var(--timeline-user);
+}
+
+.legend-waveform-ai {
+    color: var(--timeline-ai);
 }
 
 #timelineCanvas {
@@ -3849,6 +3918,16 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 
     .chat-panel {
         display: none;
+    }
+
+    .timeline-header {
+        flex-wrap: wrap;
+    }
+
+    .timeline-legend {
+        order: 3;
+        flex: 1 0 100%;
+        justify-content: flex-start;
     }
 }
 
