@@ -69,6 +69,7 @@ debug_videos/
 .coverage
 htmlcov/
 *.cover
+benchmark-results/
 
 # Development
 *.tmp
