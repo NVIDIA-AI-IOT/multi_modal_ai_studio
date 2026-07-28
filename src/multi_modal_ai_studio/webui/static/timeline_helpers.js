@@ -86,9 +86,36 @@
         return false;
     }
 
+    // Remove generated/scheduled AI audio after browser playback is stopped.
+    // Barge-in may occur after future WebAudio buffers have already been
+    // scheduled, so simply stopping BufferSources is not enough to keep the
+    // visible purple waveform faithful to what was actually played.
+    function truncateAudioSegmentsAt(segments, cutoff) {
+        if (!Array.isArray(segments)) return [];
+        const end = Number(cutoff);
+        if (!Number.isFinite(end)) return segments.slice();
+        return segments.reduce(function (result, segment) {
+            if (!segment) return result;
+            const start = Number(
+                segment.startTime != null ? segment.startTime : segment.timestamp
+            );
+            if (!Number.isFinite(start) || start >= end) return result;
+            const clipped = Object.assign({}, segment);
+            if (clipped.endTime != null) {
+                const segmentEnd = Number(clipped.endTime);
+                if (Number.isFinite(segmentEnd)) {
+                    clipped.endTime = Math.min(segmentEnd, end);
+                }
+            }
+            result.push(clipped);
+            return result;
+        }, []);
+    }
+
     return {
         applySpeechTimingEvent: applySpeechTimingEvent,
         buildTtsSegmentsFromTimeline: buildTtsSegmentsFromTimeline,
         hasDenseTtsAmplitudeTimeline: hasDenseTtsAmplitudeTimeline,
+        truncateAudioSegmentsAt: truncateAudioSegmentsAt,
     };
 }));

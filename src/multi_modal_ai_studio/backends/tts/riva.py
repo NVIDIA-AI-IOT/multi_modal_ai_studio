@@ -124,6 +124,12 @@ def list_riva_tts_voices_sync(
 # Use 1800 as safe limit to account for variations
 MAX_TTS_CHARS = 1800
 
+# Keep each server-side request short enough that a cancelled utterance cannot
+# monopolize Riva's model queue for the next conversational turn.  On Thor,
+# 80 characters kept the post-cancel TTFA below one second in the live Magpie
+# regression test; 160 characters still left the next request waiting ~3 s.
+MAX_INTERRUPTIBLE_TTS_CHARS = 80
+
 
 class RivaTTSBackend(TTSBackend):
     """NVIDIA Riva TTS backend with streaming support.
@@ -162,6 +168,8 @@ class RivaTTSBackend(TTSBackend):
 
         # Timeline for recording events (rectangle rendering, metrics)
         self.timeline = timeline
+        self._active_rpc_calls = {}
+        self._active_rpc_lock = threading.Lock()
 
         # Validate configuration
         if config.scheme != "riva":
@@ -182,6 +190,28 @@ class RivaTTSBackend(TTSBackend):
             self.logger.info(f"Initialized Riva TTS: {config.voice} @ {self.riva_server}")
         except Exception as e:
             raise ConnectionError(f"Failed to initialize Riva TTS: {e}")
+
+    def cancel_synthesis(self) -> int:
+        """Cancel every active Riva synthesis RPC and return the count."""
+        with self._active_rpc_lock:
+            active = list(self._active_rpc_calls.values())
+        cancelled = 0
+        for rpc_call, cancel_requested in active:
+            cancel_requested.set()
+            cancel = getattr(rpc_call, "cancel", None)
+            if not callable(cancel):
+                continue
+            try:
+                cancel()
+                cancelled += 1
+            except Exception:
+                self.logger.debug(
+                    "Riva TTS RPC cancellation failed",
+                    exc_info=True,
+                )
+        if cancelled:
+            self.logger.info("Cancelled %d active Riva TTS RPC(s)", cancelled)
+        return cancelled
 
     async def list_voices(self) -> list:
         """List available TTS voices from Riva.
@@ -287,7 +317,10 @@ class RivaTTSBackend(TTSBackend):
             tts_start_time = tts_start_event.timestamp
 
         # Split text into chunks if needed
-        text_chunks = self._split_text_by_sentences(text)
+        text_chunks = self._split_text_by_sentences(
+            text,
+            max_chars=MAX_INTERRUPTIBLE_TTS_CHARS,
+        )
 
         try:
             loop = asyncio.get_running_loop()
@@ -309,23 +342,49 @@ class RivaTTSBackend(TTSBackend):
 
                 chunk_queue = queue.Queue()
                 sentinel = object()
+                cancel_requested = threading.Event()
+                rpc_holder = {}
 
                 def producer():
                     try:
-                        for response in self.tts_service.synthesize_online(
+                        rpc_call = self.tts_service.synthesize_online(
                             text_chunk,
                             voice_name=self.config.voice or "",
                             language_code=language_code,
                             encoding=riva.client.AudioEncoding.LINEAR_PCM,
                             sample_rate_hz=self.config.sample_rate,
-                        ):
+                        )
+                        rpc_holder["call"] = rpc_call
+                        with self._active_rpc_lock:
+                            self._active_rpc_calls[id(rpc_call)] = (
+                                rpc_call,
+                                cancel_requested,
+                            )
+                        if cancel_requested.is_set():
+                            cancel = getattr(rpc_call, "cancel", None)
+                            if callable(cancel):
+                                cancel()
+                        for response in rpc_call:
+                            if cancel_requested.is_set():
+                                cancel = getattr(rpc_call, "cancel", None)
+                                if callable(cancel):
+                                    cancel()
+                                break
                             if response.audio:
                                 chunk_queue.put(response)
                     except Exception as e:
-                        chunk_queue.put(e)
-                    chunk_queue.put(sentinel)
+                        if not cancel_requested.is_set():
+                            chunk_queue.put(e)
+                    finally:
+                        rpc_call = rpc_holder.get("call")
+                        if rpc_call is not None:
+                            with self._active_rpc_lock:
+                                self._active_rpc_calls.pop(id(rpc_call), None)
+                        chunk_queue.put(sentinel)
 
-                thread = threading.Thread(target=producer)
+                # A daemon thread plus explicit gRPC cancellation prevents a
+                # failed/slow RPC from holding shutdown or the next turn.
+                thread = threading.Thread(target=producer, daemon=True)
                 thread.start()
                 audio_idx = 0
                 audio_buf = bytearray()
@@ -391,7 +450,27 @@ class RivaTTSBackend(TTSBackend):
                                 tts_first_audio_time = first_audio_event.timestamp
                             yield _make_chunk(out)
                 finally:
-                    thread.join(timeout=1.0)
+                    # Cancelling the asyncio consumer must also cancel the
+                    # blocking gRPC iterator running in this producer thread.
+                    # Task.cancel() alone only stops queue consumption and
+                    # previously allowed Riva to synthesize the full discarded
+                    # response after barge-in.
+                    cancel_requested.set()
+                    rpc_call = rpc_holder.get("call")
+                    cancel = getattr(rpc_call, "cancel", None)
+                    if callable(cancel):
+                        try:
+                            cancel()
+                        except Exception:
+                            self.logger.debug(
+                                "Riva TTS RPC cancellation failed",
+                                exc_info=True,
+                            )
+                    thread.join(timeout=0.5)
+                    if thread.is_alive():
+                        self.logger.warning(
+                            "Riva TTS producer did not stop within 500ms after cancellation"
+                        )
 
             # Emit TTS complete event and rectangle for timeline
             if self.timeline and tts_first_audio_time is not None:
