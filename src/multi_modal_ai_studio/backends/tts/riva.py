@@ -11,7 +11,6 @@ Streaming: yield audio chunks as Riva produces them (no buffering full sentence)
 import asyncio
 import logging
 import queue
-import re
 import threading
 from typing import AsyncIterator, List, Optional
 
@@ -23,6 +22,7 @@ from multi_modal_ai_studio.backends.base import (
     TTSChunk,
     ConnectionError,
     ConfigError,
+    split_tts_text,
 )
 from multi_modal_ai_studio.config.schema import TTSConfig
 from multi_modal_ai_studio.core.timeline import Timeline, Lane
@@ -124,11 +124,11 @@ def list_riva_tts_voices_sync(
 # Use 1800 as safe limit to account for variations
 MAX_TTS_CHARS = 1800
 
-# Keep each server-side request short enough that a cancelled utterance cannot
-# monopolize Riva's model queue for the next conversational turn.  On Thor,
-# 80 characters kept the post-cancel TTFA below one second in the live Magpie
-# regression test; 160 characters still left the next request waiting ~3 s.
-MAX_INTERRUPTIBLE_TTS_CHARS = 80
+# Keep each server request short enough that a cancelled utterance cannot
+# monopolize Riva's model queue. Thor A/B testing found 50 characters kept
+# boundary silence near 40-55 ms while reducing post-cancel TTFA substantially;
+# 40 characters added more audible joins and 60-80 delayed the next turn.
+MAX_INTERRUPTIBLE_TTS_CHARS = 50
 
 
 class RivaTTSBackend(TTSBackend):
@@ -252,42 +252,7 @@ class RivaTTSBackend(TTSBackend):
         Returns:
             List of text chunks
         """
-        if len(text) <= max_chars:
-            return [text]
-
-        # Split by sentence boundaries (., !, ?, ;, :, newlines)
-        sentences = re.split(r'(?<=[.!?;:\n])\s+', text)
-
-        chunks = []
-        current_chunk = ""
-
-        for sentence in sentences:
-            # If single sentence is too long, force split by words
-            if len(sentence) > max_chars:
-                logger.warning(
-                    f"Single sentence exceeds max length ({len(sentence)} > {max_chars}), "
-                    "splitting by words"
-                )
-                words = sentence.split()
-                for word in words:
-                    if len(current_chunk) + len(word) + 1 <= max_chars:
-                        current_chunk += (" " if current_chunk else "") + word
-                    else:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                        current_chunk = word
-            # Normal case: accumulate sentences
-            elif len(current_chunk) + len(sentence) + 1 <= max_chars:
-                current_chunk += (" " if current_chunk else "") + sentence
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = sentence
-
-        # Add final chunk
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-
+        chunks = split_tts_text(text, max_chars)
         logger.info(f"Split text ({len(text)} chars) into {len(chunks)} chunks")
         return chunks
 

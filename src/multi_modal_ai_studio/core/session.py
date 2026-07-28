@@ -225,7 +225,12 @@ class Session:
             return metrics
 
         # Calculate TTL statistics
-        ttls = [turn.latencies.get("ttl", 0) for turn in self.turns if "ttl" in turn.latencies]
+        ttls = [
+            turn.latencies["ttl"]
+            for turn in self.turns
+            if isinstance(turn.latencies.get("ttl"), (int, float))
+            and turn.latencies["ttl"] >= 0
+        ]
         if ttls:
             metrics.avg_ttl = sum(ttls) / len(ttls)
             metrics.min_ttl = min(ttls)
@@ -265,19 +270,79 @@ class Session:
         return metrics
 
     def apply_ttl_bands(self) -> None:
-        """Overwrite each turn's TTL from ttl_bands (band-based = first audio_amplitude tts). Single source of truth for TTL."""
+        """Associate valid browser-playback TTL bands with their user turns.
+
+        A cancelled response may have no first audio, and audio from the next
+        response must not be borrowed for it. Browser clocks can also leave a
+        stale band whose end precedes its start. Rebuild the baseline from the
+        bounded server timeline, then override only with a band fully contained
+        in the matching turn window.
+        """
         bands = getattr(self, "ttl_bands", None) or []
-        if not bands or not self.turns:
+        if not self.turns:
             return
-        for i, turn in enumerate(self.turns):
-            if i >= len(bands):
-                break
-            band = bands[i]
+
+        # Restore a trustworthy per-turn baseline first. This also removes
+        # negative TTL values persisted by older clients.
+        for index, turn in enumerate(self.turns):
+            turn.latencies.pop("ttl", None)
+            timeline_ttl = self.timeline.calculate_component_latencies(index).get("ttl")
+            if timeline_ttl is not None and timeline_ttl >= 0:
+                turn.latencies["ttl"] = timeline_ttl
+
+        timed_bands = []
+        legacy_ttls = []
+        for band in bands:
             if not isinstance(band, dict):
                 continue
+            start = band.get("start")
+            end = band.get("end")
             ttl_ms = band.get("ttlMs")
-            if ttl_ms is not None:
-                turn.latencies["ttl"] = float(ttl_ms) / 1000.0
+            try:
+                ttl_value = float(ttl_ms)
+            except (TypeError, ValueError):
+                continue
+            if ttl_value < 0:
+                continue
+            if start is None or end is None:
+                legacy_ttls.append(ttl_value / 1000.0)
+                continue
+            try:
+                start_value = float(start)
+                end_value = float(end)
+            except (TypeError, ValueError):
+                continue
+            if end_value < start_value:
+                continue
+            timed_bands.append((start_value, end_value))
+
+        if timed_bands and all(turn.start_time > 0 for turn in self.turns):
+            for index, turn in enumerate(self.turns):
+                previous_start = (
+                    self.turns[index - 1].start_time if index > 0 else float("-inf")
+                )
+                next_start = (
+                    self.turns[index + 1].start_time
+                    if index + 1 < len(self.turns)
+                    else float("inf")
+                )
+                candidates = [
+                    (start, end)
+                    for start, end in timed_bands
+                    if (
+                        previous_start < start <= turn.start_time
+                        and end >= turn.start_time
+                        and end < next_start
+                    )
+                ]
+                if candidates:
+                    start, end = min(candidates, key=lambda item: item[1])
+                    turn.latencies["ttl"] = end - start
+        elif legacy_ttls:
+            # Preserve compatibility with old recordings that stored ttlMs
+            # without browser-relative band timestamps.
+            for turn, ttl in zip(self.turns, legacy_ttls):
+                turn.latencies["ttl"] = ttl
         self._metrics = None  # force recalc so avg_ttl etc. use band-based TTLs
 
     def to_dict(self) -> Dict[str, Any]:

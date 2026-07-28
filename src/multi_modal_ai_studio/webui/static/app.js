@@ -104,6 +104,8 @@ const state = {
     firstTtsPlayTimeThisResponse: null,
     /** Earliest TTS segment start this response with amplitude > 0 (any signal = AI voice start) */
     earliestTtsPlayTimeAboveThreshold: null,
+    /** True only after tts_start for the response belonging to the current user turn. */
+    ttsEligibleForCurrentTtl: false,
     /** Session time (sec) when amplitude first went below threshold; used to confirm 150ms silence */
     voiceSilenceCandidate: null,
     /** Consecutive user_amplitude samples below threshold (Server USB 20 Hz path only); used to confirm silence without wall-clock. */
@@ -5985,6 +5987,7 @@ function handleVoiceWsMessage(ev) {
                 // VAD/user-speech timing state is fully handled by the shared helper.
             } else if (evt.event_type === 'asr_partial') {
                 state.voiceTurnActive = true;
+                state.ttsEligibleForCurrentTtl = false;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
                         if (typeof pt === 'number' && !isNaN(pt)) state.lastAsrPartialTime = pt;
                 state.liveAsrInterimText = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
@@ -6054,6 +6057,7 @@ function handleVoiceWsMessage(ev) {
         } else if (msg.type === 'tts_start') {
             state.firstTtsPlayTimeThisResponse = null;
             state.earliestTtsPlayTimeAboveThreshold = null;
+            state.ttsEligibleForCurrentTtl = true;
             state.activeTtsSources = [];
             state.bargeInPartialCount = 0;
             state.ttsPlaybackStoppedByBargeIn = false;
@@ -6414,6 +6418,7 @@ function startSessionRecording() {
         state.lastAsrPartialTime = null;
         state.firstTtsPlayTimeThisResponse = null;
         state.earliestTtsPlayTimeAboveThreshold = null;
+        state.ttsEligibleForCurrentTtl = false;
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
@@ -6481,6 +6486,7 @@ function startSessionRecording() {
         state.lastAsrPartialTime = null;
         state.firstTtsPlayTimeThisResponse = null;
         state.earliestTtsPlayTimeAboveThreshold = null;
+        state.ttsEligibleForCurrentTtl = false;
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
@@ -6737,24 +6743,31 @@ function ttsChunkToAmplitudeSegments(ch, sampleRate, chunkStartTime, chunkDurati
     return segments;
 }
 
+function closeLiveTtlBandFromPlayback() {
+    if (
+        state.liveTtlBandStartTime == null
+        || (
+            state.earliestTtsPlayTimeAboveThreshold == null
+            && state.firstTtsPlayTimeThisResponse == null
+        )
+    ) {
+        return false;
+    }
+    var firstChunk = state.firstTtsPlayTimeThisResponse;
+    var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
+    var bandEnd = (firstChunk != null && firstAbove != null)
+        ? Math.min(firstChunk, firstAbove)
+        : (firstAbove != null ? firstAbove : firstChunk);
+    return window.MMASTimelineHelpers.closeTtlBandAt(state, bandEnd);
+}
+
 /** When server speaker is selected: record TTS segment for purple waveform and saved session, without playing in browser.
  * skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push; only run TTL band logic. */
 function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
     if (state.liveSessionStartTime <= 0 || !state.liveTtsAmplitudeHistory) return;
     if (skipSegmentPush) {
         // first/earliest/ttsNextStartTime already set by handler; just run TTL band close if applicable
-        if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
-            var bandStart = state.liveTtlBandStartTime;
-            var firstChunk = state.firstTtsPlayTimeThisResponse;
-            var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-            var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
-            state.liveTtlBandStartTime = null;
-            state.voiceTurnActive = false;
-            state.lastAsrPartialTime = null;
-            state.firstTtsPlayTimeThisResponse = null;
-            state.earliestTtsPlayTimeAboveThreshold = null;
-            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
-        }
+        closeLiveTtlBandFromPlayback();
         return;
     }
     const binary = atob(base64Data);
@@ -6781,18 +6794,7 @@ function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
         if (segs[k].amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || segs[k].startTime < state.earliestTtsPlayTimeAboveThreshold))
             state.earliestTtsPlayTimeAboveThreshold = segs[k].startTime;
     }
-    if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
-        var bandStart = state.liveTtlBandStartTime;
-        var firstChunk = state.firstTtsPlayTimeThisResponse;
-        var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-        var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
-        state.liveTtlBandStartTime = null;
-        state.voiceTurnActive = false;
-        state.lastAsrPartialTime = null;
-        state.firstTtsPlayTimeThisResponse = null;
-        state.earliestTtsPlayTimeAboveThreshold = null;
-        state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
-    }
+    closeLiveTtlBandFromPlayback();
 }
 
 /** Stop all scheduled TTS playback (barge-in). Stops every source in activeTtsSources and resets schedule. */
@@ -6809,6 +6811,9 @@ function stopTtsPlayback() {
     state.activeTtsSources = [];
     state.ttsNextStartTime = 0;
     state.ttsPlaybackStoppedByBargeIn = true;
+    state.ttsEligibleForCurrentTtl = false;
+    state.firstTtsPlayTimeThisResponse = null;
+    state.earliestTtsPlayTimeAboveThreshold = null;
     var ctx = state.ttsAudioContext;
     if (ctx && typeof ctx.currentTime === 'number') state.ttsNextStartTime = ctx.currentTime;
     if (
@@ -6878,18 +6883,7 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
                 if (a > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || actualStartSession + ki * windowSec < state.earliestTtsPlayTimeAboveThreshold))
                     state.earliestTtsPlayTimeAboveThreshold = actualStartSession + ki * windowSec;
             }
-            if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
-                var bandStart = state.liveTtlBandStartTime;
-                var firstChunk = state.firstTtsPlayTimeThisResponse;
-                var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-                var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
-                state.liveTtlBandStartTime = null;
-                state.voiceTurnActive = false;
-                state.lastAsrPartialTime = null;
-                state.firstTtsPlayTimeThisResponse = null;
-                state.earliestTtsPlayTimeAboveThreshold = null;
-                state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
-            }
+            closeLiveTtlBandFromPlayback();
         } else if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
             var actualEndSession = actualStartSession + duration;
             var segs = ttsChunkToAmplitudeSegments(ch, sampleRate, actualStartSession, duration);
@@ -6900,29 +6894,9 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
                 if (segs[ki].amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || segs[ki].startTime < state.earliestTtsPlayTimeAboveThreshold))
                     state.earliestTtsPlayTimeAboveThreshold = segs[ki].startTime;
             }
-            if (state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
-                var bandStart = state.liveTtlBandStartTime;
-                var firstChunk = state.firstTtsPlayTimeThisResponse;
-                var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-                var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
-                state.liveTtlBandStartTime = null;
-                state.voiceTurnActive = false;
-                state.lastAsrPartialTime = null;
-                state.firstTtsPlayTimeThisResponse = null;
-                state.earliestTtsPlayTimeAboveThreshold = null;
-                state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
-            }
+            closeLiveTtlBandFromPlayback();
         } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
-            var bandStart = state.liveTtlBandStartTime;
-            var firstChunk = state.firstTtsPlayTimeThisResponse;
-            var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-            var bandEnd = (firstChunk != null && firstAbove != null) ? Math.min(firstChunk, firstAbove) : (firstAbove != null ? firstAbove : firstChunk);
-            state.liveTtlBandStartTime = null;
-            state.voiceTurnActive = false;
-            state.lastAsrPartialTime = null;
-            state.firstTtsPlayTimeThisResponse = null;
-            state.earliestTtsPlayTimeAboveThreshold = null;
-            state.liveTtlBands.push({ start: bandStart, end: bandEnd, ttlMs: Math.round((bandEnd - bandStart) * 1000) });
+            closeLiveTtlBandFromPlayback();
         }
     }
     if (ctx.state === 'suspended') {

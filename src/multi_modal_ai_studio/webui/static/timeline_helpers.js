@@ -62,6 +62,9 @@
         if (!state || !evt) return false;
         if (evt.event_type === 'vad_start' || evt.event_type === 'user_speech_start') {
             state.voiceTurnActive = true;
+            // Any TTS response already in progress belongs to the previous
+            // turn and must not close the new turn's TTL band.
+            state.ttsEligibleForCurrentTtl = false;
             state.voiceSilenceCandidate = null;
             state.voiceSilenceConsecutiveCount = 0;
             return true;
@@ -75,6 +78,7 @@
             return true;
         }
         if (evt.event_type === 'asr_final' && state.liveTtlBandStartTime == null) {
+            state.ttsEligibleForCurrentTtl = false;
             const finalTime = evt.timestamp != null ? Number(evt.timestamp) : NaN;
             if (!isNaN(finalTime)) {
                 state.liveTtlBandStartTime = state.lastAsrPartialTime != null
@@ -84,6 +88,32 @@
             }
         }
         return false;
+    }
+
+    // Close one browser-observed TTL band only when the audio belongs to the
+    // response for the current user turn. This prevents an interrupted TTS
+    // response from producing a negative band or lending its audio to the
+    // following turn.
+    function closeTtlBandAt(state, bandEnd) {
+        if (!state || state.liveTtlBandStartTime == null) return false;
+        if (state.ttsEligibleForCurrentTtl === false) return false;
+        const start = Number(state.liveTtlBandStartTime);
+        const end = Number(bandEnd);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+            return false;
+        }
+        if (!Array.isArray(state.liveTtlBands)) state.liveTtlBands = [];
+        state.liveTtlBands.push({
+            start: start,
+            end: end,
+            ttlMs: Math.round((end - start) * 1000),
+        });
+        state.liveTtlBandStartTime = null;
+        state.voiceTurnActive = false;
+        state.lastAsrPartialTime = null;
+        state.firstTtsPlayTimeThisResponse = null;
+        state.earliestTtsPlayTimeAboveThreshold = null;
+        return true;
     }
 
     // Remove generated/scheduled AI audio after browser playback is stopped.
@@ -115,6 +145,7 @@
     return {
         applySpeechTimingEvent: applySpeechTimingEvent,
         buildTtsSegmentsFromTimeline: buildTtsSegmentsFromTimeline,
+        closeTtlBandAt: closeTtlBandAt,
         hasDenseTtsAmplitudeTimeline: hasDenseTtsAmplitudeTimeline,
         truncateAudioSegmentsAt: truncateAudioSegmentsAt,
     };
