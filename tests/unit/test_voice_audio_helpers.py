@@ -7,9 +7,11 @@ import struct
 
 import pytest
 
+from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.devices.capture import _make_capture_event
 from multi_modal_ai_studio.webui.voice_pipeline import (
     BargeInController,
+    _asr_result_error_message,
     _capture_event_details,
     _pcm_amplitude_segments,
     _pcm_rms_slices,
@@ -17,6 +19,23 @@ from multi_modal_ai_studio.webui.voice_pipeline import (
     _resample_pcm_to_24k,
     _wait_for_task_or_barge_in,
 )
+
+
+def test_asr_backend_error_is_not_treated_as_an_empty_transcript():
+    result = ASRResult(
+        text="",
+        is_final=True,
+        metadata={
+            "backend": "openai-rest",
+            "error": "ASR request failed (404): unknown model",
+        },
+    )
+
+    assert (
+        _asr_result_error_message(result)
+        == "ASR request failed (404): unknown model"
+    )
+    assert _asr_result_error_message(ASRResult(text="", is_final=True)) is None
 
 
 def test_pcm_helpers_tolerate_odd_length_and_non_bytes_input():

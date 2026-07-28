@@ -231,6 +231,29 @@
                 <div class="timeline-resize-handle" id="timeline-resize-handle"></div>
                 <div class="timeline-header">
                     <h3>Timeline</h3>
+                    <div class="timeline-legend" aria-label="Timeline color legend">
+                        <span class="legend-item" data-timeline-legend="asr" title="ASR transcript activity">
+                            <span class="legend-color legend-color-asr" aria-hidden="true"></span>ASR
+                        </span>
+                        <span class="legend-item" data-timeline-legend="vad" title="Voice activity detection">
+                            <span class="legend-color legend-color-vad" aria-hidden="true"></span>VAD
+                        </span>
+                        <span class="legend-item" data-timeline-legend="llm-prefill" title="LLM prefill: request start to first token">
+                            <span class="legend-color legend-color-llm-prefill" aria-hidden="true"></span>LLM Prefill
+                        </span>
+                        <span class="legend-item" data-timeline-legend="llm-generate" title="LLM decode/generation: first token to completion">
+                            <span class="legend-color legend-color-llm-generate" aria-hidden="true"></span>LLM Generate
+                        </span>
+                        <span class="legend-item" data-timeline-legend="tts" title="TTS synthesis">
+                            <span class="legend-color legend-color-tts" aria-hidden="true"></span>TTS
+                        </span>
+                        <span class="legend-item" data-timeline-legend="user-audio" title="User microphone waveform">
+                            <span class="legend-waveform legend-waveform-user" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>User
+                        </span>
+                        <span class="legend-item" data-timeline-legend="ai-audio" title="AI speech waveform">
+                            <span class="legend-waveform legend-waveform-ai" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>AI
+                        </span>
+                    </div>
                     <div class="timeline-controls">
                         <span class="timeline-gain-label" title="UI-only amplification for waveform">User:</span>
                         <select id="timeline-user-audio-gain" class="timeline-gain-select" title="User (mic) waveform gain">
@@ -446,7 +469,8 @@
         </div>
     </div>
 
-    <script src="timeline_helpers.js?v=20260727-regression-1"></script>
-    <script src="app.js?v=20260727-regression-1"></script>
+    <script src="timeline_helpers.js?v=20260728-asr-race-1"></script>
+    <script src="config_helpers.js?v=20260728-asr-race-1"></script>
+    <script src="app.js?v=20260728-asr-race-1"></script>
 </body>
 </html>

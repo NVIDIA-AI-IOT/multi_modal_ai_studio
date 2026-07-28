@@ -183,6 +183,17 @@ def _format_llm_error_for_user(exc: Exception) -> str:
     return f"LLM request failed: {msg}"
 
 
+def _asr_result_error_message(result: ASRResult) -> Optional[str]:
+    """Return a user-facing error carried by an asynchronous ASR result."""
+    metadata = getattr(result, "metadata", {}) or {}
+    message = str(metadata.get("error", "")).strip()
+    if not message:
+        return None
+    if message.lower().startswith("asr request failed"):
+        return message
+    return f"ASR request failed: {message}"
+
+
 def _is_punctuation_or_empty(text: str) -> bool:
     """Return True if text is empty or only whitespace/punctuation (Riva TTS rejects such input)."""
     s = (text or "").strip()
@@ -1128,7 +1139,7 @@ async def _run_voice_pipeline(
         if asr_config.scheme == "riva":
             asr = RivaASRBackend(config=asr_config, timeline=session.timeline)
         else:
-            asr = OpenAIRestASRBackend(config=asr_config)
+            asr = OpenAIRestASRBackend(config=asr_config, timeline=session.timeline)
         llm = OpenAILLMBackend(config=llm_config)
         if tts_config.scheme == "riva":
             tts = RivaTTSBackend(config=tts_config, timeline=session.timeline)
@@ -1554,9 +1565,36 @@ async def _run_voice_pipeline(
                 if result is None:
                     break
 
+                asr_error = _asr_result_error_message(result)
+                if asr_error:
+                    logger.error("[asr] %s", asr_error)
+                    error_ts = (
+                        time.time() - session.timeline.start_time
+                        if session.timeline.start_time
+                        else 0
+                    )
+                    error_data = {
+                        "message": asr_error,
+                        "stage": "asr",
+                        "backend": (getattr(result, "metadata", {}) or {}).get("backend"),
+                    }
+                    session.timeline.add_event(
+                        "error",
+                        Lane.SYSTEM,
+                        data=error_data,
+                        timestamp=error_ts,
+                    )
+                    await send_event({
+                        "event_type": "error",
+                        "lane": "system",
+                        "data": error_data,
+                        "timestamp": error_ts,
+                    })
+                    continue
+
                 asr_received_count += 1
                 if asr_received_count == 1:
-                    logger.info("[asr] First result received from Riva: is_final=%s text=%r", getattr(result, "is_final", True), (result.text or "").strip()[:80])
+                    logger.info("[asr] First result received: is_final=%s text=%r", getattr(result, "is_final", True), (result.text or "").strip()[:80])
 
                 is_final = getattr(result, "is_final", True)
                 text = (result.text or "").strip()
@@ -1778,7 +1816,25 @@ async def _run_voice_pipeline(
                 logger.info("[timing] turn #%d start (asr_final received): %r", turn_index, text[:80])
                 session.start_turn(user_transcript=text)
                 session.update_turn_transcript(text, confidence=getattr(result, "confidence", 1.0))
-                session.timeline.add_event("user_speech_end", Lane.SYSTEM)
+                asr_event_ts = (result.metadata or {}).get("event_timestamp")
+                if asr_event_ts is None:
+                    asr_event_ts = (
+                        time.time() - session.timeline.start_time
+                        if session.timeline.start_time
+                        else 0
+                    )
+                result_end = getattr(result, "end_time", None)
+                speech_end_ts = (
+                    float(result_end)
+                    if result_end is not None
+                    and 0.0 <= float(result_end) <= float(asr_event_ts)
+                    else float(asr_event_ts)
+                )
+                session.timeline.add_event(
+                    "user_speech_end",
+                    Lane.SYSTEM,
+                    timestamp=speech_end_ts,
+                )
 
                 ts_llm_start = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 logger.info("[timing] llm_start @ %.2fs", ts_llm_start)
@@ -1798,7 +1854,6 @@ async def _run_voice_pipeline(
                     # NOT ts_llm_start (which is when the turn is dequeued).
                     # When TTS from a previous turn is still playing, the turn
                     # sits in the queue for seconds, inflating the window.
-                    asr_event_ts = (result.metadata or {}).get("event_timestamp")
                     t_end = asr_event_ts if asr_event_ts is not None else ts_llm_start
                     t_start = speech_start_time if speech_start_time is not None else max(0, t_end - 3.0)
                     # Pull t_start back before speech start to capture frames
