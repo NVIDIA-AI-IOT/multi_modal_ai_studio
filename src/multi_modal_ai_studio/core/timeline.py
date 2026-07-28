@@ -239,8 +239,8 @@ class Timeline:
         
         Returns breakdown:
         - asr_latency: user_speech_end to asr_final
-        - llm_latency: asr_final to llm_complete
-        - tts_latency: llm_complete to tts_first_audio
+        - llm_latency: asr_final to llm_first_token (llm_complete fallback)
+        - tts_latency: tts_start to tts_first_audio
         - ttl: Total turn-taking latency (user_speech_end to tts_first_audio)
         
         Args:
@@ -252,7 +252,10 @@ class Timeline:
         latencies = {}
         
         # Find events for this turn
-        speech_end_events = self.get_events_by_type("user_speech_end")
+        speech_end_events = sorted(
+            self.get_events_by_type("user_speech_end"),
+            key=lambda event: event.timestamp,
+        )
         if not speech_end_events:
             return latencies
         
@@ -263,26 +266,67 @@ class Timeline:
             return latencies
         
         speech_end = speech_end_events[turn_id]
+        next_speech_end = (
+            speech_end_events[turn_id + 1].timestamp
+            if turn_id + 1 < len(speech_end_events)
+            else float("inf")
+        )
         
-        # Find subsequent events
-        asr_final = self._find_next_event("asr_final", speech_end.timestamp)
-        llm_complete = self._find_next_event("llm_complete", speech_end.timestamp)
-        tts_first = self._find_next_event("tts_first_audio", speech_end.timestamp)
+        # Find events inside this turn only. Without the upper bound, a turn
+        # cancelled before audio can borrow the next turn's first token/audio.
+        asr_final = self._find_event_between(
+            "asr_final", speech_end.timestamp, next_speech_end
+        )
+        llm_first = self._find_event_between(
+            "llm_first_token", speech_end.timestamp, next_speech_end
+        )
+        llm_complete = self._find_event_between(
+            "llm_complete", speech_end.timestamp, next_speech_end
+        )
+        tts_start = self._find_event_between(
+            "tts_start", speech_end.timestamp, next_speech_end
+        )
+        tts_first = self._find_event_between(
+            "tts_first_audio", speech_end.timestamp, next_speech_end
+        )
         
         # Calculate latencies
         if asr_final:
             latencies["asr_latency"] = asr_final.timestamp - speech_end.timestamp
         
-        if asr_final and llm_complete:
-            latencies["llm_latency"] = llm_complete.timestamp - asr_final.timestamp
+        llm_ready = llm_first or llm_complete
+        if asr_final and llm_ready:
+            latencies["llm_latency"] = llm_ready.timestamp - asr_final.timestamp
         
-        if llm_complete and tts_first:
-            latencies["tts_latency"] = tts_first.timestamp - llm_complete.timestamp
+        if tts_start and tts_first:
+            latencies["tts_latency"] = tts_first.timestamp - tts_start.timestamp
         
         if tts_first:
             latencies["ttl"] = tts_first.timestamp - speech_end.timestamp
         
-        return latencies
+        return {
+            name: value
+            for name, value in latencies.items()
+            if value >= 0
+        }
+
+    def _find_event_between(
+        self,
+        event_type: str,
+        after_timestamp: float,
+        before_timestamp: float,
+    ) -> Optional[TimelineEvent]:
+        """Find the earliest event of a type within one conversation turn."""
+        matching = [
+            event
+            for event in self.events
+            if (
+                event.event_type == event_type
+                and event.timestamp >= after_timestamp
+                and event.timestamp < before_timestamp
+            )
+        ]
+        return min(matching, key=lambda event: event.timestamp) if matching else None
     
     def _find_next_event(
         self,

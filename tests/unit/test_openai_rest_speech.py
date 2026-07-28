@@ -4,6 +4,7 @@
 
 import asyncio
 import struct
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,35 @@ def test_openai_rest_vad_and_wav_encoding():
     assert not backend._is_speech(silence)
     assert backend._is_speech(speech)
     assert backend._wav_bytes(speech)[:4] == b"RIFF"
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_vad_uses_timeline_clock_across_audio_gaps(monkeypatch):
+    timeline = SimpleNamespace(start_time=100.0)
+    backend = OpenAIRestASRBackend(_asr_config(), timeline=timeline)
+    backend.config.speech_timeout_ms = 200
+    backend._session = object()
+    backend._results = asyncio.Queue()
+    backend._requests = asyncio.Queue()
+
+    now = iter([105.0, 105.1, 110.0, 110.1])
+    monkeypatch.setattr(
+        "multi_modal_ai_studio.backends.asr.openai_rest.time.time",
+        lambda: next(now),
+    )
+    speech = struct.pack("<1600h", *([4000] * 1600))
+    silence = struct.pack("<1600h", *([0] * 1600))
+
+    await backend.send_audio(speech)
+    await backend.send_audio(speech)
+    await backend.send_audio(silence)
+    await backend.send_audio(silence)
+
+    pcm, start_time, end_time = backend._requests.get_nowait()
+    assert pcm
+    assert start_time == pytest.approx(4.9)
+    assert end_time == pytest.approx(9.9)
+    assert end_time > backend._audio_position_ms / 1000.0
 
 
 @pytest.mark.asyncio

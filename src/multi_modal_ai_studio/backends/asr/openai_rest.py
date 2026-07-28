@@ -8,6 +8,7 @@ import io
 import logging
 import math
 import struct
+import time
 from typing import AsyncIterator, Deque, Optional
 from urllib.parse import urljoin
 import wave
@@ -21,6 +22,7 @@ from multi_modal_ai_studio.backends.base import (
     ConnectionError,
 )
 from multi_modal_ai_studio.config.schema import ASRConfig
+from multi_modal_ai_studio.core.timeline import Timeline
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +38,14 @@ class OpenAIRestASRBackend(ASRBackend):
     still participate in MMAS's streaming backend interface.
     """
 
-    def __init__(self, config: ASRConfig):
+    def __init__(self, config: ASRConfig, timeline: Optional[Timeline] = None):
         super().__init__(config)
         if config.scheme != "openai-rest":
             raise ConfigError(f"Expected scheme 'openai-rest', got '{config.scheme}'")
         if not config.api_base:
             raise ConfigError("OpenAI-compatible ASR api_base is required")
 
+        self.timeline = timeline
         self._session: Optional[aiohttp.ClientSession] = None
         self._results: Optional[asyncio.Queue] = None
         self._pre_roll: Deque[bytes] = deque()
@@ -56,6 +59,7 @@ class OpenAIRestASRBackend(ASRBackend):
         self._max_normalized_rms = 0.0
         self._audio_position_ms = 0.0
         self._speech_start_ms: Optional[float] = None
+        self._silence_start_ms: Optional[float] = None
 
     async def start_stream(self) -> None:
         """Open the HTTP session and reset endpointing state."""
@@ -87,8 +91,21 @@ class OpenAIRestASRBackend(ASRBackend):
             return True
 
         duration_ms = len(audio_chunk) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0
-        chunk_start_ms = self._audio_position_ms
-        chunk_end_ms = chunk_start_ms + duration_ms
+        audio_chunk_start_ms = self._audio_position_ms
+        audio_chunk_end_ms = audio_chunk_start_ms + duration_ms
+        if self.timeline is not None and self.timeline.start_time is not None:
+            # Anchor events to the MMAS wall-clock timeline. PCM can arrive
+            # with gaps while inference is busy, so accumulated audio duration
+            # is not a reliable UI timestamp.
+            chunk_end_ms = max(
+                0.0,
+                (time.time() - self.timeline.start_time) * 1000.0,
+            )
+            chunk_start_ms = max(0.0, chunk_end_ms - duration_ms)
+        else:
+            # Standalone adapter users have no external event clock.
+            chunk_start_ms = audio_chunk_start_ms
+            chunk_end_ms = audio_chunk_end_ms
         self._chunk_count += 1
         normalized_rms = self._normalized_rms(audio_chunk)
         self._max_normalized_rms = max(self._max_normalized_rms, normalized_rms)
@@ -119,7 +136,10 @@ class OpenAIRestASRBackend(ASRBackend):
             self._utterance.extend(audio_chunk)
             if speech:
                 self._silence_ms = 0.0
+                self._silence_start_ms = None
             else:
+                if self._silence_start_ms is None:
+                    self._silence_start_ms = chunk_start_ms
                 self._silence_ms += duration_ms
                 if self._silence_ms >= self.config.speech_timeout_ms:
                     # Anchor the UI's light-blue finalization interval at the
@@ -128,7 +148,9 @@ class OpenAIRestASRBackend(ASRBackend):
                     # last-partial -> final semantics.
                     speech_end_ms = max(
                         self._speech_start_ms or 0.0,
-                        chunk_end_ms - self._silence_ms,
+                        self._silence_start_ms
+                        if self._silence_start_ms is not None
+                        else chunk_end_ms - self._silence_ms,
                     )
                     utterance_ms = len(self._utterance) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0
                     logger.info(
@@ -143,7 +165,7 @@ class OpenAIRestASRBackend(ASRBackend):
                         end_time=speech_end_ms / 1000.0,
                     )
                     self._reset_audio_state()
-        self._audio_position_ms = chunk_end_ms
+        self._audio_position_ms = audio_chunk_end_ms
         return True
 
     async def receive_results(self) -> AsyncIterator[ASRResult]:
@@ -168,7 +190,12 @@ class OpenAIRestASRBackend(ASRBackend):
             self._queue_transcription(
                 bytes(self._utterance),
                 start_time=(self._speech_start_ms or 0.0) / 1000.0,
-                end_time=self._audio_position_ms / 1000.0,
+                end_time=(
+                    max(0.0, time.time() - self.timeline.start_time)
+                    if self.timeline is not None
+                    and self.timeline.start_time is not None
+                    else self._audio_position_ms / 1000.0
+                ),
             )
         elif self._chunk_count:
             logger.info(
@@ -341,3 +368,4 @@ class OpenAIRestASRBackend(ASRBackend):
         self._speech_active = False
         self._speech_start_ms = None
         self._silence_ms = 0.0
+        self._silence_start_ms = None
