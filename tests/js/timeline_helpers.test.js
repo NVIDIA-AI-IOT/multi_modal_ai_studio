@@ -10,6 +10,7 @@ const {
     applySpeechTimingEvent,
     buildTtsSegmentsFromTimeline,
     hasDenseTtsAmplitudeTimeline,
+    truncateAudioSegmentsAt,
 } = require('../../src/multi_modal_ai_studio/webui/static/timeline_helpers.js');
 
 test('coarse TTS replay starts at first audio and stays within each turn', () => {
@@ -99,4 +100,17 @@ test('ASR final preserves the last partial as the TTL start when available', () 
     applySpeechTimingEvent(state, { event_type: 'asr_final', timestamp: 5 });
 
     assert.equal(state.liveTtlBandStartTime, 4.25);
+});
+
+test('barge-in truncates scheduled AI audio at the actual stop time', () => {
+    const segments = truncateAudioSegmentsAt([
+        { startTime: 4, endTime: 5, amplitude: 10 },
+        { startTime: 5, endTime: 7, amplitude: 20 },
+        { startTime: 7, endTime: 8, amplitude: 30 },
+    ], 6.25);
+
+    assert.deepEqual(segments, [
+        { startTime: 4, endTime: 5, amplitude: 10 },
+        { startTime: 5, endTime: 6.25, amplitude: 20 },
+    ]);
 });

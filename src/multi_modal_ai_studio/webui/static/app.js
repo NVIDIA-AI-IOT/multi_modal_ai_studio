@@ -6797,10 +6797,10 @@ function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
 
 /** Stop all scheduled TTS playback (barge-in). Stops every source in activeTtsSources and resets schedule. */
 function stopTtsPlayback() {
-    if (!state.activeTtsSources || !state.activeTtsSources.length) return;
     try {
-        for (var i = 0; i < state.activeTtsSources.length; i++) {
-            var s = state.activeTtsSources[i];
+        var sources = state.activeTtsSources || [];
+        for (var i = 0; i < sources.length; i++) {
+            var s = sources[i];
             if (s && typeof s.stop === 'function') {
                 try { s.stop(0); } catch (e) { }
             }
@@ -6811,6 +6811,17 @@ function stopTtsPlayback() {
     state.ttsPlaybackStoppedByBargeIn = true;
     var ctx = state.ttsAudioContext;
     if (ctx && typeof ctx.currentTime === 'number') state.ttsNextStartTime = ctx.currentTime;
+    if (
+        state.liveSessionStartTime > 0
+        && Array.isArray(state.liveTtsAmplitudeHistory)
+        && window.MMASTimelineHelpers
+    ) {
+        var cutoff = Math.max(0, Date.now() / 1000 - state.liveSessionStartTime);
+        state.liveTtsAmplitudeHistory = window.MMASTimelineHelpers.truncateAudioSegmentsAt(
+            state.liveTtsAmplitudeHistory,
+            cutoff
+        );
+    }
 }
 
 /** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push from PCM; first/earliest set below when serverAmplitudeSegments provided.

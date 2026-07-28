@@ -108,7 +108,7 @@ class BargeInController:
 
     def observe_asr(self, *, is_final: bool, text: str) -> bool:
         """Observe ASR activity and return True when it requests interruption."""
-        if not self.enabled or not self.tts_active or not (text or "").strip():
+        if not self.enabled or not (text or "").strip():
             return False
         if self.trigger == "partial":
             if is_final:
@@ -119,8 +119,15 @@ class BargeInController:
                 return False
         elif not is_final:
             return False
+        # Latch the interruption even if ``tts_active`` briefly appears false.
+        # ASR and turn execution are independent tasks: a final can arrive
+        # while TTS is starting, or while a background lookahead synthesis is
+        # still running.  ``begin_turn()`` clears this event before processing
+        # the utterance that caused it, so latching an idle final is harmless
+        # and closes the race that otherwise lets old TTS finish before the
+        # queued turn can start.
         self.requested.set()
-        return True
+        return self.tts_active
 
 
 async def _wait_for_task_or_barge_in(
@@ -142,11 +149,14 @@ async def _wait_for_task_or_barge_in(
 
     waiter = asyncio.create_task(requested.wait())
     try:
-        done, _ = await asyncio.wait(
+        await asyncio.wait(
             {task, waiter},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if waiter in done and requested.is_set():
+        # The task and event can complete in the same event-loop iteration
+        # after the gRPC call is cancelled. The event remains authoritative
+        # even when asyncio reports the task first.
+        if requested.is_set():
             if not task.done():
                 task.cancel()
             try:
@@ -1662,11 +1672,24 @@ async def _run_voice_pipeline(
                         logger.debug("[asr] Skipping phantom asr_partial (same utterance as last final): %r", text[:50])
                         continue
 
+                interruption_was_requested = barge_in.requested.is_set()
                 if barge_in.observe_asr(is_final=is_final, text=text):
                     logger.info(
                         "[barge_in] Backend interruption requested by %s ASR",
                         "final" if is_final else "partial",
                     )
+                if (
+                    not interruption_was_requested
+                    and barge_in.requested.is_set()
+                ):
+                    cancel_synthesis = getattr(tts, "cancel_synthesis", None)
+                    if callable(cancel_synthesis):
+                        cancelled_rpcs = cancel_synthesis()
+                        if cancelled_rpcs:
+                            logger.info(
+                                "[barge_in] Cancelled %d active TTS RPC(s)",
+                                cancelled_rpcs,
+                            )
 
                 if not is_final:
                     # VLM: Track speech start time for frame synchronization.
@@ -2027,9 +2050,9 @@ async def _run_voice_pipeline(
                             result.append(c)
                         return result
 
+                    lookahead: Optional[asyncio.Task] = None
                     try:
                         chunk_idx = 0
-                        lookahead: Optional[asyncio.Task] = None
                         stream_ended = False
 
                         # ── Phase 1: stream first chunk immediately ──
@@ -2105,9 +2128,23 @@ async def _run_voice_pipeline(
                                     except asyncio.QueueEmpty:
                                         pass
 
+                    except asyncio.CancelledError:
+                        logger.info("[stream_tts] TTS consumer cancelled")
+                        raise
                     except Exception as e:
                         logger.exception("[stream_tts] TTS consumer error: %s", e)
                         tts_consumer_error = e
+                    finally:
+                        # A lookahead synthesis is a separate task. Cancelling
+                        # only the consumer otherwise leaves it generating
+                        # discarded audio (and occupying the GPU) after
+                        # browser playback has stopped for barge-in.
+                        if lookahead is not None and not lookahead.done():
+                            lookahead.cancel()
+                            try:
+                                await lookahead
+                            except (asyncio.CancelledError, Exception):
+                                pass
 
                 # ── LLM generation + TTS ──
                 ts_first = ts_llm_start
@@ -2354,6 +2391,11 @@ async def _run_voice_pipeline(
                             if amplitude_segments:
                                 payload["amplitude_segments"] = amplitude_segments
                             await ws.send_str(json.dumps(payload))
+                        # Direct gRPC cancellation can make the iterator finish
+                        # normally. Preserve the authoritative ASR interruption
+                        # as a cancelled turn rather than a successful TTS.
+                        if barge_in.requested.is_set():
+                            tts_interrupted = True
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                     logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs, cancelled=%s)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0, tts_interrupted)
                     complete_data = {"cancelled": True, "reason": "barge_in"} if tts_interrupted else {}
