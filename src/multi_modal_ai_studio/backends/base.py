@@ -11,8 +11,153 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional, Dict, Any, List
 import logging
+import unicodedata
 
 logger = logging.getLogger(__name__)
+
+_TTS_SENTENCE_BREAKS = frozenset(
+    ".!?。！？｡؟۔።।॥៕៚᙮᜶᜷꓿…"
+)
+_TTS_CLAUSE_BREAKS = frozenset(
+    ",;:，、；：﹐﹑﹔﹕︐︑︔︓､،؛"
+)
+_TTS_CLOSING_PUNCTUATION = frozenset(
+    "\"'”’»›」』】）》〕〉》〗〙〛"
+)
+
+
+def _split_after_punctuation(text: str, boundaries: frozenset) -> List[str]:
+    """Return text pieces ending after Unicode punctuation and closing marks."""
+    pieces = []
+    start = 0
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\n" or char in boundaries:
+            end = index + 1
+            while (
+                end < len(text)
+                and text[end] in _TTS_CLOSING_PUNCTUATION
+            ):
+                end += 1
+            piece = text[start:end].strip()
+            if piece:
+                pieces.append(piece)
+            start = end
+            index = end
+            continue
+        index += 1
+    tail = text[start:].strip()
+    if tail:
+        pieces.append(tail)
+    return pieces
+
+
+def _unicode_text_clusters(text: str) -> List[str]:
+    """Approximate grapheme clusters without a language-specific tokenizer."""
+    clusters: List[str] = []
+    current = ""
+    previous_was_zwj = False
+    for char in text:
+        codepoint = ord(char)
+        is_mark = unicodedata.category(char) in {"Mn", "Mc", "Me"}
+        is_variation_selector = (
+            0xFE00 <= codepoint <= 0xFE0F
+            or 0xE0100 <= codepoint <= 0xE01EF
+        )
+        is_zwj = codepoint == 0x200D
+        if (
+            current
+            and not is_mark
+            and not is_variation_selector
+            and not is_zwj
+            and not previous_was_zwj
+        ):
+            clusters.append(current)
+            current = char
+        else:
+            current += char
+        previous_was_zwj = is_zwj
+    if current:
+        clusters.append(current)
+    return clusters
+
+
+def _pack_tts_pieces(
+    pieces: List[str],
+    max_chars: int,
+    separator: str = " ",
+) -> List[str]:
+    """Pack already-bounded semantic pieces without exceeding max_chars."""
+    chunks: List[str] = []
+    current = ""
+    for piece in pieces:
+        piece = piece.strip()
+        if not piece:
+            continue
+        joiner = separator if current else ""
+        if len(current) + len(joiner) + len(piece) <= max_chars:
+            current += joiner + piece
+        else:
+            if current:
+                chunks.append(current)
+            current = piece
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def split_tts_text(text: str, max_chars: int) -> List[str]:
+    """Split multilingual TTS text without requiring a language tokenizer.
+
+    Prefer Unicode sentence endings, then clause punctuation, then whitespace
+    boundaries. Text without spaces (for example Japanese or Chinese) falls
+    back to approximate grapheme clusters so combining marks and ZWJ sequences
+    remain intact whenever possible.
+    """
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+
+    bounded: List[str] = []
+    for sentence in _split_after_punctuation(text, _TTS_SENTENCE_BREAKS):
+        if len(sentence) <= max_chars:
+            bounded.append(sentence)
+            continue
+        for clause in _split_after_punctuation(sentence, _TTS_CLAUSE_BREAKS):
+            if len(clause) <= max_chars:
+                bounded.append(clause)
+                continue
+            words = clause.split()
+            if len(words) > 1:
+                word_chunks = _pack_tts_pieces(words, max_chars)
+                for word_chunk in word_chunks:
+                    if len(word_chunk) <= max_chars:
+                        bounded.append(word_chunk)
+                    else:
+                        bounded.extend(
+                            _pack_tts_pieces(
+                                _unicode_text_clusters(word_chunk),
+                                max_chars,
+                                separator="",
+                            )
+                        )
+            else:
+                bounded.extend(
+                    _pack_tts_pieces(
+                        _unicode_text_clusters(clause),
+                        max_chars,
+                        separator="",
+                    )
+                )
+    # Keep primary sentence boundaries intact. Repacking the final list could
+    # join the tail of one sentence to the next and undo the prosody boundary
+    # that this splitter is intended to preserve.
+    return [piece for piece in bounded if piece]
 
 
 @dataclass

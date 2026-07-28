@@ -9,8 +9,13 @@ from types import SimpleNamespace
 import pytest
 
 from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
-from multi_modal_ai_studio.backends.tts.openai_rest import _PCM16FrameAligner
-from multi_modal_ai_studio.config.schema import ASRConfig, SessionConfig
+from multi_modal_ai_studio.backends.base import split_tts_text
+from multi_modal_ai_studio.backends.tts.openai_rest import (
+    MAX_REST_TTS_CHARS,
+    OpenAIRestTTSBackend,
+    _PCM16FrameAligner,
+)
+from multi_modal_ai_studio.config.schema import ASRConfig, SessionConfig, TTSConfig
 from multi_modal_ai_studio.webui.voice_pipeline import TTSChunkBuffer
 
 
@@ -139,3 +144,134 @@ def test_pcm16_aligner_preserves_samples_across_odd_http_chunks():
     assert all(len(chunk) % 2 == 0 for chunk in output)
     assert b"".join(output) == pcm
     assert aligner.finish() == b""
+
+
+def test_multilingual_tts_splitter_prefers_japanese_punctuation():
+    text = (
+        "ロボットの歴史は古代の自動機械から始まります。"
+        "現代では人工知能や高度なセンサーを利用し、"
+        "人と安全に協働します。"
+    )
+
+    chunks = split_tts_text(text, 24)
+
+    assert all(len(chunk) <= 24 for chunk in chunks)
+    assert "".join(chunks).replace(" ", "") == text
+    assert any(chunk.endswith("。") for chunk in chunks)
+    assert any(chunk.endswith("、") for chunk in chunks)
+
+
+def test_multilingual_tts_splitter_supports_arabic_punctuation():
+    text = "بدأ تاريخ الروبوتات بآلات قديمة؟ ثم تطورت، وأصبحت أكثر ذكاءً."
+
+    chunks = split_tts_text(text, 24)
+
+    assert all(len(chunk) <= 24 for chunk in chunks)
+    assert " ".join(chunks).split() == text.split()
+    assert any(chunk.endswith("؟") for chunk in chunks)
+
+
+def test_multilingual_tts_splitter_keeps_combining_character_cluster():
+    text = "か\u3099" * 12
+
+    chunks = split_tts_text(text, 7)
+
+    assert all(len(chunk) <= 7 for chunk in chunks)
+    assert all(not chunk.startswith("\u3099") for chunk in chunks)
+    assert "".join(chunks) == text
+
+
+class _FakeResponse:
+    status = 200
+
+    def __init__(self, audio=b"\x01\x02\x03\x04"):
+        self.content = self
+        self.audio = audio
+
+    async def iter_chunked(self, _size):
+        yield self.audio
+
+
+class _FakeRequestContext:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+class _FakeTTSSession:
+    def __init__(self):
+        self.inputs = []
+
+    def post(self, _url, *, json, headers):
+        self.inputs.append(json["input"])
+        return _FakeRequestContext(_FakeResponse())
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_chunks_long_completed_llm_response():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="nvidia/magpie_tts_multilingual_357m",
+            voice="Sofia",
+            sample_rate=22050,
+        )
+    )
+    fake_session = _FakeTTSSession()
+    backend._session = fake_session
+    text = (
+        "The history of robotics includes ancient automata and modern machines. "
+        "Robots now use advanced perception, planning, and control systems. "
+    ) * 3
+
+    chunks = [chunk async for chunk in backend.synthesize_stream(text)]
+
+    assert len(fake_session.inputs) > 1
+    assert all(len(item) <= MAX_REST_TTS_CHARS for item in fake_session.inputs)
+    assert " ".join(fake_session.inputs).split() == text.split()
+    assert chunks
+    assert not any(chunk.is_final for chunk in chunks[:-1])
+    assert chunks[-1].is_final
+
+
+class _BlockingRequestContext:
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def __aenter__(self):
+        self.started.set()
+        await asyncio.Future()
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_cancel_synthesis_interrupts_active_request():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="nvidia/magpie_tts_multilingual_357m",
+            voice="Sofia",
+            sample_rate=22050,
+        )
+    )
+    request = _BlockingRequestContext()
+    backend._session = SimpleNamespace(post=lambda *_args, **_kwargs: request)
+
+    async def consume():
+        async for _ in backend.synthesize_stream("Long response"):
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(request.started.wait(), timeout=0.5)
+    assert backend.cancel_synthesis() == 1
+    with pytest.raises(asyncio.CancelledError):
+        await task

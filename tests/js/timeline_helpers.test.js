@@ -9,6 +9,7 @@ const test = require('node:test');
 const {
     applySpeechTimingEvent,
     buildTtsSegmentsFromTimeline,
+    closeTtlBandAt,
     hasDenseTtsAmplitudeTimeline,
     truncateAudioSegmentsAt,
 } = require('../../src/multi_modal_ai_studio/webui/static/timeline_helpers.js');
@@ -113,4 +114,40 @@ test('barge-in truncates scheduled AI audio at the actual stop time', () => {
         { startTime: 4, endTime: 5, amplitude: 10 },
         { startTime: 5, endTime: 6.25, amplitude: 20 },
     ]);
+});
+
+test('old TTS audio cannot close the new user turn TTL band', () => {
+    const state = {
+        liveTtlBands: [],
+        liveTtlBandStartTime: 15.5,
+        voiceTurnActive: true,
+        ttsEligibleForCurrentTtl: false,
+    };
+
+    assert.equal(closeTtlBandAt(state, 16.2), false);
+    assert.equal(state.liveTtlBandStartTime, 15.5);
+    assert.deepEqual(state.liveTtlBands, []);
+});
+
+test('TTL band rejects negative duration and accepts current response audio', () => {
+    const state = {
+        liveTtlBands: [],
+        liveTtlBandStartTime: 15.5,
+        voiceTurnActive: true,
+        ttsEligibleForCurrentTtl: true,
+        lastAsrPartialTime: 15.2,
+        firstTtsPlayTimeThisResponse: 12.3,
+        earliestTtsPlayTimeAboveThreshold: 12.4,
+    };
+
+    assert.equal(closeTtlBandAt(state, 12.3), false);
+    assert.equal(state.liveTtlBandStartTime, 15.5);
+
+    state.firstTtsPlayTimeThisResponse = 17.1;
+    state.earliestTtsPlayTimeAboveThreshold = 17.2;
+    assert.equal(closeTtlBandAt(state, 17.1), true);
+    assert.deepEqual(state.liveTtlBands, [
+        { start: 15.5, end: 17.1, ttlMs: 1600 },
+    ]);
+    assert.equal(state.liveTtlBandStartTime, null);
 });
