@@ -111,11 +111,14 @@ def test_capture_event_mapping(event, expected_type, terminal):
     assert is_terminal is terminal
 
 
-def test_final_barge_in_only_interrupts_active_tts():
+def test_final_barge_in_latches_across_tts_state_race():
     controller = BargeInController(enabled=True, trigger="final")
     controller.begin_turn()
     assert not controller.observe_asr(is_final=True, text="before speech")
+    assert controller.requested.is_set()
 
+    controller.begin_turn()
+    assert not controller.requested.is_set()
     controller.start_tts()
     assert not controller.observe_asr(is_final=False, text="partial")
     assert controller.observe_asr(is_final=True, text="interrupt")
