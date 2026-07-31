@@ -8,6 +8,8 @@ import struct
 import pytest
 
 from multi_modal_ai_studio.backends.base import ASRResult
+from multi_modal_ai_studio.config.schema import SessionConfig
+from multi_modal_ai_studio.core.session import Session
 from multi_modal_ai_studio.devices.capture import _make_capture_event
 from multi_modal_ai_studio.webui.voice_pipeline import (
     BargeInController,
@@ -16,6 +18,7 @@ from multi_modal_ai_studio.webui.voice_pipeline import (
     _pcm_amplitude_segments,
     _pcm_rms_slices,
     _pcm_rms_to_amplitude,
+    _record_cancelled_tts_events,
     _resample_pcm_to_24k,
     _wait_for_task_or_barge_in,
 )
@@ -164,3 +167,43 @@ async def test_wait_for_task_cancels_tts_on_barge_in():
 
     assert await _wait_for_task_or_barge_in(task, requested) is False
     assert task.cancelled()
+
+
+def test_cancelled_streaming_tts_records_both_terminal_events():
+    async def run():
+        session = Session(SessionConfig())
+        session.start()
+        session.start_turn(user_transcript="interrupt")
+        emitted = []
+
+        async def send_event(event):
+            emitted.append(event)
+
+        await _record_cancelled_tts_events(
+            session,
+            send_event,
+            timestamp=4.25,
+            cancel_requested_at=4.20,
+        )
+
+        terminal = session.timeline.events[-2:]
+        assert [event.event_type for event in terminal] == [
+            "tts_cancelled",
+            "tts_complete",
+        ]
+        assert terminal[0].timestamp == pytest.approx(4.25)
+        assert terminal[0].data == {
+            "reason": "barge_in",
+            "turn_id": 1,
+            "cancel_latency_ms": 50,
+        }
+        assert terminal[1].data == {
+            "cancelled": True,
+            "reason": "barge_in",
+        }
+        assert [event["event_type"] for event in emitted] == [
+            "tts_cancelled",
+            "tts_complete",
+        ]
+
+    asyncio.run(run())

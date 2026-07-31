@@ -1774,6 +1774,21 @@ function toggleVlmSettings() {
 function renderTTSConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
+    const restVoiceLabels = {
+        alloy: 'Alloy', echo: 'Echo', fable: 'Fable', onyx: 'Onyx',
+        nova: 'Nova', shimmer: 'Shimmer', Aria: 'Magpie Aria',
+        Jason: 'Magpie Jason', John: 'Magpie John', Leo: 'Magpie Leo',
+        Sofia: 'Magpie Sofia'
+    };
+    const configuredRestVoice = config.voice || 'alloy';
+    const restVoices = Object.keys(restVoiceLabels);
+    if (!restVoices.includes(configuredRestVoice)) restVoices.unshift(configuredRestVoice);
+    const restVoiceOptions = restVoices.map(function (voice) {
+        const label = restVoiceLabels[voice] || (voice + ' (configured)');
+        return '<option value="' + escapeHtml(voice) + '"' +
+            (voice === configuredRestVoice ? ' selected' : '') + '>' +
+            escapeHtml(label) + '</option>';
+    }).join('');
 
     return `
         <div class="config-form ${roClass}">
@@ -1826,14 +1841,18 @@ function renderTTSConfig(config, readonly = false) {
 
                 <div class="form-group">
                     <label>Voice</label>
-                    ${readonly
-                        ? `<input type="text" ${disabled} value="${config.voice || 'Default'}" readonly class="readonly-config-input">`
-                        : `<select id="tts-voice-select" class="config-select" onchange="updateConfig('tts', 'voice', this.value); updateTTSVoiceDefaultHint();">
-                               <option value="">Default</option>
-                           </select>`
-                    }
+                    <div class="tts-voice-control-row">
+                        ${readonly
+                            ? `<input type="text" ${disabled} value="${config.voice || 'Default'}" readonly class="readonly-config-input">`
+                            : `<select id="tts-voice-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'voice', this.value); updateTTSVoiceDefaultHint();">
+                                   <option value="">Default</option>
+                               </select>
+                               <button type="button" id="tts-riva-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>`
+                        }
+                    </div>
                     ${!readonly ? '<span class="input-hint">Queried from RIVA (language-specific voices)</span>' : ''}
                     ${!readonly ? '<div id="tts-voice-default-hint" class="input-hint" style="margin-top: 4px; color: var(--text-secondary);"></div>' : ''}
+                    ${!readonly ? '<div id="tts-riva-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
                 </div>
 
                 ${!readonly ? `
@@ -1856,19 +1875,13 @@ function renderTTSConfig(config, readonly = false) {
 
                 <div class="form-group">
                     <label>Voice</label>
-                    <select ${disabled} value="${config.voice || 'alloy'}" onchange="updateConfig('tts', 'voice', this.value)">
-                        <option value="alloy" ${config.voice === 'alloy' ? 'selected' : ''}>Alloy</option>
-                        <option value="echo" ${config.voice === 'echo' ? 'selected' : ''}>Echo</option>
-                        <option value="fable" ${config.voice === 'fable' ? 'selected' : ''}>Fable</option>
-                        <option value="onyx" ${config.voice === 'onyx' ? 'selected' : ''}>Onyx</option>
-                        <option value="nova" ${config.voice === 'nova' ? 'selected' : ''}>Nova</option>
-                        <option value="shimmer" ${config.voice === 'shimmer' ? 'selected' : ''}>Shimmer</option>
-                        <option value="Aria" ${config.voice === 'Aria' ? 'selected' : ''}>Magpie Aria</option>
-                        <option value="Jason" ${config.voice === 'Jason' ? 'selected' : ''}>Magpie Jason</option>
-                        <option value="John" ${config.voice === 'John' ? 'selected' : ''}>Magpie John</option>
-                        <option value="Leo" ${config.voice === 'Leo' ? 'selected' : ''}>Magpie Leo</option>
-                        <option value="Sofia" ${config.voice === 'Sofia' ? 'selected' : ''}>Magpie Sofia</option>
-                    </select>
+                    <div class="tts-voice-control-row">
+                        <select ${disabled} id="tts-rest-voice-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'voice', this.value)">
+                            ${restVoiceOptions}
+                        </select>
+                        ${!readonly ? '<button type="button" id="tts-rest-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>' : ''}
+                    </div>
+                    ${!readonly ? '<div id="tts-rest-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
                 </div>
 
                 <div class="form-group">
@@ -3137,6 +3150,99 @@ function updateTTSVoiceDefaultHint() {
     }
 }
 
+let _ttsVoicePreviewAudio = null;
+let _ttsVoicePreviewObjectUrl = null;
+let _ttsVoicePreviewAbortController = null;
+let _ttsVoicePreviewButton = null;
+
+function _ttsVoicePreviewStatusElement() {
+    const backend = (currentConfig.tts && (currentConfig.tts.backend || currentConfig.tts.scheme)) || 'riva';
+    return document.getElementById(backend === 'riva'
+        ? 'tts-riva-preview-status'
+        : 'tts-rest-preview-status');
+}
+
+function _setTTSVoicePreviewButton(button, iconName, disabled) {
+    if (!button) return;
+    button.disabled = Boolean(disabled);
+    button.innerHTML = '<i data-lucide="' + iconName + '" class="lucide-inline"></i>';
+    if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons(button);
+}
+
+/** Stop a voice preview without touching the live session or its timeline. */
+function stopTTSVoicePreview() {
+    if (_ttsVoicePreviewAbortController) {
+        _ttsVoicePreviewAbortController.abort();
+        _ttsVoicePreviewAbortController = null;
+    }
+    if (_ttsVoicePreviewAudio) {
+        _ttsVoicePreviewAudio.pause();
+        _ttsVoicePreviewAudio.currentTime = 0;
+        _ttsVoicePreviewAudio = null;
+    }
+    if (_ttsVoicePreviewObjectUrl) {
+        URL.revokeObjectURL(_ttsVoicePreviewObjectUrl);
+        _ttsVoicePreviewObjectUrl = null;
+    }
+    _setTTSVoicePreviewButton(_ttsVoicePreviewButton, 'play', false);
+    _ttsVoicePreviewButton = null;
+    const status = _ttsVoicePreviewStatusElement();
+    if (status) status.textContent = '';
+}
+
+/** Generate and play a short sample using the currently selected TTS voice. */
+async function previewTTSVoice(button) {
+    if (state.sessionState !== 'setup') {
+        showVoiceErrorToast('Voice preview is available before starting a session.');
+        return;
+    }
+    if (_ttsVoicePreviewAudio && !_ttsVoicePreviewAudio.paused) {
+        stopTTSVoicePreview();
+        return;
+    }
+
+    stopTTSVoicePreview();
+    _ttsVoicePreviewButton = button;
+    _ttsVoicePreviewAbortController = new AbortController();
+    const controller = _ttsVoicePreviewAbortController;
+    const status = _ttsVoicePreviewStatusElement();
+    const voice = (currentConfig.tts && currentConfig.tts.voice) || 'default';
+    if (status) status.textContent = 'Generating preview for ' + voice + '…';
+    _setTTSVoicePreviewButton(button, 'loader-circle', true);
+
+    try {
+        const response = await fetch(getApiBase() + '/api/tts/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tts: currentConfig.tts || {} }),
+            signal: controller.signal
+        });
+        if (!response.ok) {
+            const errorBody = await response.json().catch(function () { return {}; });
+            throw new Error(errorBody.error || ('TTS preview failed: HTTP ' + response.status));
+        }
+        const audioBlob = await response.blob();
+        if (controller.signal.aborted) return;
+        _ttsVoicePreviewObjectUrl = URL.createObjectURL(audioBlob);
+        _ttsVoicePreviewAudio = new Audio(_ttsVoicePreviewObjectUrl);
+        _ttsVoicePreviewAudio.onended = function () {
+            stopTTSVoicePreview();
+        };
+        _ttsVoicePreviewAudio.onerror = function () {
+            showVoiceErrorToast('The generated voice preview could not be played.');
+            stopTTSVoicePreview();
+        };
+        await _ttsVoicePreviewAudio.play();
+        _ttsVoicePreviewAbortController = null;
+        if (status) status.textContent = 'Playing ' + voice + ' — click again to stop';
+        _setTTSVoicePreviewButton(button, 'square', false);
+    } catch (error) {
+        if (error && error.name === 'AbortError') return;
+        stopTTSVoicePreview();
+        showVoiceErrorToast(error && error.message ? error.message : 'TTS voice preview failed.');
+    }
+}
+
 // Toggle Advanced ASR Settings panel (Live RIVA WebUI-style)
 function toggleNestedPanel(panelId) {
     const content = document.getElementById(panelId);
@@ -3402,6 +3508,33 @@ function updateAsrTimelineLegend(config) {
     }
 }
 
+/** Show Barge-in diagnostic keys only when the rendered timeline uses them. */
+function updateBargeInDiagnosticLegend(timeline, inLiveSession) {
+    const discardedItem = document.querySelector(
+        '[data-timeline-legend="discarded-audio"]'
+    );
+    const cancellingItem = document.querySelector(
+        '[data-timeline-legend="tts-cancelling"]'
+    );
+    const windows = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.buildBargeInWindows === 'function'
+    ) ? window.MMASTimelineHelpers.buildBargeInWindows(
+        Array.isArray(timeline) ? timeline : []
+    ) : [];
+
+    const hasDiscardedAudio = windows.some(function (window) {
+        return window.discardedEnd != null && window.discardedEnd > window.start;
+    });
+    const hasCancellationWait = windows.some(function (window) {
+        return (
+            window.cancelEnd != null && window.cancelEnd > window.start
+        ) || (inLiveSession === true && window.cancelEnd == null);
+    });
+    if (discardedItem) discardedItem.hidden = !hasDiscardedAudio;
+    if (cancellingItem) cancellingItem.hidden = !hasCancellationWait;
+}
+
 /** Clear timeline when starting New Voice Chat (no selected session). */
 function initTimeline() {
     state.timelineZoom = 1.0;
@@ -3409,6 +3542,7 @@ function initTimeline() {
     state.timelineDuration = 0;
     state.timelineBargeInHitRegions = [];
     updateAsrTimelineLegend(currentConfig);
+    updateBargeInDiagnosticLegend([]);
 
     const canvas = document.getElementById('timeline-canvas');
     if (canvas) {
@@ -3444,6 +3578,7 @@ function renderTimeline() {
         && state.selectedSession.config
     ) ? state.selectedSession.config : currentConfig;
     updateAsrTimelineLegend(legendConfig);
+    updateBargeInDiagnosticLegend(timeline, inLive);
     state.timelineBargeInHitRegions = [];
     if (!inLive && !hasStoppedLiveData && !state.selectedSession) return;
 

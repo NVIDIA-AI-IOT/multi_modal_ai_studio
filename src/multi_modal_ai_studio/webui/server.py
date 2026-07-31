@@ -10,12 +10,15 @@ Supports HTTPS via self-signed certificates (same logic as Live RIVA WebUI).
 """
 
 import asyncio
+import inspect
+import io
 import json
 import logging
 import os
 import socket
 import subprocess
 import sys
+import wave
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
@@ -27,11 +30,12 @@ from aiohttp import web
 load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
-from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig
+from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig, TTSConfig
 from multi_modal_ai_studio.core.session import decode_session_thumbnail
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
-from multi_modal_ai_studio.backends.tts.riva import list_riva_tts_voices_sync
+from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
+from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend, list_riva_tts_voices_sync
 from multi_modal_ai_studio.devices.local import (
     list_local_cameras,
     list_local_audio_inputs,
@@ -43,6 +47,75 @@ from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_TTS_PREVIEW_MAX_PCM_BYTES = 4 * 1024 * 1024
+_TTS_PREVIEW_TIMEOUT_SECONDS = 45
+
+
+def _tts_preview_text(language: str) -> str:
+    """Return a short sample sentence appropriate for the selected language."""
+    language = (language or "en-US").lower()
+    samples = {
+        "ja": "こんにちは。これは選択した音声のサンプルです。",
+        "es": "Hola. Esta es una muestra de la voz seleccionada.",
+        "fr": "Bonjour. Voici un exemple de la voix sélectionnée.",
+        "de": "Hallo. Dies ist eine Vorschau der ausgewählten Stimme.",
+    }
+    return samples.get(
+        language.split("-", 1)[0],
+        "Hello. This is a preview of the selected voice.",
+    )
+
+
+def _pcm16_mono_wav(pcm: bytes, sample_rate: int) -> bytes:
+    """Wrap raw little-endian mono PCM16 in a browser-playable WAV file."""
+    if not pcm:
+        raise ValueError("TTS preview returned no audio")
+    if not 8000 <= sample_rate <= 192000:
+        raise ValueError(f"TTS preview returned invalid sample rate: {sample_rate}")
+    pcm = pcm[: len(pcm) - (len(pcm) % 2)]
+    if not pcm:
+        raise ValueError("TTS preview returned incomplete PCM16 audio")
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm)
+    return output.getvalue()
+
+
+async def _synthesize_tts_preview(config: TTSConfig, text: str) -> bytes:
+    """Synthesize one short preview without creating a session or timeline."""
+    if config.scheme == "riva":
+        backend = RivaTTSBackend(config=config)
+    elif config.scheme == "openai-rest":
+        backend = OpenAIRestTTSBackend(config=config)
+    else:
+        raise ValueError(
+            "Voice preview supports Riva and OpenAI REST TTS; "
+            "Realtime voices belong to the active Realtime session"
+        )
+
+    audio = bytearray()
+    sample_rate = config.sample_rate
+    try:
+        async for chunk in backend.synthesize_stream(text):
+            if not chunk.audio:
+                continue
+            if audio and chunk.sample_rate != sample_rate:
+                raise ValueError("TTS preview sample rate changed during synthesis")
+            sample_rate = chunk.sample_rate
+            audio.extend(chunk.audio)
+            if len(audio) > _TTS_PREVIEW_MAX_PCM_BYTES:
+                raise ValueError("TTS preview exceeded the maximum audio size")
+    finally:
+        close = getattr(backend, "close", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+    return _pcm16_mono_wav(bytes(audio), sample_rate)
 
 
 def _get_network_ips() -> List[str]:
@@ -219,6 +292,7 @@ class WebUIServer:
         self.app.router.add_post('/api/llm/warmup', self.handle_llm_warmup)
         self.app.router.add_get('/api/asr/models', self.handle_asr_models)
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
+        self.app.router.add_post('/api/tts/preview', self.handle_tts_preview)
         self.app.router.add_get('/api/health/llm', self.handle_health_llm)
         self.app.router.add_get('/api/health/riva', self.handle_health_riva)
         self.app.router.add_get('/api/devices/cameras', self.handle_list_cameras)
@@ -674,6 +748,40 @@ class WebUIServer:
         except Exception as e:
             logger.exception("Failed to list Riva TTS voices")
             return web.json_response({"error": str(e), "voices": [], "model_name": None, "model_names": []}, status=500)
+
+    async def handle_tts_preview(self, request: web.Request) -> web.Response:
+        """Synthesize a short, browser-playable preview for the selected voice."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"error": "Request body must be JSON"}, status=400)
+
+        tts_payload = body.get("tts") if isinstance(body, dict) else None
+        if not isinstance(tts_payload, dict):
+            return web.json_response({"error": "tts configuration is required"}, status=400)
+
+        try:
+            config = SessionConfig.from_dict({"tts": tts_payload}).tts
+            text = _tts_preview_text(config.language)
+            audio = await asyncio.wait_for(
+                _synthesize_tts_preview(config, text),
+                timeout=_TTS_PREVIEW_TIMEOUT_SECONDS,
+            )
+            return web.Response(
+                body=audio,
+                content_type="audio/wav",
+                headers={"Cache-Control": "no-store"},
+            )
+        except asyncio.TimeoutError:
+            return web.json_response(
+                {"error": f"TTS preview timed out after {_TTS_PREVIEW_TIMEOUT_SECONDS} seconds"},
+                status=504,
+            )
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except Exception as e:
+            logger.exception("TTS voice preview failed")
+            return web.json_response({"error": str(e)}, status=502)
 
     async def handle_health_llm(self, request: web.Request) -> web.Response:
         """Check if the LLM server (Ollama, vLLM, etc.) at api_base is reachable. Returns { \"ok\": true } or { \"ok\": false, \"error\": \"...\" }."""

@@ -26,6 +26,8 @@ def test_timeline_header_includes_pipeline_and_audio_legend():
         "user-audio",
         "ai-audio",
         "barge-in",
+        "discarded-audio",
+        "tts-cancelling",
     ):
         assert f'data-timeline-legend="{legend}"' in html
 
@@ -68,6 +70,7 @@ def test_barge_in_timeline_records_and_draws_actual_playback_stop():
         "selectFirstPlaybackTimes",
         "rebuildTtsPlaybackSegments",
         "tts_playback_segments",
+        "updateBargeInDiagnosticLegend",
     ):
         assert behavior in app
 
