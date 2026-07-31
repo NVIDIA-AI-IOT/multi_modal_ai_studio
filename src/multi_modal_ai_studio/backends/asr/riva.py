@@ -23,7 +23,7 @@ from multi_modal_ai_studio.backends.base import (
     ConfigError,
 )
 from multi_modal_ai_studio.config.schema import ASRConfig
-from multi_modal_ai_studio.core.timeline import Timeline, Lane
+from multi_modal_ai_studio.core.timeline import Timeline
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +101,10 @@ class RivaASRBackend(ASRBackend):
         self.stream_task: Optional[asyncio.Task] = None
         self._results_queue: Optional[asyncio.Queue] = None
 
-        # VAD/ASR segment tracking for rectangle rendering
+        # ASR response timing. Physical VAD boundaries are observed from the
+        # input PCM in voice_pipeline; Riva responses only describe transcript
+        # delivery and must not be relabeled as speech start/end.
         self._speech_start_time: Optional[float] = None
-        self._vad_start_time: Optional[float] = None
-        # Dedupe repeated asr_final (Riva sometimes sends same final twice)
-        self._last_final_text: Optional[str] = None
 
     def _create_streaming_config(
         self,
@@ -322,11 +321,14 @@ class RivaASRBackend(ASRBackend):
                 else:
                     _last_partial_text[0] = ""
 
-                if self.timeline and self._speech_start_time is None:
-                    event = self.timeline.add_event("vad_start", Lane.AUDIO)
-                    self._speech_start_time = event.timestamp
-                    self._vad_start_time = event.timestamp
-                    self._last_final_text = None
+                response_timestamp = (
+                    max(0.0, time.time() - self.timeline.start_time)
+                    if self.timeline is not None
+                    and self.timeline.start_time is not None
+                    else 0.0
+                )
+                if not is_final and self._speech_start_time is None:
+                    self._speech_start_time = response_timestamp
                     self.logger.debug("Speech started at %.3fs", self._speech_start_time)
                 asr_result = ASRResult(
                     text=text,
@@ -335,6 +337,7 @@ class RivaASRBackend(ASRBackend):
                     metadata={
                         "stability": getattr(alternative, "stability", 1.0),
                         "language_code": self.config.language,
+                        "event_timestamp": response_timestamp,
                     },
                 )
                 if is_final:
@@ -343,30 +346,7 @@ class RivaASRBackend(ASRBackend):
                     self.logger.info(
                         "Final transcript #%d: %s (confidence=%.2f)", finals_emitted, text, asr_result.confidence
                     )
-                    if self.timeline and self._speech_start_time is not None:
-                        if text == self._last_final_text:
-                            self.logger.debug("Skipping duplicate asr_final in timeline: %r", text[:50])
-                            asr_result.metadata["event_timestamp"] = time.time() - (self.timeline.start_time or 0)
-                            self._speech_start_time = None
-                            self._vad_start_time = None
-                        else:
-                            self._last_final_text = text
-                            vad_end_event = self.timeline.add_event("vad_end", Lane.AUDIO)
-                            asr_final_event = self.timeline.add_event(
-                                "asr_final", Lane.SPEECH,
-                                data={"text": text, "confidence": asr_result.confidence},
-                            )
-                            speech_end_time = asr_final_event.timestamp
-                            self.timeline.add_vad_segment(
-                                self._vad_start_time, vad_end_event.timestamp, data={"confidence": 0.95}
-                            )
-                            self.timeline.add_asr_segment(
-                                self._speech_start_time, speech_end_time, text=text,
-                                data={"confidence": asr_result.confidence},
-                            )
-                            self._speech_start_time = None
-                            self._vad_start_time = None
-                            asr_result.metadata["event_timestamp"] = asr_final_event.timestamp
+                    self._speech_start_time = None
                 else:
                     if not getattr(process_response, "_logged_partial", False):
                         process_response._logged_partial = True

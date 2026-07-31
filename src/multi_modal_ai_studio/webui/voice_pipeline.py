@@ -59,6 +59,7 @@ from multi_modal_ai_studio.core.session import Session, validate_session_thumbna
 from multi_modal_ai_studio.core.timeline import Lane
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
+from multi_modal_ai_studio.backends.asr.energy_vad import EnergyVADObserver
 from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
@@ -1180,6 +1181,18 @@ async def _run_voice_pipeline(
         _release_server_capture()
         return None
 
+    # Riva performs its own server-side endpointing, but the streaming API does
+    # not expose explicit physical speech boundaries. Observe the same 16 kHz
+    # PCM locally for timeline visualization only. This never gates or modifies
+    # the audio sent to Riva and therefore applies identically to Browser and
+    # Server USB microphones.
+    riva_energy_vad = (
+        EnergyVADObserver(asr_config)
+        if asr_config.scheme == "riva"
+        else None
+    )
+    riva_energy_speech_ends: List[float] = []
+
     # ASR starts only after client sends start_session (both mics). Avoids Riva timeout during preview and keeps logic identical.
     asr_stream_started = False
     conversation_history = []
@@ -1413,6 +1426,52 @@ async def _run_voice_pipeline(
                     logger.warning("Send user_amplitude (preview) failed: %s", e)
         return (last_amplitude_time, did_send, amp, now)
 
+    async def _send_asr_audio(pcm_bytes: bytes) -> bool:
+        """Observe Riva speech boundaries, then forward the original PCM."""
+        if (
+            riva_energy_vad is not None
+            and session.timeline.start_time is not None
+        ):
+            observed_at = max(
+                0.0,
+                time.time() - session.timeline.start_time,
+            )
+            for vad_event in riva_energy_vad.observe(
+                pcm_bytes,
+                chunk_end_time=observed_at,
+            ):
+                data = {
+                    "source": "local-energy",
+                    "detector": "pcm-rms",
+                    "observed_at": vad_event.observed_at,
+                    "decision_delay_ms": max(
+                        0.0,
+                        (vad_event.observed_at - vad_event.timestamp) * 1000.0,
+                    ),
+                    "normalized_rms": vad_event.normalized_rms,
+                }
+                session.timeline.add_event(
+                    vad_event.event_type,
+                    Lane.SPEECH,
+                    data=data,
+                    timestamp=vad_event.timestamp,
+                )
+                await send_event({
+                    "event_type": vad_event.event_type,
+                    "lane": "speech",
+                    "data": data,
+                    "timestamp": vad_event.timestamp,
+                })
+                if vad_event.event_type == "vad_end":
+                    riva_energy_speech_ends.append(vad_event.timestamp)
+                logger.info(
+                    "[Riva Energy VAD] %s boundary=%.3fs observed=%.3fs",
+                    vad_event.event_type,
+                    vad_event.timestamp,
+                    vad_event.observed_at,
+                )
+        return await asr.send_audio(pcm_bytes)
+
     async def _feed_pcm_to_pipeline(
         pcm_bytes: bytes,
         last_amplitude_time: float,
@@ -1423,7 +1482,7 @@ async def _run_voice_pipeline(
             return (last_amplitude_time, False, 0.0, 0.0)
         now = time.time() - session.timeline.start_time
         if not mic_muted:
-            accepted = await asr.send_audio(pcm_bytes)
+            accepted = await _send_asr_audio(pcm_bytes)
             if not accepted and not getattr(_feed_pcm_to_pipeline, "_warned_dead_stream", False):
                 _feed_pcm_to_pipeline._warned_dead_stream = True
                 logger.warning("[asr] send_audio dropped — ASR stream not active (waiting for auto-restart)")
@@ -1463,10 +1522,17 @@ async def _run_voice_pipeline(
                             nonlocal mic_muted
                             muted = obj.get("muted", True)
                             if muted and session.timeline.start_time is not None:
-                                # Inject ~0.5s silence so Riva VAD endpoints any partial
-                                _silence_05s = 16000 * 2 * 0.5  # 16 kHz, 16-bit, 0.5 s
+                                # Feed enough silence to close both Riva's
+                                # endpoint detector and the local observer.
+                                silence_s = max(
+                                    0.5,
+                                    asr_config.speech_timeout_ms / 1000.0,
+                                )
+                                silence_bytes = int(16000 * 2 * silence_s)
                                 try:
-                                    await asr.send_audio(b"\x00" * int(_silence_05s))
+                                    await _send_asr_audio(
+                                        b"\x00" * silence_bytes
+                                    )
                                 except Exception as e:
                                     logger.debug("PTT: inject silence failed %s", e)
                             mic_muted = muted
@@ -1721,6 +1787,23 @@ async def _run_voice_pipeline(
                 if ts is None:
                     ts = now_ts
                 ev_type = "asr_partial" if not is_final else "asr_final"
+
+                if is_final and riva_energy_speech_ends:
+                    # Associate the latest unconsumed physical speech boundary
+                    # with this Riva final. turn_executor then uses it for TTL
+                    # instead of treating transcript arrival as speech end.
+                    eligible_ends = [
+                        boundary
+                        for boundary in riva_energy_speech_ends
+                        if boundary <= ts
+                    ]
+                    if eligible_ends:
+                        result.end_time = eligible_ends[-1]
+                        riva_energy_speech_ends[:] = [
+                            boundary
+                            for boundary in riva_energy_speech_ends
+                            if boundary > result.end_time
+                        ]
 
                 # File-style OpenAI REST ASR has no partial transcripts. Preserve
                 # its local VAD timing so the UI can still draw a truthful ASR
