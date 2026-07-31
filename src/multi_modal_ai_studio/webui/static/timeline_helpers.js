@@ -266,6 +266,88 @@
         }).filter(Boolean);
     }
 
+    // Keep the ASR legend truthful across fundamentally different transports.
+    // REST has one observable request per utterance; Realtime and Riva keep a
+    // stream open and expose transcript updates instead.
+    function getAsrLegendSpec(config) {
+        const asr = config && config.asr ? config.asr : (config || {});
+        const scheme = String(asr.scheme || asr.backend || '').toLowerCase();
+        let mode = 'generic';
+        if (scheme) {
+            if (scheme.indexOf('realtime') >= 0) {
+                mode = 'realtime';
+            } else if (scheme === 'riva') {
+                mode = 'riva';
+            } else if (
+                scheme === 'openai'
+                || scheme.indexOf('rest') >= 0
+            ) {
+                mode = 'rest';
+            }
+        } else if (asr.realtime_url) {
+            mode = 'realtime';
+        } else if (
+            asr.riva_server
+            || String(asr.server || '').indexOf(':50051') >= 0
+        ) {
+            mode = 'riva';
+        } else if (asr.api_base) {
+            mode = 'rest';
+        }
+
+        const common = {
+            mode: mode,
+            speechLabel: 'Speech / VAD',
+            gpuLabel: 'GPU Peak',
+        };
+        if (mode === 'rest') {
+            return Object.assign(common, {
+                speechTitle: 'Local energy VAD detected user speech',
+                endpointLabel: 'Endpoint Wait',
+                endpointTitle: 'Local silence hold before submitting the utterance',
+                activeLabel: 'ASR Request',
+                activeTitle: 'REST transcription request: audio upload through response receipt',
+                activeSwatch: 'request',
+                showGpuPeak: true,
+                gpuTitle: 'Peak local GPU utilization observed during the ASR request',
+            });
+        }
+        if (mode === 'realtime') {
+            return Object.assign(common, {
+                speechTitle: 'Speech activity from provider events when available; otherwise inferred from transcript timing',
+                endpointLabel: 'Finalization',
+                endpointTitle: 'Last partial to completed transcript; may include endpointing, commit, and final decoding',
+                activeLabel: 'Streaming ASR',
+                activeTitle: 'Partial transcript updates observed on the persistent Realtime stream; not exact GPU time',
+                activeSwatch: 'streaming',
+                showGpuPeak: false,
+                gpuTitle: 'No request-scoped local GPU marker is available for this Realtime stream',
+            });
+        }
+        if (mode === 'riva') {
+            return Object.assign(common, {
+                speechTitle: 'Riva speech activity; currently approximated from recognition results when explicit VAD events are unavailable',
+                endpointLabel: 'Endpoint / Finalize',
+                endpointTitle: 'Last interim result to final transcript; combines Riva endpointing and finalization',
+                activeLabel: 'Streaming ASR',
+                activeTitle: 'Riva interim transcript activity on the persistent gRPC stream; not exact GPU time',
+                activeSwatch: 'streaming',
+                showGpuPeak: false,
+                gpuTitle: 'No request-scoped local GPU marker is available for the persistent Riva stream',
+            });
+        }
+        return Object.assign(common, {
+            speechTitle: 'Detected or inferred user speech activity',
+            endpointLabel: 'Endpoint / Finalize',
+            endpointTitle: 'Speech endpointing and final transcript completion',
+            activeLabel: 'ASR Active',
+            activeTitle: 'Observed recognition activity; exact meaning depends on the ASR backend',
+            activeSwatch: 'streaming',
+            showGpuPeak: false,
+            gpuTitle: 'No request-scoped local GPU marker is available for this backend',
+        });
+    }
+
     // Apply the speech timing state shared by the REST and Realtime paths.
     // Returns true when the caller should not process the event further.
     function applySpeechTimingEvent(state, evt) {
@@ -454,6 +536,7 @@
         buildTtsSegmentsFromTimeline: buildTtsSegmentsFromTimeline,
         closeTtlBandAt: closeTtlBandAt,
         dedupeTimelineEventsByTimestamp: dedupeTimelineEventsByTimestamp,
+        getAsrLegendSpec: getAsrLegendSpec,
         hasDenseTtsAmplitudeTimeline: hasDenseTtsAmplitudeTimeline,
         pairTimelineEvents: pairTimelineEvents,
         rebuildTtsPlaybackSegments: rebuildTtsPlaybackSegments,

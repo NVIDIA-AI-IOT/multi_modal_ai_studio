@@ -18,8 +18,8 @@ def test_timeline_header_includes_pipeline_and_audio_legend():
 
     for legend in (
         "speech-vad",
-        "endpoint-wait",
-        "asr-request",
+        "endpoint-phase",
+        "asr-active",
         "gpu-peak",
         "llm-prefill",
         "llm-generate",
@@ -53,6 +53,8 @@ def test_barge_in_timeline_records_and_draws_actual_playback_stop():
         "pairTimelineEvents",
         "asr_inference_start",
         "asr_inference_end",
+        "getAsrLegendSpec",
+        "updateAsrTimelineLegend",
         "dedupeTimelineEventsByTimestamp",
         "speechEndCandidates",
         "rebuildTtsPlaybackSegments",
