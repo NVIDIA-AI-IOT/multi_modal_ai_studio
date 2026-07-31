@@ -142,3 +142,16 @@ def test_browser_and_server_usb_share_classic_pcm_pipeline():
     assert pipeline.count("await _feed_pcm_to_pipeline(") == 2
     assert "riva_energy_vad.observe(" in pipeline
     assert '"source": "local-energy"' in pipeline
+
+
+def test_recorded_configuration_note_is_consistent_across_tabs():
+    repository_root = Path(__file__).resolve().parents[2]
+    app = (
+        repository_root
+        / "src/multi_modal_ai_studio/webui/static/app.js"
+    ).read_text()
+
+    assert "Recorded configuration for this session (read-only)" in app
+    assert "This is a historical session configuration (read-only)" not in app
+    assert "Recorded devices for this session (read-only)" not in app
+    assert app.count("renderReadonlySessionConfigNote(") == 7
