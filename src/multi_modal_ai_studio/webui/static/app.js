@@ -1249,13 +1249,18 @@ function renderEditableConfigForm(tab, config, readonly = false, sessionConfig =
     }
 }
 
+function renderReadonlySessionConfigNote(readonly = true) {
+    if (!readonly) return '';
+    return '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded configuration for this session (read-only)</p>';
+}
+
 function renderASRConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
 
     return `
         <div class="config-form ${roClass}">
-            ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${renderReadonlySessionConfigNote(readonly)}
 
             <!-- Backend Tabs (traditional style: RIVA | REST API | Realtime API) -->
             <div class="backend-tabs speech-api-tabs ${readonly ? 'disabled' : ''}">
@@ -1509,7 +1514,7 @@ function renderLLMConfig(config, readonly = false) {
 
     return `
         <div class="config-form ${roClass}">
-            ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${renderReadonlySessionConfigNote(readonly)}
             ${realtimeFullVoice ? '<p class="config-note"><i data-lucide="message-circle" class="lucide-inline"></i> Realtime full-voice: only <strong>System Prompt</strong> is used (sent as Realtime instructions). API Base and Model are fixed.</p>' : ''}
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
@@ -1754,7 +1759,7 @@ function renderTTSConfig(config, readonly = false) {
 
     return `
         <div class="config-form ${roClass}">
-            ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${renderReadonlySessionConfigNote(readonly)}
 
             <!-- Backend Tabs (traditional style: RIVA | REST API | Realtime API) -->
             <div class="backend-tabs speech-api-tabs ${readonly ? 'disabled' : ''}">
@@ -1951,7 +1956,7 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
         const spkName = (deviceLabels.speaker != null && deviceLabels.speaker !== '') ? escapeHtml(String(deviceLabels.speaker)) : '—';
         return `
         <div class="config-form readonly">
-            <p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded devices for this session (read-only)</p>
+            ${renderReadonlySessionConfigNote()}
             <div class="form-group">
                 <label><i data-lucide="video" class="lucide-inline"></i> Camera device</label>
                 <input type="text" class="config-value config-value--device" readonly disabled value="${camName}" aria-readonly="true" />
@@ -1976,7 +1981,7 @@ function renderDeviceConfig(config, readonly = false, deviceLabels = null) {
 
     return `
         <div class="config-form ${roClass}">
-            ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${renderReadonlySessionConfigNote(readonly)}
             <p class="input-hint" style="margin-bottom: 1rem;">Select the device for your chat session. Select &#128683;None if you don&apos;t plan to use the device or go text based. <strong>Microphone:</strong> (Browser) = mic on this PC; Server USB = mic attached to the server (e.g. EMEET). <strong>Speaker:</strong> (Browser) plays on this PC; Server USB plays through the selected ALSA device on the server.</p>
             <div class="form-group">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
@@ -2186,7 +2191,7 @@ function renderAppConfig(config, readonly = false) {
     const startMuted = !!config.start_with_microphone_muted;
     return `
         <div class="config-form ${roClass}">
-            ${readonly ? '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> This is a historical session configuration (read-only)</p>' : ''}
+            ${renderReadonlySessionConfigNote(readonly)}
 
             <div class="form-group">
                 <div class="form-group-row form-group-row--toggle">
