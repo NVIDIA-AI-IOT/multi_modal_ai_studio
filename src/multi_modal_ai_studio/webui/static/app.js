@@ -3377,12 +3377,6 @@ function updateAsrTimelineLegend(config) {
             );
         }
     }
-    const gpuItem = updateItem(
-        'gpu-peak',
-        spec.gpuLabel,
-        spec.gpuTitle
-    );
-    if (gpuItem) gpuItem.hidden = !spec.showGpuPeak;
 }
 
 /** Clear timeline when starting New Voice Chat (no selected session). */
@@ -3768,7 +3762,15 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
     // Per-turn window: end-of-speech must be between first partial and final (before LLM / first AI voice)
     const turnWindows = [];
     if (timeline && timeline.length) {
-        const finals = timeline.filter(function (e) { return e.event_type === 'asr_final'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        const dedupeEvents = (
+            window.MMASTimelineHelpers
+            && typeof window.MMASTimelineHelpers.dedupeTimelineEventsByTimestamp === 'function'
+        ) ? window.MMASTimelineHelpers.dedupeTimelineEventsByTimestamp : function (events) {
+            return events;
+        };
+        const finals = dedupeEvents(
+            timeline.filter(function (e) { return e.event_type === 'asr_final'; })
+        ).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
         const partials = timeline.filter(function (e) { return e.event_type === 'asr_partial'; });
         for (let i = 0; i < finals.length; i++) {
             const asrFinalTime = finals[i].timestamp != null ? Number(finals[i].timestamp) : null;
@@ -3785,7 +3787,15 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
     // First TTS audio per turn: prefer tts_first_audio (first sound out), then audio_amplitude, then segment (tts_start) fallback
     const firstTtsFirstAudioByTurn = [];
     if (timeline && timeline.length && turnWindows.length) {
-        const ttsFirstAudioEvents = timeline.filter(function (e) { return e.event_type === 'tts_first_audio'; }).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+        const dedupeEvents = (
+            window.MMASTimelineHelpers
+            && typeof window.MMASTimelineHelpers.dedupeTimelineEventsByTimestamp === 'function'
+        ) ? window.MMASTimelineHelpers.dedupeTimelineEventsByTimestamp : function (events) {
+            return events;
+        };
+        const ttsFirstAudioEvents = dedupeEvents(
+            timeline.filter(function (e) { return e.event_type === 'tts_first_audio'; })
+        ).sort(function (a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
         for (var ti = 0; ti < turnWindows.length; ti++) {
             const win = turnWindows[ti];
             const nextFinal = turnWindows[ti + 1] ? turnWindows[ti + 1].asrFinalTime : Infinity;
@@ -3810,21 +3820,35 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
         }
     }
     // Band end T = first TTS audio (tts_first_audio) when available; else first audio_amplitude (tts); else first segment start (tts_start). Do not min with segmentTime or we pull T back to tts_start.
-    const firstPlayPerTurn = responseGroups.map(function (group, k) {
-        var firstChunkTime = group[0].startTime;
-        const withSignal = group.filter(function (s) { return (s.amplitude != null ? s.amplitude : 0) > 0; });
-        var segmentTime = withSignal.length ? Math.min(firstChunkTime, Math.min.apply(null, withSignal.map(function (s) { return s.startTime; }))) : firstChunkTime;
-        var timelineFirstAudio = firstTtsFirstAudioByTurn[k];
-        var timelineAmp = firstTtsAmplitudeByTurn[k];
-        if (timelineFirstAudio != null && timelineFirstAudio > 0) return timelineFirstAudio;
-        if (timelineAmp != null && timelineAmp > 0) return timelineAmp;
-        return segmentTime;
-    });
+    const playbackTurnCount = turnWindows.length || responseGroups.length;
+    const selectFirstPlaybackTimes = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.selectFirstPlaybackTimes === 'function'
+    ) ? window.MMASTimelineHelpers.selectFirstPlaybackTimes : function (
+        count,
+        firstAudio,
+        firstAmplitude,
+        groups
+    ) {
+        return Array.from({ length: count }, function (_, index) {
+            return firstAudio[index] || firstAmplitude[index]
+                || (groups[index] && groups[index][0]
+                    ? groups[index][0].startTime
+                    : null);
+        });
+    };
+    const firstPlayPerTurn = selectFirstPlaybackTimes(
+        playbackTurnCount,
+        firstTtsFirstAudioByTurn,
+        firstTtsAmplitudeByTurn,
+        responseGroups
+    );
     // One band per turn: S = threshold-based end-of-speech (silenceStarts) when available; else end-of-speech proxy (asr_final - 150ms), never last partial
     const bands = [];
     const usedSilence = {};
     for (let k = 0; k < firstPlayPerTurn.length; k++) {
         const T = firstPlayPerTurn[k];
+        if (T == null || !Number.isFinite(Number(T))) continue;
         const win = turnWindows[k];
         const minS = win ? win.firstPartialTime : 0;
         const maxS = win ? win.asrFinalTime : T;
@@ -3846,17 +3870,6 @@ function computeTtlBandsFromReplay(amplitudeHistory, ttsSegments, timeline) {
             // No turn window or maxS >= T: still show band
             const fallbackS = Math.max(0, T - 0.5);
             bands.push({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
-        }
-    }
-    // If we have more turns (asr_finals) than TTS segment groups, add bands for the missing early turns
-    if (turnWindows.length > bands.length && (firstTtsFirstAudioByTurn.length >= turnWindows.length || firstTtsAmplitudeByTurn.length >= turnWindows.length)) {
-        var missingCount = turnWindows.length - bands.length;
-        for (var ti = 0; ti < missingCount; ti++) {
-            const T = (firstTtsFirstAudioByTurn[ti] != null && firstTtsFirstAudioByTurn[ti] > 0) ? firstTtsFirstAudioByTurn[ti] : firstTtsAmplitudeByTurn[ti];
-            const win = turnWindows[ti];
-            if (T == null || T <= 0 || !win) continue;
-            const fallbackS = Math.max(0, win.asrFinalTime - 0.15);
-            bands.unshift({ start: fallbackS, end: T, ttlMs: Math.round((T - fallbackS) * 1000) });
         }
     }
     return bands;
@@ -3932,10 +3945,18 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     const vadSpeechStarts = timeline.filter(e => e.event_type === 'vad_speech_start').sort((a, b) => a.timestamp - b.timestamp);
     const vadSpeechEnds = timeline.filter(e => e.event_type === 'vad_speech_end').sort((a, b) => a.timestamp - b.timestamp);
     const asrPartials = timeline.filter(e => e.event_type === 'asr_partial');
-    const asrFinals = timeline.filter(e => e.event_type === 'asr_final').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-    const ttsStarts = timeline.filter(e => e.event_type === 'tts_start').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-    const ttsFirstAudios = timeline.filter(e => e.event_type === 'tts_first_audio');
-    const ttsCompletes = timeline.filter(e => e.event_type === 'tts_complete');
+    const asrFinals = dedupeSpeechBoundaries(
+        timeline.filter(e => e.event_type === 'asr_final')
+    );
+    const ttsStarts = dedupeSpeechBoundaries(
+        timeline.filter(e => e.event_type === 'tts_start')
+    );
+    const ttsFirstAudios = dedupeSpeechBoundaries(
+        timeline.filter(e => e.event_type === 'tts_first_audio')
+    );
+    const ttsCompletes = dedupeSpeechBoundaries(
+        timeline.filter(e => e.event_type === 'tts_complete')
+    );
     const llmStarts = timeline.filter(e => e.event_type === 'llm_start').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const llmFirstTokens = timeline.filter(e => e.event_type === 'llm_first_token').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const llmCompletes = timeline.filter(e => e.event_type === 'llm_complete').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -4078,6 +4099,11 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const timestamp = Number(event.timestamp || 0);
             return timestamp >= Number(speechStart.timestamp || 0)
                 && (!asrFinal || timestamp <= Number(asrFinal.timestamp || 0));
+        }).sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+        const localEnergySpeechEnds = speechEndCandidates.filter(function (event) {
+            return event.event_type === 'vad_end'
+                && event.data
+                && event.data.source === 'local-energy';
         });
         const speechEnd = speechEndCandidates.length
             ? speechEndCandidates[speechEndCandidates.length - 1]
@@ -4115,6 +4141,13 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
 
         // Speech end for this turn: optional vad_speech_end if present, else speechEnd (with/without VAD events)
         const turnSpeechEnd = (() => {
+            // Prefer the physical boundary observed from the shared input PCM.
+            // user_speech_end is often emitted when the final transcript is
+            // dequeued, which describes pipeline progress rather than the end
+            // of the user's voice.
+            if (localEnergySpeechEnds.length > 0) {
+                return localEnergySpeechEnds[localEnergySpeechEnds.length - 1];
+            }
             if (asrFinal && vadSpeechEnds.length > 0) {
                 const inRange = vadSpeechEnds.filter(v =>
                     v.timestamp >= (firstPartial?.timestamp ?? 0) && v.timestamp <= (asrFinal.timestamp + 0.001)
@@ -4127,28 +4160,42 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             return speechEnd;
         })();
 
-        // Phase 2: Blue = first partial → last partial (active ASR; partials coming in)
-        if (firstPartial && lastPartial && lastPartial.timestamp > firstPartial.timestamp) {
+        const physicalSpeechEnd = (
+            turnSpeechEnd
+            && asrFinal
+            && turnSpeechEnd.timestamp < asrFinal.timestamp - 0.001
+        ) ? turnSpeechEnd.timestamp : null;
+
+        // Phase 2: Blue = first partial → physical speech end. If an older
+        // recording has no physical boundary, retain last-partial fallback.
+        const activeAsrEnd = physicalSpeechEnd != null
+            ? Math.max(firstPartial?.timestamp ?? physicalSpeechEnd, physicalSpeechEnd)
+            : lastPartial?.timestamp;
+        if (firstPartial && activeAsrEnd != null && activeAsrEnd > firstPartial.timestamp) {
             inferredRectangles.push({
                 event_type: 'asr_active',
                 lane: 'speech',
                 start_time: firstPartial.timestamp,
-                end_time: lastPartial.timestamp,
+                end_time: activeAsrEnd,
                 timestamp: firstPartial.timestamp,
                 phase: 'active-asr',
                 inferred: true
             });
         }
 
-        // Phase 3: Last partial → final transcript (light blue)
-        if (lastPartial && asrFinal && asrFinal.timestamp > lastPartial.timestamp) {
+        // Phase 3: Physical speech end → final transcript. Last partial is
+        // only a compatibility fallback; it is not proof that speech ended.
+        const finalizationStart = physicalSpeechEnd != null
+            ? Math.max(firstPartial?.timestamp ?? physicalSpeechEnd, physicalSpeechEnd)
+            : lastPartial?.timestamp;
+        if (finalizationStart != null && asrFinal && asrFinal.timestamp > finalizationStart) {
             inferredRectangles.push({
                 event_type: 'asr_finalizing',
                 lane: 'speech',
-                start_time: lastPartial.timestamp,
+                start_time: finalizationStart,
                 end_time: asrFinal.timestamp,
-                timestamp: lastPartial.timestamp,
-                phase: 'post-asr',  // Light blue: last partial to final
+                timestamp: finalizationStart,
+                phase: 'post-asr',
                 inferred: true
             });
         }
@@ -5069,47 +5116,6 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             drawAreaAndLine(cpuPoints, '#2196F3', '#2196F3', 0.45);
             drawAreaAndLine(gpuPoints, '#4CAF50', '#4CAF50', 0.45);
 
-            // Preserve a point-in-time ASR GPU peak even when the 100–300 ms
-            // request occupies only one or two telemetry samples. The marker
-            // has a minimum screen width but remains anchored to the actual
-            // sample timestamp.
-            const buildIntervalPeakMarkers = (
-                window.MMASTimelineHelpers
-                && typeof window.MMASTimelineHelpers.buildIntervalPeakMarkers === 'function'
-            ) ? window.MMASTimelineHelpers.buildIntervalPeakMarkers : function () {
-                return [];
-            };
-            const asrGpuPeaks = buildIntervalPeakMarkers(
-                liveSystemStats,
-                asrRequestIntervals,
-                5
-            );
-            asrGpuPeaks.forEach(function (peak) {
-                const x = PADDING_LEFT + (peak.t - timelineOffset) * timeScale;
-                if (x < visibleLeft || x > visibleRight) return;
-                const value = Math.max(0, Math.min(100, Number(peak.value)));
-                const y = laneY + laneH * (1 - value / 100);
-                ctx.fillStyle = 'rgba(118, 185, 0, 0.28)';
-                ctx.fillRect(x - 2.5, y, 5, Math.max(1, baseline - y));
-                ctx.strokeStyle = '#76B900';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(x, y);
-                ctx.lineTo(x, baseline);
-                ctx.stroke();
-                ctx.fillStyle = '#76B900';
-                ctx.beginPath();
-                ctx.arc(x, y, 3, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.font = 'bold 9px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'top';
-                ctx.fillText(
-                    Math.round(value) + '%',
-                    x,
-                    Math.min(baseline - 10, y + 4)
-                );
-            });
             ctx.restore();
         }
     }

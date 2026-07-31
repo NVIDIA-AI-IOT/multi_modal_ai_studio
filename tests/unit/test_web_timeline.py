@@ -20,7 +20,6 @@ def test_timeline_header_includes_pipeline_and_audio_legend():
         "speech-vad",
         "endpoint-phase",
         "asr-active",
-        "gpu-peak",
         "llm-prefill",
         "llm-generate",
         "tts",
@@ -29,6 +28,11 @@ def test_timeline_header_includes_pipeline_and_audio_legend():
         "barge-in",
     ):
         assert f'data-timeline-legend="{legend}"' in html
+
+    speech_position = html.index('data-timeline-legend="speech-vad"')
+    active_position = html.index('data-timeline-legend="asr-active"')
+    endpoint_position = html.index('data-timeline-legend="endpoint-phase"')
+    assert speech_position < active_position < endpoint_position
 
 
 def test_barge_in_timeline_records_and_draws_actual_playback_stop():
@@ -49,7 +53,6 @@ def test_barge_in_timeline_records_and_draws_actual_playback_stop():
         "syncLiveSessionClock",
         "liveSessionClockSynchronized",
         "buildPeakPreservingPoints",
-        "buildIntervalPeakMarkers",
         "pairTimelineEvents",
         "asr_inference_start",
         "asr_inference_end",
@@ -57,6 +60,9 @@ def test_barge_in_timeline_records_and_draws_actual_playback_stop():
         "updateAsrTimelineLegend",
         "dedupeTimelineEventsByTimestamp",
         "speechEndCandidates",
+        "localEnergySpeechEnds",
+        "physicalSpeechEnd",
+        "selectFirstPlaybackTimes",
         "rebuildTtsPlaybackSegments",
         "tts_playback_segments",
     ):
@@ -122,3 +128,17 @@ def test_web_timeline_regressions():
         cwd=repository_root,
         check=True,
     )
+
+
+def test_browser_and_server_usb_share_classic_pcm_pipeline():
+    repository_root = Path(__file__).resolve().parents[2]
+    pipeline = (
+        repository_root
+        / "src/multi_modal_ai_studio/webui/voice_pipeline.py"
+    ).read_text()
+
+    # One call is the Browser WebSocket path and one is the Server USB capture
+    # consumer. The common function owns Riva Energy VAD and ASR forwarding.
+    assert pipeline.count("await _feed_pcm_to_pipeline(") == 2
+    assert "riva_energy_vad.observe(" in pipeline
+    assert '"source": "local-energy"' in pipeline

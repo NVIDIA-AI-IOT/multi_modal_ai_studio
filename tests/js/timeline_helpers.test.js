@@ -9,7 +9,6 @@ const test = require('node:test');
 const {
     applySpeechTimingEvent,
     buildBargeInWindows,
-    buildIntervalPeakMarkers,
     buildPeakPreservingPoints,
     buildTtsSegmentsFromTimeline,
     closeTtlBandAt,
@@ -18,6 +17,7 @@ const {
     hasDenseTtsAmplitudeTimeline,
     pairTimelineEvents,
     rebuildTtsPlaybackSegments,
+    selectFirstPlaybackTimes,
     splitAudioSegmentsAt,
     syncLiveSessionClock,
     truncateAudioSegmentsAt,
@@ -37,7 +37,6 @@ test('ASR legend describes REST request timing', () => {
     assert.equal(spec.mode, 'rest');
     assert.equal(spec.activeLabel, 'ASR Request');
     assert.equal(spec.endpointLabel, 'Endpoint Wait');
-    assert.equal(spec.showGpuPeak, true);
 });
 
 test('ASR legend describes persistent streaming transports', () => {
@@ -50,10 +49,8 @@ test('ASR legend describes persistent streaming transports', () => {
 
     assert.equal(realtime.activeLabel, 'Streaming ASR');
     assert.equal(realtime.endpointLabel, 'Finalization');
-    assert.equal(realtime.showGpuPeak, false);
     assert.equal(riva.activeLabel, 'Streaming ASR');
     assert.equal(riva.endpointLabel, 'Endpoint / Finalize');
-    assert.equal(riva.showGpuPeak, false);
 });
 
 test('ASR request starts and ends pair without crossing the next request', () => {
@@ -70,21 +67,22 @@ test('ASR request starts and ends pair without crossing the next request', () =>
     ]);
 });
 
-test('ASR GPU marker selects only the strongest sample inside each request', () => {
-    const markers = buildIntervalPeakMarkers([
-        { t: 1.9, gpu: 99 },
-        { t: 2.02, gpu: 41 },
-        { t: 2.08, gpu: 96 },
-        { t: 2.2, gpu: 88 },
-        { t: 5.1, gpu: 3 },
-    ], [
-        { start: 2.0, end: 2.1 },
-        { start: 5.0, end: 5.2 },
-    ], 5);
+test('turn-scoped first audio survives a short barge-in playback gap', () => {
+    const playbackTimes = selectFirstPlaybackTimes(
+        2,
+        [12.645, 22.784],
+        [12.653, 22.788],
+        [
+            [
+                { startTime: 12.653, endTime: 22.098 },
+                // Only 0.69 s separates these replies, so legacy gap-based
+                // waveform grouping merges them.
+                { startTime: 22.788, endTime: 23.138 },
+            ],
+        ]
+    );
 
-    assert.equal(markers.length, 1);
-    assert.equal(markers[0].t, 2.08);
-    assert.equal(markers[0].value, 96);
+    assert.deepEqual(playbackTimes, [12.645, 22.784]);
 });
 
 test('GPU plotting retains the peak when samples share a screen pixel', () => {
