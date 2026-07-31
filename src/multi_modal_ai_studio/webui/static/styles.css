@@ -3371,26 +3371,6 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     background: var(--timeline-asr-request);
 }
 
-.legend-gpu-peak {
-    position: relative;
-    display: inline-block;
-    width: 11px;
-    height: 13px;
-    flex: 0 0 11px;
-}
-
-.legend-gpu-peak::before {
-    content: "";
-    position: absolute;
-    left: 4px;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    border-radius: 1px;
-    background: var(--nvidia-green);
-    box-shadow: 0 0 0 1px rgba(118, 185, 0, 0.2);
-}
-
 .legend-color-llm-prefill {
     background: var(--timeline-llm-prefill);
 }

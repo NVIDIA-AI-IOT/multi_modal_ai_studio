@@ -228,42 +228,36 @@
         return intervals;
     }
 
-    // Find the strongest observed GPU sample inside each explicit interval.
-    // The renderer gives these point-in-time peaks a minimum visual width;
-    // this helper intentionally does not widen the measured time window.
-    function buildIntervalPeakMarkers(samples, intervals, minimumValue) {
-        const threshold = Number.isFinite(Number(minimumValue))
-            ? Number(minimumValue)
-            : 5;
-        if (!Array.isArray(samples) || !Array.isArray(intervals)) return [];
-        return intervals.map(function (interval) {
-            const start = Number(interval.start);
-            const end = Number(interval.end);
-            if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
-                return null;
+    // Prefer turn-scoped playback events over gap-based waveform grouping.
+    // Barge-in can leave only a short gap before the next reply, making two
+    // independent responses look like one continuous waveform group.
+    function selectFirstPlaybackTimes(
+        turnCount,
+        firstAudioByTurn,
+        firstAmplitudeByTurn,
+        responseGroups
+    ) {
+        const count = Math.max(0, Number(turnCount) || 0);
+        return Array.from({ length: count }, function (_, index) {
+            const firstAudio = Number(firstAudioByTurn && firstAudioByTurn[index]);
+            if (Number.isFinite(firstAudio) && firstAudio > 0) return firstAudio;
+            const firstAmplitude = Number(
+                firstAmplitudeByTurn && firstAmplitudeByTurn[index]
+            );
+            if (Number.isFinite(firstAmplitude) && firstAmplitude > 0) {
+                return firstAmplitude;
             }
-            let peak = null;
-            samples.forEach(function (sample) {
-                const timestamp = Number(sample && sample.t);
-                const value = Number(sample && sample.gpu);
-                if (
-                    !Number.isFinite(timestamp)
-                    || !Number.isFinite(value)
-                    || timestamp < start
-                    || timestamp > end
-                ) return;
-                if (!peak || value > peak.value) {
-                    peak = {
-                        t: timestamp,
-                        value: value,
-                        sample: sample,
-                        start: start,
-                        end: end,
-                    };
-                }
+            const group = (
+                responseGroups
+                && Array.isArray(responseGroups[index])
+            ) ? responseGroups[index] : [];
+            const starts = group.filter(function (segment) {
+                return segment && Number.isFinite(Number(segment.startTime));
+            }).map(function (segment) {
+                return Number(segment.startTime);
             });
-            return peak && peak.value >= threshold ? peak : null;
-        }).filter(Boolean);
+            return starts.length ? Math.min.apply(null, starts) : null;
+        });
     }
 
     // Keep the ASR legend truthful across fundamentally different transports.
@@ -298,7 +292,6 @@
         const common = {
             mode: mode,
             speechLabel: 'Speech / VAD',
-            gpuLabel: 'GPU Peak',
         };
         if (mode === 'rest') {
             return Object.assign(common, {
@@ -308,8 +301,6 @@
                 activeLabel: 'ASR Request',
                 activeTitle: 'REST transcription request: audio upload through response receipt',
                 activeSwatch: 'request',
-                showGpuPeak: true,
-                gpuTitle: 'Peak local GPU utilization observed during the ASR request',
             });
         }
         if (mode === 'realtime') {
@@ -320,20 +311,16 @@
                 activeLabel: 'Streaming ASR',
                 activeTitle: 'Partial transcript updates observed on the persistent Realtime stream; not exact GPU time',
                 activeSwatch: 'streaming',
-                showGpuPeak: false,
-                gpuTitle: 'No request-scoped local GPU marker is available for this Realtime stream',
             });
         }
         if (mode === 'riva') {
             return Object.assign(common, {
-                speechTitle: 'Riva speech activity; currently approximated from recognition results when explicit VAD events are unavailable',
+                speechTitle: 'Local energy VAD observed the same PCM stream sent to Riva',
                 endpointLabel: 'Endpoint / Finalize',
-                endpointTitle: 'Last interim result to final transcript; combines Riva endpointing and finalization',
+                endpointTitle: 'Local energy speech end to Riva final transcript; includes endpointing and final decoding',
                 activeLabel: 'Streaming ASR',
                 activeTitle: 'Riva interim transcript activity on the persistent gRPC stream; not exact GPU time',
                 activeSwatch: 'streaming',
-                showGpuPeak: false,
-                gpuTitle: 'No request-scoped local GPU marker is available for the persistent Riva stream',
             });
         }
         return Object.assign(common, {
@@ -343,8 +330,6 @@
             activeLabel: 'ASR Active',
             activeTitle: 'Observed recognition activity; exact meaning depends on the ASR backend',
             activeSwatch: 'streaming',
-            showGpuPeak: false,
-            gpuTitle: 'No request-scoped local GPU marker is available for this backend',
         });
     }
 
@@ -531,7 +516,6 @@
     return {
         applySpeechTimingEvent: applySpeechTimingEvent,
         buildBargeInWindows: buildBargeInWindows,
-        buildIntervalPeakMarkers: buildIntervalPeakMarkers,
         buildPeakPreservingPoints: buildPeakPreservingPoints,
         buildTtsSegmentsFromTimeline: buildTtsSegmentsFromTimeline,
         closeTtlBandAt: closeTtlBandAt,
@@ -540,6 +524,7 @@
         hasDenseTtsAmplitudeTimeline: hasDenseTtsAmplitudeTimeline,
         pairTimelineEvents: pairTimelineEvents,
         rebuildTtsPlaybackSegments: rebuildTtsPlaybackSegments,
+        selectFirstPlaybackTimes: selectFirstPlaybackTimes,
         syncLiveSessionClock: syncLiveSessionClock,
         splitAudioSegmentsAt: splitAudioSegmentsAt,
         truncateAudioSegmentsAt: truncateAudioSegmentsAt,
