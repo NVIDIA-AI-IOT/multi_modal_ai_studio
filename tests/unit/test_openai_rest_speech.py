@@ -4,6 +4,7 @@
 
 import asyncio
 import struct
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,10 @@ from multi_modal_ai_studio.backends.tts.openai_rest import (
     _PCM16FrameAligner,
 )
 from multi_modal_ai_studio.config.schema import ASRConfig, SessionConfig, TTSConfig
-from multi_modal_ai_studio.webui.voice_pipeline import TTSChunkBuffer
+from multi_modal_ai_studio.webui.voice_pipeline import (
+    TTSChunkBuffer,
+    _normalize_frontend_config,
+)
 
 
 def _asr_config() -> ASRConfig:
@@ -87,6 +91,48 @@ async def test_openai_rest_asr_preserves_utterance_order():
     assert observed == [b"first", b"second"]
 
 
+class _FakeASRResponse:
+    status = 200
+
+    async def text(self):
+        return '{"text":"hello"}'
+
+    async def json(self):
+        return {"text": "hello"}
+
+
+class _FakeASRSession:
+    def post(self, *_args, **_kwargs):
+        return _FakeRequestContext(_FakeASRResponse())
+
+
+def test_openai_rest_asr_records_request_timing():
+    async def scenario():
+        timeline = SimpleNamespace(start_time=time.time() - 1.0)
+        backend = OpenAIRestASRBackend(_asr_config(), timeline=timeline)
+        backend._session = _FakeASRSession()
+        backend._results = asyncio.Queue()
+
+        await backend._transcribe(
+            struct.pack("<16000h", *([4000] * 16000)),
+            start_time=0.1,
+            end_time=1.1,
+        )
+
+        result = backend._results.get_nowait()
+        metadata = result.metadata
+        assert metadata["backend"] == "openai-rest"
+        assert metadata["audio_duration_ms"] == pytest.approx(1000.0)
+        assert metadata["inference_start_time"] >= 0
+        assert (
+            metadata["inference_end_time"]
+            >= metadata["inference_start_time"]
+        )
+        assert metadata["inference_duration_ms"] >= 0
+
+    asyncio.run(scenario())
+
+
 def test_frontend_openai_aliases_normalize_to_rest():
     config = SessionConfig.from_dict(
         {
@@ -107,6 +153,51 @@ def test_frontend_openai_aliases_normalize_to_rest():
     assert config.tts.scheme == "openai-rest"
     assert config.tts.api_base == "http://localhost:8082/v1"
     assert config.tts.language == "ja-JP"
+
+
+def test_rest_tts_metadata_keeps_model_and_voice_separate():
+    normalized = _normalize_frontend_config(
+        {
+            "tts_model_name": "Sofia",
+            "tts": {
+                "backend": "openai-rest",
+                "model": "nvidia/magpie_tts_multilingual_357m",
+                "voice": "Sofia",
+                "riva_model_name": "Sofia",
+            },
+        }
+    )
+
+    assert normalized["tts"]["scheme"] == "openai-rest"
+    assert normalized["tts"]["model"] == "nvidia/magpie_tts_multilingual_357m"
+    assert normalized["tts"]["voice"] == "Sofia"
+    assert "riva_model_name" not in normalized["tts"]
+    assert (
+        normalized["tts_model_name"]
+        == "nvidia/magpie_tts_multilingual_357m"
+    )
+
+
+def test_riva_tts_metadata_keeps_discovered_model_name():
+    normalized = _normalize_frontend_config(
+        {
+            "tts_model_name": "magpie_tts_ensemble-Magpie-Multilingual",
+            "tts": {
+                "backend": "riva",
+                "voice": "Magpie-Multilingual.EN-US.Sofia",
+            },
+        }
+    )
+
+    assert normalized["tts"]["scheme"] == "riva"
+    assert (
+        normalized["tts"]["riva_model_name"]
+        == "magpie_tts_ensemble-Magpie-Multilingual"
+    )
+    assert (
+        normalized["tts_model_name"]
+        == "magpie_tts_ensemble-Magpie-Multilingual"
+    )
 
 
 def test_tts_chunk_buffer_counts_cjk_characters():
@@ -253,7 +344,7 @@ class _BlockingRequestContext:
 
 
 @pytest.mark.asyncio
-async def test_openai_rest_tts_cancel_synthesis_interrupts_active_request():
+async def test_openai_rest_tts_cancel_synthesis_preserves_caller_task():
     backend = OpenAIRestTTSBackend(
         TTSConfig(
             scheme="openai-rest",
@@ -273,5 +364,5 @@ async def test_openai_rest_tts_cancel_synthesis_interrupts_active_request():
     task = asyncio.create_task(consume())
     await asyncio.wait_for(request.started.wait(), timeout=0.5)
     assert backend.cancel_synthesis() == 1
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    await asyncio.wait_for(task, timeout=0.5)
+    assert not task.cancelled()

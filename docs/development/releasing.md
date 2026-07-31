@@ -30,6 +30,7 @@ Before starting the release process, ensure:
 
 - [ ] All planned features and bug fixes are merged to `main`
 - [ ] Tests pass (e.g. `pytest tests/` or `./scripts/pre_commit_check.sh` if configured)
+- [ ] Required P0/P1 rows in the [Manual Speech Release Test Plan](manual_speech_release_test.md) are complete, with session evidence
 - [ ] Code quality checks pass (Black, Ruff, etc.)
 - [ ] Documentation is up to date
 - [ ] CHANGELOG.md is updated with all changes since last release

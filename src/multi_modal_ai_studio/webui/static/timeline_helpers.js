@@ -56,6 +56,216 @@
         return false;
     }
 
+    // Reconstruct browser-style continuous playout for recordings created
+    // before client-timed TTS segments were persisted. Server timeline
+    // amplitudes carry generation/send timestamps, which can overlap or have
+    // large gaps even though WebAudio queued the PCM chunks continuously.
+    function rebuildTtsPlaybackSegments(timeline, ttlBands) {
+        if (!Array.isArray(timeline)) return [];
+        const groups = [];
+        let current = null;
+        timeline.forEach(function (event) {
+            if (!event) return;
+            if (event.event_type === 'tts_start') {
+                current = {
+                    start: Number(event.timestamp || 0),
+                    firstAudio: null,
+                    playbackStop: null,
+                    amplitudes: [],
+                };
+                groups.push(current);
+                return;
+            }
+            if (!current) return;
+            if (event.event_type === 'tts_first_audio' && current.firstAudio == null) {
+                current.firstAudio = Number(event.timestamp);
+                return;
+            }
+            if (
+                event.event_type === 'tts_playback_stopped'
+                && current.playbackStop == null
+            ) {
+                current.playbackStop = Number(event.timestamp);
+                return;
+            }
+            if (
+                event.event_type === 'audio_amplitude'
+                && (event.source === 'tts' || event.source === 'ai')
+            ) {
+                current.amplitudes.push(Number(event.amplitude || 0));
+            }
+        });
+
+        const bands = Array.isArray(ttlBands) ? ttlBands : [];
+        const windowSeconds = 0.025;
+        const segments = [];
+        groups.forEach(function (group, index) {
+            if (!group.amplitudes.length) return;
+            const nextStart = groups[index + 1] ? groups[index + 1].start : Infinity;
+            const matchingBand = bands.find(function (band) {
+                const end = Number(band && band.end);
+                return Number.isFinite(end) && end >= group.start && end < nextStart;
+            });
+            const bandStart = matchingBand ? Number(matchingBand.end) : NaN;
+            const playbackStart = Number.isFinite(bandStart)
+                ? bandStart
+                : group.firstAudio;
+            if (!Number.isFinite(playbackStart)) return;
+            group.amplitudes.forEach(function (amplitude, sampleIndex) {
+                const startTime = playbackStart + sampleIndex * windowSeconds;
+                if (
+                    Number.isFinite(group.playbackStop)
+                    && startTime >= group.playbackStop
+                ) {
+                    return;
+                }
+                segments.push({
+                    startTime: startTime,
+                    endTime: Number.isFinite(group.playbackStop)
+                        ? Math.min(startTime + windowSeconds, group.playbackStop)
+                        : startTime + windowSeconds,
+                    amplitude: amplitude,
+                });
+            });
+        });
+        return segments;
+    }
+
+    // Convert the server-relative session_start timestamp into the browser
+    // wall-clock origin used by live rendering and browser-generated events.
+    //
+    // The START button is clicked before the WebSocket connects and the
+    // server creates its Timeline. Keeping that click time as the origin
+    // makes server-timestamped microphone samples appear seconds in the past.
+    // Anchoring when session_start arrives keeps both clocks in one timebase.
+    function syncLiveSessionClock(receivedAt, eventTimestamp) {
+        const received = Number(receivedAt);
+        if (!Number.isFinite(received)) return 0;
+        const serverTime = Number(eventTimestamp);
+        return received - (
+            Number.isFinite(serverTime) && serverTime >= 0 ? serverTime : 0
+        );
+    }
+
+    // Collapse multiple telemetry samples that land on the same screen pixel,
+    // retaining the largest value so short GPU bursts remain visible.
+    function buildPeakPreservingPoints(samples, getX, getValue) {
+        if (!Array.isArray(samples)) return [];
+        const buckets = new Map();
+        samples.forEach(function (sample) {
+            const x = Number(getX(sample));
+            const rawValue = getValue(sample);
+            if (rawValue == null) return;
+            const value = Number(rawValue);
+            if (!Number.isFinite(x) || !Number.isFinite(value)) return;
+            const pixel = Math.floor(x);
+            const current = buckets.get(pixel);
+            if (!current || value > current.value) {
+                buckets.set(pixel, { x: x, value: value, sample: sample });
+            }
+        });
+        return Array.from(buckets.values()).sort(function (a, b) {
+            return a.x - b.x;
+        });
+    }
+
+    // VAD and speech events can be emitted as two aliases at the same
+    // timestamp. Treat them as one boundary so ASR turn indices do not shift.
+    function dedupeTimelineEventsByTimestamp(events, toleranceSeconds) {
+        const tolerance = Number.isFinite(Number(toleranceSeconds))
+            ? Math.max(0, Number(toleranceSeconds))
+            : 0.005;
+        const ordered = (Array.isArray(events) ? events : []).slice().sort(function (a, b) {
+            return Number(a.timestamp || 0) - Number(b.timestamp || 0);
+        });
+        return ordered.filter(function (event, index, all) {
+            if (index === 0) return true;
+            return Math.abs(
+                Number(event.timestamp || 0)
+                - Number(all[index - 1].timestamp || 0)
+            ) > tolerance;
+        });
+    }
+
+    // Pair point events into non-overlapping intervals.  Each end belongs to
+    // the closest preceding start and may not cross the following start.
+    function pairTimelineEvents(timeline, startType, endType) {
+        if (!Array.isArray(timeline)) return [];
+        const starts = timeline.filter(function (event) {
+            return event && event.event_type === startType
+                && Number.isFinite(Number(event.timestamp));
+        }).slice().sort(function (a, b) {
+            return Number(a.timestamp) - Number(b.timestamp);
+        });
+        const ends = timeline.filter(function (event) {
+            return event && event.event_type === endType
+                && Number.isFinite(Number(event.timestamp));
+        }).slice().sort(function (a, b) {
+            return Number(a.timestamp) - Number(b.timestamp);
+        });
+        const usedEnds = new Set();
+        const intervals = [];
+        starts.forEach(function (startEvent, index) {
+            const start = Number(startEvent.timestamp);
+            const nextStart = index + 1 < starts.length
+                ? Number(starts[index + 1].timestamp)
+                : Infinity;
+            const endIndex = ends.findIndex(function (endEvent, candidateIndex) {
+                if (usedEnds.has(candidateIndex)) return false;
+                const end = Number(endEvent.timestamp);
+                return end >= start && end < nextStart;
+            });
+            if (endIndex < 0) return;
+            usedEnds.add(endIndex);
+            const endEvent = ends[endIndex];
+            intervals.push({
+                start: start,
+                end: Number(endEvent.timestamp),
+                startEvent: startEvent,
+                endEvent: endEvent,
+            });
+        });
+        return intervals;
+    }
+
+    // Find the strongest observed GPU sample inside each explicit interval.
+    // The renderer gives these point-in-time peaks a minimum visual width;
+    // this helper intentionally does not widen the measured time window.
+    function buildIntervalPeakMarkers(samples, intervals, minimumValue) {
+        const threshold = Number.isFinite(Number(minimumValue))
+            ? Number(minimumValue)
+            : 5;
+        if (!Array.isArray(samples) || !Array.isArray(intervals)) return [];
+        return intervals.map(function (interval) {
+            const start = Number(interval.start);
+            const end = Number(interval.end);
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+                return null;
+            }
+            let peak = null;
+            samples.forEach(function (sample) {
+                const timestamp = Number(sample && sample.t);
+                const value = Number(sample && sample.gpu);
+                if (
+                    !Number.isFinite(timestamp)
+                    || !Number.isFinite(value)
+                    || timestamp < start
+                    || timestamp > end
+                ) return;
+                if (!peak || value > peak.value) {
+                    peak = {
+                        t: timestamp,
+                        value: value,
+                        sample: sample,
+                        start: start,
+                        end: end,
+                    };
+                }
+            });
+            return peak && peak.value >= threshold ? peak : null;
+        }).filter(Boolean);
+    }
+
     // Apply the speech timing state shared by the REST and Realtime paths.
     // Returns true when the caller should not process the event further.
     function applySpeechTimingEvent(state, evt) {
@@ -142,11 +352,113 @@
         }, []);
     }
 
+    // Split scheduled browser audio at the exact WebAudio stop point.  The
+    // played side remains the authoritative purple waveform; the discarded
+    // side is summarized as a hatched diagnostic region.
+    function splitAudioSegmentsAt(segments, cutoff) {
+        const stop = Number(cutoff);
+        const played = [];
+        const discarded = [];
+        if (!Array.isArray(segments) || !Number.isFinite(stop)) {
+            return {
+                played: Array.isArray(segments) ? segments.slice() : [],
+                discarded: [],
+                discardedEnd: null,
+            };
+        }
+        segments.forEach(function (segment) {
+            if (!segment) return;
+            const start = Number(
+                segment.startTime != null ? segment.startTime : segment.timestamp
+            );
+            const rawEnd = Number(
+                segment.endTime != null ? segment.endTime : start
+            );
+            if (!Number.isFinite(start) || !Number.isFinite(rawEnd)) return;
+            const end = Math.max(start, rawEnd);
+            if (start < stop) {
+                const before = Object.assign({}, segment, {
+                    startTime: start,
+                    endTime: Math.min(end, stop),
+                });
+                if (before.endTime > before.startTime) played.push(before);
+            }
+            if (end > stop) {
+                const after = Object.assign({}, segment, {
+                    startTime: Math.max(start, stop),
+                    endTime: end,
+                });
+                if (after.endTime > after.startTime) discarded.push(after);
+            }
+        });
+        const discardedEnd = discarded.length
+            ? Math.max.apply(null, discarded.map(function (segment) {
+                return Number(segment.endTime);
+            }))
+            : null;
+        return {
+            played: played,
+            discarded: discarded,
+            discardedEnd: discardedEnd,
+        };
+    }
+
+    // Pair each browser playback stop with the cancellation completion for the
+    // same response.  The next tts_start is a hard boundary so a missing
+    // completion cannot lend its wait interval to the following turn.
+    function buildBargeInWindows(timeline) {
+        if (!Array.isArray(timeline)) return [];
+        const ordered = timeline.slice().sort(function (a, b) {
+            return Number(a.timestamp || 0) - Number(b.timestamp || 0);
+        });
+        const stops = ordered.filter(function (event) {
+            return event && event.event_type === 'tts_playback_stopped'
+                && (!event.data || !event.data.reason || event.data.reason === 'barge_in');
+        });
+        return stops.map(function (stopEvent) {
+            const start = Number(stopEvent.timestamp);
+            const nextStart = ordered.find(function (event) {
+                return event.event_type === 'tts_start'
+                    && Number(event.timestamp) > start;
+            });
+            const limit = nextStart ? Number(nextStart.timestamp) : Infinity;
+            const cancelEvent = ordered.find(function (event) {
+                const timestamp = Number(event.timestamp);
+                if (!(timestamp >= start && timestamp < limit)) return false;
+                if (event.event_type === 'tts_cancelled') return true;
+                return event.event_type === 'tts_complete'
+                    && event.data && event.data.cancelled === true;
+            }) || null;
+            const data = stopEvent.data || {};
+            const discardedEnd = Number(data.discarded_audio_end);
+            return {
+                stopEvent: stopEvent,
+                start: start,
+                cancelEnd: cancelEvent ? Number(cancelEvent.timestamp) : null,
+                cancelEvent: cancelEvent,
+                nextTtsStart: Number.isFinite(limit) ? limit : null,
+                discardedEnd: Number.isFinite(discardedEnd) && discardedEnd > start
+                    ? Math.min(discardedEnd, limit)
+                    : null,
+            };
+        }).filter(function (window) {
+            return Number.isFinite(window.start);
+        });
+    }
+
     return {
         applySpeechTimingEvent: applySpeechTimingEvent,
+        buildBargeInWindows: buildBargeInWindows,
+        buildIntervalPeakMarkers: buildIntervalPeakMarkers,
+        buildPeakPreservingPoints: buildPeakPreservingPoints,
         buildTtsSegmentsFromTimeline: buildTtsSegmentsFromTimeline,
         closeTtlBandAt: closeTtlBandAt,
+        dedupeTimelineEventsByTimestamp: dedupeTimelineEventsByTimestamp,
         hasDenseTtsAmplitudeTimeline: hasDenseTtsAmplitudeTimeline,
+        pairTimelineEvents: pairTimelineEvents,
+        rebuildTtsPlaybackSegments: rebuildTtsPlaybackSegments,
+        syncLiveSessionClock: syncLiveSessionClock,
+        splitAudioSegmentsAt: splitAudioSegmentsAt,
         truncateAudioSegmentsAt: truncateAudioSegmentsAt,
     };
 }));

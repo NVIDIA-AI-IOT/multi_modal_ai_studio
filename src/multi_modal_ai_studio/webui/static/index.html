@@ -232,11 +232,17 @@
                 <div class="timeline-header">
                     <h3>Timeline</h3>
                     <div class="timeline-legend" aria-label="Timeline color legend">
-                        <span class="legend-item" data-timeline-legend="asr" title="ASR transcript activity">
-                            <span class="legend-color legend-color-asr" aria-hidden="true"></span>ASR
+                        <span class="legend-item" data-timeline-legend="speech-vad" title="Energy VAD detected user speech">
+                            <span class="legend-color legend-color-speech-vad" aria-hidden="true"></span>Speech / VAD
                         </span>
-                        <span class="legend-item" data-timeline-legend="vad" title="Voice activity detection">
-                            <span class="legend-color legend-color-vad" aria-hidden="true"></span>VAD
+                        <span class="legend-item" data-timeline-legend="endpoint-wait" title="Waiting for the configured silence duration">
+                            <span class="legend-color legend-color-endpoint-wait" aria-hidden="true"></span>Endpoint Wait
+                        </span>
+                        <span class="legend-item" data-timeline-legend="asr-request" title="ASR REST request: audio upload through response receipt">
+                            <span class="legend-color legend-color-asr-request" aria-hidden="true"></span>ASR Request
+                        </span>
+                        <span class="legend-item" data-timeline-legend="gpu-peak" title="Peak GPU utilization observed during an ASR request">
+                            <span class="legend-gpu-peak" aria-hidden="true"></span>GPU Peak
                         </span>
                         <span class="legend-item" data-timeline-legend="llm-prefill" title="LLM prefill: request start to first token">
                             <span class="legend-color legend-color-llm-prefill" aria-hidden="true"></span>LLM Prefill
@@ -252,6 +258,9 @@
                         </span>
                         <span class="legend-item" data-timeline-legend="ai-audio" title="AI speech waveform">
                             <span class="legend-waveform legend-waveform-ai" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>AI
+                        </span>
+                        <span class="legend-item" data-timeline-legend="barge-in" title="Barge-in: browser or server speaker playback stopped">
+                            <span class="legend-barge-in" aria-hidden="true"><i></i></span>Barge-in
                         </span>
                     </div>
                     <div class="timeline-controls">
@@ -277,6 +286,7 @@
                 </div>
                 <div class="timeline-content" id="timeline-content">
                     <canvas id="timeline-canvas"></canvas>
+                    <div class="timeline-event-tooltip" id="timeline-event-tooltip" role="tooltip" hidden></div>
                 </div>
                 <div class="timeline-scroll-bar" id="timeline-scroll-bar" style="display: none;">
                     <div class="timeline-scroll-track" id="timeline-scroll-track">
@@ -469,8 +479,8 @@
         </div>
     </div>
 
-    <script src="timeline_helpers.js?v=20260728-barge-in-2"></script>
-    <script src="config_helpers.js?v=20260728-barge-in-2"></script>
-    <script src="app.js?v=20260728-barge-in-2"></script>
+    <script src="timeline_helpers.js?v=20260730-live-clock-sync-1"></script>
+    <script src="config_helpers.js?v=20260730-tts-model-metadata-1"></script>
+    <script src="app.js?v=20260730-tts-model-metadata-1"></script>
 </body>
 </html>

@@ -8,11 +8,76 @@ const test = require('node:test');
 
 const {
     applySpeechTimingEvent,
+    buildBargeInWindows,
+    buildIntervalPeakMarkers,
+    buildPeakPreservingPoints,
     buildTtsSegmentsFromTimeline,
     closeTtlBandAt,
+    dedupeTimelineEventsByTimestamp,
     hasDenseTtsAmplitudeTimeline,
+    pairTimelineEvents,
+    rebuildTtsPlaybackSegments,
+    splitAudioSegmentsAt,
+    syncLiveSessionClock,
     truncateAudioSegmentsAt,
 } = require('../../src/multi_modal_ai_studio/webui/static/timeline_helpers.js');
+
+test('ASR request starts and ends pair without crossing the next request', () => {
+    const intervals = pairTimelineEvents([
+        { event_type: 'asr_inference_end', timestamp: 5.3 },
+        { event_type: 'asr_inference_start', timestamp: 2.0 },
+        { event_type: 'asr_inference_start', timestamp: 5.0 },
+        { event_type: 'asr_inference_end', timestamp: 2.2 },
+    ], 'asr_inference_start', 'asr_inference_end');
+
+    assert.deepEqual(intervals.map(interval => [interval.start, interval.end]), [
+        [2.0, 2.2],
+        [5.0, 5.3],
+    ]);
+});
+
+test('ASR GPU marker selects only the strongest sample inside each request', () => {
+    const markers = buildIntervalPeakMarkers([
+        { t: 1.9, gpu: 99 },
+        { t: 2.02, gpu: 41 },
+        { t: 2.08, gpu: 96 },
+        { t: 2.2, gpu: 88 },
+        { t: 5.1, gpu: 3 },
+    ], [
+        { start: 2.0, end: 2.1 },
+        { start: 5.0, end: 5.2 },
+    ], 5);
+
+    assert.equal(markers.length, 1);
+    assert.equal(markers[0].t, 2.08);
+    assert.equal(markers[0].value, 96);
+});
+
+test('GPU plotting retains the peak when samples share a screen pixel', () => {
+    const points = buildPeakPreservingPoints(
+        [
+            { t: 1.00, gpu: 0 },
+            { t: 1.01, gpu: 73 },
+            { t: 1.02, gpu: 12 },
+            { t: 1.20, gpu: 4 },
+        ],
+        sample => sample.t * 10,
+        sample => sample.gpu,
+    );
+
+    assert.deepEqual(points.map(point => point.value), [73, 4]);
+});
+
+test('ASR boundary aliases at the same timestamp count as one turn boundary', () => {
+    const boundaries = dedupeTimelineEventsByTimestamp([
+        { event_type: 'vad_end', timestamp: 2.5 },
+        { event_type: 'user_speech_end', timestamp: 2.5 },
+        { event_type: 'vad_end', timestamp: 8.0 },
+        { event_type: 'user_speech_end', timestamp: 8.002 },
+    ]);
+
+    assert.deepEqual(boundaries.map(event => event.timestamp), [2.5, 8.0]);
+});
 
 test('coarse TTS replay starts at first audio and stays within each turn', () => {
     const segments = buildTtsSegmentsFromTimeline([
@@ -51,6 +116,39 @@ test('dense TTS amplitude requires adjacent samples at 100 ms or less', () => {
     assert.equal(hasDenseTtsAmplitudeTimeline([sample(1), sample(1.025)]), true);
     assert.equal(hasDenseTtsAmplitudeTimeline([sample(1), sample(1.2)]), false);
     assert.equal(hasDenseTtsAmplitudeTimeline([sample(1, 'user'), sample(1.025, 'user')]), false);
+});
+
+test('legacy generated TTS envelopes are rebuilt as continuous browser playout', () => {
+    const segments = rebuildTtsPlaybackSegments([
+        { event_type: 'tts_start', timestamp: 10 },
+        { event_type: 'tts_first_audio', timestamp: 12 },
+        { event_type: 'audio_amplitude', source: 'tts', timestamp: 11.6, amplitude: 4 },
+        { event_type: 'audio_amplitude', source: 'tts', timestamp: 11.625, amplitude: 8 },
+        // The next generated chunk overlaps in server time, but follows the
+        // first chunk in WebAudio playout order.
+        { event_type: 'audio_amplitude', source: 'tts', timestamp: 11.5, amplitude: 12 },
+        { event_type: 'tts_playback_stopped', timestamp: 12.29 },
+        { event_type: 'tts_start', timestamp: 20 },
+        { event_type: 'tts_first_audio', timestamp: 21 },
+        { event_type: 'audio_amplitude', source: 'tts', timestamp: 20.7, amplitude: 16 },
+    ], [
+        { start: 9, end: 12.25 },
+        { start: 19, end: 21.5 },
+    ]);
+
+    assert.deepEqual(segments.map(segment => segment.amplitude), [4, 8, 16]);
+    assert.ok(Math.abs(segments[0].startTime - 12.25) < 1e-9);
+    assert.ok(Math.abs(segments[1].startTime - 12.275) < 1e-9);
+    assert.ok(Math.abs(segments[1].endTime - 12.29) < 1e-9);
+    assert.ok(Math.abs(segments[2].startTime - 21.5) < 1e-9);
+});
+
+test('live session clock replaces pre-connect click time with server timeline origin', () => {
+    // START was clicked at wall-clock 1000.0, but session_start(timestamp=0)
+    // arrived two seconds later. The live origin must become 1002.0 so a
+    // server amplitude at t=12 renders at wall-clock 1014, not 1012.
+    assert.equal(syncLiveSessionClock(1002, 0), 1002);
+    assert.equal(syncLiveSessionClock(1002.125, 0.125), 1002);
 });
 
 test('VAD start and end drive the REST ASR turn and TTL state', () => {
@@ -114,6 +212,50 @@ test('barge-in truncates scheduled AI audio at the actual stop time', () => {
         { startTime: 4, endTime: 5, amplitude: 10 },
         { startTime: 5, endTime: 6.25, amplitude: 20 },
     ]);
+});
+
+test('barge-in preserves discarded scheduled audio as a separate diagnostic region', () => {
+    const result = splitAudioSegmentsAt([
+        { startTime: 4, endTime: 5, amplitude: 10 },
+        { startTime: 5, endTime: 7, amplitude: 20 },
+        { startTime: 7, endTime: 8, amplitude: 30 },
+    ], 6.25);
+
+    assert.deepEqual(result.played, [
+        { startTime: 4, endTime: 5, amplitude: 10 },
+        { startTime: 5, endTime: 6.25, amplitude: 20 },
+    ]);
+    assert.deepEqual(result.discarded, [
+        { startTime: 6.25, endTime: 7, amplitude: 20 },
+        { startTime: 7, endTime: 8, amplitude: 30 },
+    ]);
+    assert.equal(result.discardedEnd, 8);
+});
+
+test('barge-in windows stop at cancellation and never borrow the next turn', () => {
+    const windows = buildBargeInWindows([
+        { event_type: 'tts_start', timestamp: 2 },
+        {
+            event_type: 'tts_playback_stopped',
+            timestamp: 4,
+            data: { reason: 'barge_in', discarded_audio_end: 5.5 },
+        },
+        { event_type: 'tts_cancelled', timestamp: 4.8 },
+        { event_type: 'tts_start', timestamp: 8 },
+        {
+            event_type: 'tts_playback_stopped',
+            timestamp: 9,
+            data: { reason: 'barge_in', discarded_audio_end: 11 },
+        },
+        { event_type: 'tts_start', timestamp: 10 },
+        { event_type: 'tts_cancelled', timestamp: 10.5 },
+    ]);
+
+    assert.equal(windows.length, 2);
+    assert.equal(windows[0].cancelEnd, 4.8);
+    assert.equal(windows[0].discardedEnd, 5.5);
+    assert.equal(windows[1].cancelEnd, null);
+    assert.equal(windows[1].discardedEnd, 10);
 });
 
 test('old TTS audio cannot close the new user turn TTL band', () => {

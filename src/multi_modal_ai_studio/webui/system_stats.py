@@ -3,9 +3,10 @@
 """
 CPU/GPU stats for timeline system lane.
 
-The voice pipeline calls gather_system_stats() at 10 Hz during a live session,
-sends each sample over the voice WebSocket (type=system_stats), and appends to
-session.system_stats for save. No HTTP polling; client renders from WS messages.
+The voice pipeline consumes a persistent nvidia-smi stream at 20 Hz during a
+live session, sends each sample over the voice WebSocket (type=system_stats),
+and appends to session.system_stats for save. No HTTP polling; client renders
+from WS messages.
 """
 
 import subprocess
@@ -18,10 +19,45 @@ try:
 except ImportError:
     psutil = None
 
-# Cache updated by voice pipeline at 10 Hz; API returns this when fresh to avoid duplicate gather.
+# Cache updated by voice pipeline at 20 Hz; API returns this when fresh to avoid duplicate gather.
 _cache: Dict[str, Any] = {}
 _cache_time: float = 0.0
 _nvidia_smi_gpu_supported: Optional[bool] = None
+GPU_SAMPLE_INTERVAL_MS = 50
+
+
+def nvidia_smi_loop_command(interval_ms: int = GPU_SAMPLE_INTERVAL_MS) -> list[str]:
+    """Build the persistent GPU-utilization stream command."""
+    interval = max(20, int(interval_ms))
+    return [
+        "nvidia-smi",
+        "--query-gpu=utilization.gpu",
+        "--format=csv,noheader,nounits",
+        f"--loop-ms={interval}",
+    ]
+
+
+def parse_nvidia_smi_gpu_percent(value: Any) -> Optional[float]:
+    """Parse one nvidia-smi utilization line."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    text = str(value or "").strip()
+    raw = text.splitlines()[0].replace("%", "").strip() if text else ""
+    try:
+        percent = float(raw)
+    except ValueError:
+        return None
+    return percent if 0.0 <= percent <= 100.0 else None
+
+
+def read_cpu_percent_nonblocking() -> Optional[float]:
+    """Return CPU utilization without delaying the 20 Hz GPU sampler."""
+    if psutil is None:
+        return None
+    try:
+        return round(psutil.cpu_percent(interval=None), 1)
+    except Exception:
+        return None
 
 
 def _read_nvidia_smi_gpu_percent() -> Optional[float]:
@@ -42,14 +78,9 @@ def _read_nvidia_smi_gpu_percent() -> Optional[float]:
     if out.returncode != 0 or not out.stdout.strip():
         _nvidia_smi_gpu_supported = False
         return None
-    val = out.stdout.strip().split("\n")[0].strip().replace("%", "").strip()
-    try:
-        percent = float(val)
-    except ValueError:
+    percent = parse_nvidia_smi_gpu_percent(out.stdout)
+    if percent is None:
         # Jetson's nvidia-smi can exit successfully while returning "[N/A]".
-        _nvidia_smi_gpu_supported = False
-        return None
-    if not 0.0 <= percent <= 100.0:
         _nvidia_smi_gpu_supported = False
         return None
     _nvidia_smi_gpu_supported = True
@@ -72,7 +103,7 @@ def _read_jetson_sysfs_gpu_percent() -> Optional[float]:
 
 
 def set_system_stats_cache(stats: Dict[str, Any]) -> None:
-    """Update the shared cache (call from voice pipeline after each gather at 10 Hz)."""
+    """Update the shared cache after each live telemetry sample."""
     global _cache, _cache_time
     _cache = dict(stats)
     _cache_time = time.time()

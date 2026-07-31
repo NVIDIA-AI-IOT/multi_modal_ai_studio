@@ -9,6 +9,10 @@ Multi-modal AI Studio uses a tiered testing strategy:
 - **Tier 3 (pre-release):** Optional integration tests with live backends (e.g. `scripts/test_integration.py`, `scripts/test_backends.py`) – run manually before releases.
 - **Tier 4 (performance):** Optional latency/throughput tests if added later.
 
+Real microphone, speaker, barge-in, browser permission, and USB-device coverage
+is defined in the
+[Manual Speech Release Test Plan](manual_speech_release_test.md).
+
 ## Test Layout
 
 | Directory | Purpose | Requires |
@@ -60,6 +64,10 @@ These require no external services and run in CI.
 ## Integration and Manual Scripts
 
 Existing scripts under `scripts/` (e.g. `test_backends.py`, `test_integration.py`) remain for manual runs and pre-release checks. They are not part of the default `pytest` run. You can later move or duplicate some of them into `tests/integration/` and mark them with `@pytest.mark.integration` if you want them in the test suite with an option to exclude.
+
+For release candidates, run the manual speech matrix after these scripts and
+attach the session JSON filenames or other evidence to the PR or qualification
+record.
 
 ## CI
 

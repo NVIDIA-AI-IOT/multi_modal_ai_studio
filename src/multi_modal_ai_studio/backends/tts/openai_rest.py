@@ -4,6 +4,7 @@
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 from urllib.parse import urljoin
 
@@ -23,6 +24,20 @@ logger = logging.getLogger(__name__)
 # The local Magpie endpoint buffers a complete do_tts() call before returning
 # HTTP audio. Keep requests bounded even when LLM-to-TTS streaming is disabled.
 MAX_REST_TTS_CHARS = 50
+
+
+@dataclass
+class _RequestDone:
+    """Terminal message from an isolated REST request worker."""
+
+    cancelled: bool = False
+
+
+@dataclass
+class _RequestFailure:
+    """Propagate a request worker failure without cancelling its caller."""
+
+    error: Exception
 
 
 class _PCM16FrameAligner:
@@ -58,18 +73,94 @@ class OpenAIRestTTSBackend(TTSBackend):
         self._active_tasks = set()
 
     def cancel_synthesis(self) -> int:
-        """Cancel active REST synthesis tasks immediately."""
-        caller = asyncio.current_task()
+        """Cancel active HTTP workers without cancelling the turn executor."""
         active = [
             task
             for task in self._active_tasks
-            if not task.done() and task is not caller
+            if not task.done()
         ]
         for task in active:
             task.cancel()
         if active:
             logger.info("Cancelled %d active REST TTS request(s)", len(active))
         return len(active)
+
+    async def _produce_request_audio(
+        self,
+        *,
+        url: str,
+        request: dict,
+        headers: dict,
+        text_index: int,
+        total_text_chunks: int,
+        is_last_text: bool,
+        output: asyncio.Queue,
+    ) -> None:
+        """Run one HTTP request in an isolated, cancellable worker task."""
+        try:
+            async with self._session.post(
+                url,
+                json=request,
+                headers=headers,
+            ) as response:
+                if response.status >= 400:
+                    body = await response.text()
+                    raise ConnectionError(
+                        f"TTS request failed ({response.status}): {body[:300]}"
+                    )
+                pending = None
+                aligner = _PCM16FrameAligner()
+                async for audio in response.content.iter_chunked(16384):
+                    audio = aligner.feed(audio)
+                    if not audio:
+                        continue
+                    if pending is not None:
+                        output.put_nowait(
+                            TTSChunk(
+                                audio=pending,
+                                sample_rate=self.config.sample_rate,
+                                is_final=False,
+                                metadata={
+                                    "text_chunk_index": text_index,
+                                    "total_text_chunks": total_text_chunks,
+                                },
+                            )
+                        )
+                    pending = audio
+                trailing = aligner.finish()
+                if trailing:
+                    logger.warning(
+                        "OpenAI-compatible TTS returned %d trailing byte(s) "
+                        "outside a complete PCM16 frame; dropping them",
+                        len(trailing),
+                    )
+                if pending:
+                    output.put_nowait(
+                        TTSChunk(
+                            audio=pending,
+                            sample_rate=self.config.sample_rate,
+                            is_final=is_last_text,
+                            metadata={
+                                "text_chunk_index": text_index,
+                                "total_text_chunks": total_text_chunks,
+                            },
+                        )
+                    )
+        except asyncio.CancelledError:
+            output.put_nowait(_RequestDone(cancelled=True))
+            raise
+        except aiohttp.ClientError as exc:
+            output.put_nowait(
+                _RequestFailure(
+                    ConnectionError(
+                        f"OpenAI-compatible TTS request failed: {exc}"
+                    )
+                )
+            )
+        except Exception as exc:
+            output.put_nowait(_RequestFailure(exc))
+        else:
+            output.put_nowait(_RequestDone())
 
     async def synthesize_stream(self, text: str) -> AsyncIterator[TTSChunk]:
         """Generate an utterance and yield response chunks as PCM."""
@@ -83,73 +174,53 @@ class OpenAIRestTTSBackend(TTSBackend):
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         url = urljoin(self.config.api_base.rstrip("/") + "/", "audio/speech")
         text_chunks = split_tts_text(text, MAX_REST_TTS_CHARS)
-        current_task = asyncio.current_task()
-        if current_task is not None:
-            self._active_tasks.add(current_task)
 
-        try:
-            for text_index, text_chunk in enumerate(text_chunks):
-                request = {
-                    "model": self.config.model or "tts-1",
-                    "input": text_chunk,
-                    "voice": self.config.voice,
-                    "response_format": "pcm",
-                    "speed": self.config.speed,
-                }
-                if (self.config.model or "").startswith("nvidia/"):
-                    request["language"] = (
-                        self.config.language or "en"
-                    ).split("-")[0].lower()
-                is_last_text = text_index == len(text_chunks) - 1
-                async with self._session.post(
-                    url,
-                    json=request,
+        for text_index, text_chunk in enumerate(text_chunks):
+            request = {
+                "model": self.config.model or "tts-1",
+                "input": text_chunk,
+                "voice": self.config.voice,
+                "response_format": "pcm",
+                "speed": self.config.speed,
+            }
+            if (self.config.model or "").startswith("nvidia/"):
+                request["language"] = (
+                    self.config.language or "en"
+                ).split("-")[0].lower()
+            output: asyncio.Queue = asyncio.Queue()
+            worker = asyncio.create_task(
+                self._produce_request_audio(
+                    url=url,
+                    request=request,
                     headers=headers,
-                ) as response:
-                    if response.status >= 400:
-                        body = await response.text()
-                        raise ConnectionError(
-                            f"TTS request failed ({response.status}): {body[:300]}"
-                        )
-                    pending = None
-                    aligner = _PCM16FrameAligner()
-                    async for audio in response.content.iter_chunked(16384):
-                        audio = aligner.feed(audio)
-                        if not audio:
-                            continue
-                        if pending is not None:
-                            yield TTSChunk(
-                                audio=pending,
-                                sample_rate=self.config.sample_rate,
-                                is_final=False,
-                                metadata={
-                                    "text_chunk_index": text_index,
-                                    "total_text_chunks": len(text_chunks),
-                                },
-                            )
-                        pending = audio
-                    trailing = aligner.finish()
-                    if trailing:
-                        logger.warning(
-                            "OpenAI-compatible TTS returned %d trailing byte(s) "
-                            "outside a complete PCM16 frame; dropping them",
-                            len(trailing),
-                        )
-                    if pending:
-                        yield TTSChunk(
-                            audio=pending,
-                            sample_rate=self.config.sample_rate,
-                            is_final=is_last_text,
-                            metadata={
-                                "text_chunk_index": text_index,
-                                "total_text_chunks": len(text_chunks),
-                            },
-                        )
-        except aiohttp.ClientError as exc:
-            raise ConnectionError(f"OpenAI-compatible TTS request failed: {exc}") from exc
-        finally:
-            if current_task is not None:
-                self._active_tasks.discard(current_task)
+                    text_index=text_index,
+                    total_text_chunks=len(text_chunks),
+                    is_last_text=text_index == len(text_chunks) - 1,
+                    output=output,
+                )
+            )
+            self._active_tasks.add(worker)
+            cancelled = False
+            try:
+                while True:
+                    message = await output.get()
+                    if isinstance(message, TTSChunk):
+                        yield message
+                    elif isinstance(message, _RequestFailure):
+                        raise message.error
+                    elif isinstance(message, _RequestDone):
+                        cancelled = message.cancelled
+                        break
+            finally:
+                if not worker.done():
+                    worker.cancel()
+                try:
+                    await worker
+                except asyncio.CancelledError:
+                    pass
+                self._active_tasks.discard(worker)
+            if cancelled:
+                return
 
     async def close(self) -> None:
         """Close the reusable HTTP connection pool."""

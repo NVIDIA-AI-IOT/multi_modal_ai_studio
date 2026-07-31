@@ -279,10 +279,18 @@ class OpenAIRestASRBackend(ASRBackend):
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         url = urljoin(self.config.api_base.rstrip("/") + "/", "audio/transcriptions")
+        audio_ms = len(pcm) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0
+        request_started_monotonic = time.monotonic()
+        inference_start_time = (
+            max(0.0, time.time() - self.timeline.start_time)
+            if self.timeline is not None
+            and self.timeline.start_time is not None
+            else None
+        )
         logger.info(
             "[OpenAI REST ASR] POST %s (%.0fms PCM)",
             url,
-            len(pcm) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0,
+            audio_ms,
         )
         try:
             async with session.post(url, data=form, headers=headers) as response:
@@ -290,6 +298,23 @@ class OpenAIRestASRBackend(ASRBackend):
                 if response.status >= 400:
                     raise ConnectionError(f"ASR request failed ({response.status}): {body[:300]}")
                 payload = await response.json()
+            inference_end_time = (
+                max(0.0, time.time() - self.timeline.start_time)
+                if self.timeline is not None
+                and self.timeline.start_time is not None
+                else None
+            )
+            inference_duration_ms = (
+                time.monotonic() - request_started_monotonic
+            ) * 1000.0
+            result_metadata = {
+                "backend": "openai-rest",
+                "model": self.config.model,
+                "inference_start_time": inference_start_time,
+                "inference_end_time": inference_end_time,
+                "inference_duration_ms": inference_duration_ms,
+                "audio_duration_ms": audio_ms,
+            }
             text = str(payload.get("text", "")).strip()
             if text:
                 logger.info("[OpenAI REST ASR] Transcript: %r", text[:120])
@@ -299,12 +324,30 @@ class OpenAIRestASRBackend(ASRBackend):
                         is_final=True,
                         start_time=start_time,
                         end_time=end_time,
-                        metadata={"backend": "openai-rest", "model": self.config.model},
+                        metadata=result_metadata,
                     )
                 )
             else:
                 logger.warning("[OpenAI REST ASR] Endpoint returned an empty transcript")
+                # Preserve request timing even when the endpoint returns no
+                # text so the Timeline can still show the real ASR work.
+                await results.put(
+                    ASRResult(
+                        text="",
+                        is_final=True,
+                        confidence=0.0,
+                        start_time=start_time,
+                        end_time=end_time,
+                        metadata=result_metadata,
+                    )
+                )
         except Exception as exc:
+            inference_end_time = (
+                max(0.0, time.time() - self.timeline.start_time)
+                if self.timeline is not None
+                and self.timeline.start_time is not None
+                else None
+            )
             logger.exception("OpenAI-compatible ASR request failed")
             await results.put(
                 ASRResult(
@@ -313,7 +356,17 @@ class OpenAIRestASRBackend(ASRBackend):
                     confidence=0.0,
                     start_time=start_time,
                     end_time=end_time,
-                    metadata={"error": str(exc), "backend": "openai-rest"},
+                    metadata={
+                        "error": str(exc),
+                        "backend": "openai-rest",
+                        "model": self.config.model,
+                        "inference_start_time": inference_start_time,
+                        "inference_end_time": inference_end_time,
+                        "inference_duration_ms": (
+                            time.monotonic() - request_started_monotonic
+                        ) * 1000.0,
+                        "audio_duration_ms": audio_ms,
+                    },
                 )
             )
 

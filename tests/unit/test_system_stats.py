@@ -38,6 +38,31 @@ def test_nvidia_smi_numeric_utilization_is_used_and_cached(monkeypatch):
     assert calls[0][1]["timeout"] == 2
 
 
+def test_nvidia_smi_loop_uses_50ms_stream_and_parses_samples():
+    assert system_stats.nvidia_smi_loop_command() == [
+        "nvidia-smi",
+        "--query-gpu=utilization.gpu",
+        "--format=csv,noheader,nounits",
+        "--loop-ms=50",
+    ]
+    assert system_stats.parse_nvidia_smi_gpu_percent(b"37\n") == 37.0
+    assert system_stats.parse_nvidia_smi_gpu_percent("12 %") == 12.0
+    assert system_stats.parse_nvidia_smi_gpu_percent("[N/A]") is None
+    assert system_stats.parse_nvidia_smi_gpu_percent("101") is None
+
+
+def test_cpu_sampler_is_nonblocking(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        system_stats,
+        "psutil",
+        SimpleNamespace(cpu_percent=lambda interval: calls.append(interval) or 12.34),
+    )
+
+    assert system_stats.read_cpu_percent_nonblocking() == 12.3
+    assert calls == [None]
+
+
 @pytest.mark.parametrize(
     "result",
     [
