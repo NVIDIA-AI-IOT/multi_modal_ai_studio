@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+
+name: "Qwen3-TTS 0.6B TensorRT Edge-LLM"
+description: "Nemotron ASR + Qwen3 4B + Qwen3-TTS FP16 on Jetson Thor"
+app_version: "0.1.0"
+
+asr:
+  scheme: openai-rest
+  api_base: http://localhost:8081/v1
+  model: nvidia/nemotron-3.5-asr-streaming-0.6b
+  language: en-US
+  vad_start_threshold: 0.4
+  vad_stop_threshold: 0.3
+  speech_pad_ms: 500
+  speech_timeout_ms: 700
+
+llm:
+  scheme: openai
+  api_base: http://localhost:8000/v1
+  model: Qwen/Qwen3-4B-Instruct-2507
+  temperature: 0.3
+  max_tokens: 256
+  history_turns: 3
+  include_conversation_history: true
+  extra_request_body: '{"chat_template_kwargs": {"enable_thinking": false}}'
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Answer briefly in English.
+    Plain text only, no markdown, no bullet points, no emojis.
+  enable_vision: false
+
+tts:
+  scheme: openai-rest
+  api_base: http://localhost:8083/v1
+  model: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+  language: en-US
+  voice: ono_anna
+  sample_rate: 24000
+  speed: 1.0
+  response_format: pcm
+  stream_tts: true
+  tts_chunk_words: 12
+
+devices:
+  video_source: none
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  timeline_position: right
+  session_auto_save: true
+  session_output_dir: ./sessions

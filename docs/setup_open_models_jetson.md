@@ -19,6 +19,19 @@ microphone
 The checkpoints are public. Each stage is an independent OpenAI-compatible
 service, so it can be started, measured, replaced, and debugged separately.
 
+The following independently reproducible alternatives use the same API
+boundaries and can replace one stage at a time:
+
+| Stage | Path | Thor status | Current recommendation |
+|---|---|---|---|
+| ASR | [Nemotron 3.5 ASR with parakeet.cpp GGUF](setup_parakeet_nemotron_gguf.md) | f16, q8_0, and q4_k measured; OpenAI Transcriptions smoke passed | q4_k for the smallest artifact and fastest load in the fixed test |
+| TTS | [faster-qwen3-tts](setup_faster_qwen3_tts.md) | BF16 baseline, CUDA Graph, and source-built GGML Q8_0 measured; OpenAI Speech smoke passed | source-built Q8_0 for the measured English-first low-latency path |
+| TTS | [Qwen3-TTS with TensorRT Edge-LLM](setup_qwen3_tts_edgellm.md) | Thor C++ runtime built; official x86 FP16 ONNX export and target engine/inference measurements pending | evaluation path until the full FP16 artifact flow is qualified |
+
+The detailed pages pin upstream revisions, keep generated models outside Git,
+record English and Japanese quality checks, and distinguish measured Jetson
+results from Orin Nano 8 GB estimates.
+
 “Open” here means publicly downloadable model weights and source-based local
 inference, with no Riva/EA application or service credential. Checkpoint terms
 still apply: Nemotron 3.5 ASR uses Open Model Development Watch License 1.1,
