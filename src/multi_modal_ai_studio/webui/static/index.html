@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260731-tts-preview-1">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -259,6 +259,12 @@
                         <span class="legend-item" data-timeline-legend="barge-in" title="Barge-in: browser or server speaker playback stopped">
                             <span class="legend-barge-in" aria-hidden="true"><i></i></span>Barge-in
                         </span>
+                        <span class="legend-item" data-timeline-legend="discarded-audio" title="AI audio that was already scheduled but not played after Barge-in" hidden>
+                            <span class="legend-color legend-color-discarded-audio" aria-hidden="true"></span>Discarded audio
+                        </span>
+                        <span class="legend-item" data-timeline-legend="tts-cancelling" title="Time from playback stop until TTS backend cancellation completed" hidden>
+                            <span class="legend-color legend-color-tts-cancelling" aria-hidden="true"></span>TTS cancelling
+                        </span>
                     </div>
                     <div class="timeline-controls">
                         <span class="timeline-gain-label" title="UI-only amplification for waveform">User:</span>
@@ -478,6 +484,6 @@
 
     <script src="timeline_helpers.js?v=20260730-timing-gaps-1"></script>
     <script src="config_helpers.js?v=20260730-tts-model-metadata-1"></script>
-    <script src="app.js?v=20260730-timing-gaps-1"></script>
+    <script src="app.js?v=20260731-tts-preview-1"></script>
 </body>
 </html>
