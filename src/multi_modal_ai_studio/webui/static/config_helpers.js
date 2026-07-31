@@ -31,7 +31,34 @@
         return true;
     }
 
+    /**
+     * Return the model identifier used for pipeline/session metadata.
+     *
+     * Voice and model are separate concepts. Older clients selected
+     * riva_model_name -> voice -> model for every backend, which caused a REST
+     * Magpie session to be recorded as model "Sofia". Prefer the REST model,
+     * while retaining Riva's discovered model-name behavior.
+     */
+    function getTtsModelName(config) {
+        if (!config) return null;
+        const tts = config.tts || config;
+        const topLevelName = config.tts ? config.tts_model_name : null;
+        const isRiva = tts.backend === 'riva' || tts.scheme === 'riva';
+        if (isRiva) {
+            return topLevelName
+                || tts.riva_model_name
+                || tts.model
+                || tts.voice
+                || null;
+        }
+        return tts.model
+            || topLevelName
+            || tts.voice
+            || null;
+    }
+
     return {
+        getTtsModelName,
         matchesRivaDiscovery,
     };
 }));

@@ -19,10 +19,12 @@
     --timeline-ai: #9C27B0;            /* AI/System - Purple */
     --timeline-vad: #64B5F6;           /* VAD - Light Blue */
     --timeline-asr: #1976D2;           /* ASR/Speech - Dark Blue */
+    --timeline-asr-request: #0D47A1;   /* REST ASR request - Deep Blue */
     --timeline-tts: #EC407A;           /* TTS - Pink/Magenta */
     --timeline-llm-prefill: #FF9800;   /* LLM Prefill - Orange */
     --timeline-llm-generate: #FFB74D;  /* LLM Generate - Light Orange */
     --timeline-ttl: #FFEB3B;           /* TTL - Yellow */
+    --timeline-barge-in: #EF4444;      /* Barge-in playback stop - Red */
 
     /* Semantic aliases for timeline lanes (Live RIVA WebUI style) */
     --timeline-system: #9C27B0;        /* System lane - Purple */
@@ -448,9 +450,7 @@ code, pre {
 
 .session-item {
     position: relative;
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-xs);
+    display: block;
     padding: var(--space-md);
     margin-bottom: var(--space-sm);
     background: var(--bg-primary);
@@ -460,10 +460,32 @@ code, pre {
     transition: all var(--transition-base);
 }
 
+.session-item-thumbnail {
+    width: 72px;
+    height: 48px;
+    flex: 0 0 72px;
+    align-self: flex-end;
+    object-fit: cover;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+}
+
 .session-item-body {
-    flex: 1;
     min-width: 0;
     cursor: pointer;
+}
+
+.session-item-lower {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.session-item-details {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .session-item:hover {
@@ -483,9 +505,10 @@ code, pre {
 }
 
 .session-item-menu-btn {
-    flex-shrink: 0;
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
     padding: var(--space-xs);
-    margin: calc(-1 * var(--space-xs)) 0 0;
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
@@ -561,11 +584,13 @@ code, pre {
     font-weight: 600;
     color: var(--text-primary);
     margin-bottom: var(--space-xs);
+    padding-right: calc(16px + var(--space-md));
 }
 
 .session-item-meta {
     display: flex;
-    gap: var(--space-md);
+    justify-content: space-between;
+    gap: var(--space-sm);
     font-size: 0.75rem;
     color: var(--text-tertiary);
     margin-bottom: var(--space-sm);
@@ -1798,6 +1823,87 @@ code, pre {
 }
 .chat-panel:not(.chat-panel--config-collapsed) .chat-panel-right-col .voice-debug-panel {
     flex-shrink: 0;
+}
+
+/*
+ * A stopped or historical session only has one saved still image. Keep that
+ * image as a compact reference beside the conversation instead of letting it
+ * occupy the live video's 16:9 stage.
+ */
+.chat-panel.chat-panel--recorded-review {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-columns: 176px minmax(0, 1fr);
+    gap: var(--space-sm);
+    overflow: hidden;
+}
+
+.chat-panel.chat-panel--recorded-review .session-meta-container {
+    grid-row: 1;
+    grid-column: 1 / -1;
+}
+
+.chat-panel.chat-panel--recorded-review .pipeline-config-container {
+    grid-row: 2;
+    grid-column: 1 / -1;
+}
+
+.chat-panel.chat-panel--recorded-review .chat-panel-main-wrap {
+    grid-row: 3;
+    grid-column: 1;
+    display: flex;
+    align-items: flex-start;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.chat-panel.chat-panel--recorded-review .chat-panel-right-col {
+    grid-row: 3;
+    grid-column: 2;
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.chat-panel.chat-panel--recorded-review .chat-panel-right-col .chat-history {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.chat-panel.chat-panel--recorded-review .chat-panel-main-wrap .session-image-container {
+    width: 160px;
+    height: 90px;
+    min-height: 90px;
+    max-height: 90px !important;
+    aspect-ratio: 16 / 9;
+    flex: 0 0 90px !important;
+    margin: 0;
+    border-radius: var(--radius-md);
+}
+
+.chat-panel.chat-panel--recorded-review .session-preview-image {
+    object-fit: cover;
+}
+
+.chat-panel.chat-panel--recorded-review .fullscreen-controls,
+.chat-panel.chat-panel--recorded-review .session-control-overlay,
+.chat-panel.chat-panel--recorded-review .mic-preview-strip {
+    display: none !important;
+}
+
+.chat-panel.chat-panel--recorded-review:not(.chat-panel--recorded-review-has-thumbnail) {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.chat-panel.chat-panel--recorded-review:not(.chat-panel--recorded-review-has-thumbnail) .chat-panel-main-wrap {
+    display: none;
+}
+
+.chat-panel.chat-panel--recorded-review:not(.chat-panel--recorded-review-has-thumbnail) .chat-panel-right-col {
+    grid-column: 1;
 }
 
 /* Pipeline config: transparent grid, device slots + connected pipeline bar */
@@ -3067,6 +3173,26 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     display: block;
 }
 
+.timeline-event-tooltip {
+    position: absolute;
+    z-index: 12;
+    max-width: 320px;
+    padding: 7px 9px;
+    border: 1px solid rgba(239, 68, 68, 0.75);
+    border-radius: 6px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    font-size: 0.68rem;
+    line-height: 1.45;
+    white-space: normal;
+    pointer-events: none;
+}
+
+.timeline-event-tooltip strong {
+    color: var(--timeline-barge-in);
+}
+
 .timeline-gain-label {
     font-size: 0.65rem;
     color: var(--text-tertiary);
@@ -3221,12 +3347,43 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-.legend-color-asr {
-    background: var(--timeline-asr);
+.legend-color-speech-vad {
+    background-color: var(--timeline-asr);
+    background-image: repeating-linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0.34) 0,
+        rgba(255, 255, 255, 0.34) 2px,
+        transparent 2px,
+        transparent 5px
+    );
 }
 
-.legend-color-vad {
+.legend-color-endpoint-wait {
     background: var(--timeline-vad);
+}
+
+.legend-color-asr-request {
+    background: var(--timeline-asr-request);
+}
+
+.legend-gpu-peak {
+    position: relative;
+    display: inline-block;
+    width: 11px;
+    height: 13px;
+    flex: 0 0 11px;
+}
+
+.legend-gpu-peak::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 1px;
+    background: var(--nvidia-green);
+    box-shadow: 0 0 0 1px rgba(118, 185, 0, 0.2);
 }
 
 .legend-color-llm-prefill {
@@ -3278,6 +3435,35 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 
 .legend-waveform-ai {
     color: var(--timeline-ai);
+}
+
+.legend-barge-in {
+    position: relative;
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    flex: 0 0 13px;
+}
+
+.legend-barge-in::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 1px;
+    bottom: 0;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--timeline-barge-in);
+}
+
+.legend-barge-in i {
+    position: absolute;
+    left: 3px;
+    top: 0;
+    width: 8px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--timeline-barge-in);
 }
 
 #timelineCanvas {

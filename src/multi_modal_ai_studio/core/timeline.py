@@ -498,6 +498,8 @@ class EventType:
     USER_SPEECH_END = "user_speech_end"      # VAD detected silence (KEY for TTL!)
     ASR_PARTIAL = "asr_partial"
     ASR_FINAL = "asr_final"
+    ASR_INFERENCE_START = "asr_inference_start"
+    ASR_INFERENCE_END = "asr_inference_end"
     
     # LLM events
     LLM_START = "llm_start"
@@ -512,4 +514,8 @@ class EventType:
     TTS_COMPLETE = "tts_complete"
     
     # Barge-in events
-    BARGE_IN = "barge_in"  # User interrupted AI
+    BARGE_IN = "barge_in"  # Legacy: user interrupted AI
+    BARGE_IN_TRIGGERED = "barge_in_triggered"
+    TTS_CANCEL_REQUESTED = "tts_cancel_requested"
+    TTS_PLAYBACK_STOPPED = "tts_playback_stopped"
+    TTS_CANCELLED = "tts_cancelled"

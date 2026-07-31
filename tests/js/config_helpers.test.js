@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+    getTtsModelName,
     matchesRivaDiscovery,
 } = require('../../src/multi_modal_ai_studio/webui/static/config_helpers.js');
 
@@ -44,4 +45,37 @@ test('conflicting backend and scheme fail closed', () => {
     };
 
     assert.equal(matchesRivaDiscovery(config, 'localhost:50051'), false);
+});
+
+test('REST TTS pipeline metadata uses model instead of voice', () => {
+    const config = {
+        tts_model_name: 'Sofia',
+        tts: {
+            scheme: 'openai-rest',
+            model: 'nvidia/magpie_tts_multilingual_357m',
+            voice: 'Sofia',
+            riva_model_name: 'Sofia',
+        },
+    };
+
+    assert.equal(
+        getTtsModelName(config),
+        'nvidia/magpie_tts_multilingual_357m',
+    );
+});
+
+test('Riva TTS pipeline metadata retains discovered model name', () => {
+    const config = {
+        tts_model_name: 'magpie_tts_ensemble-Magpie-Multilingual',
+        tts: {
+            scheme: 'riva',
+            riva_model_name: 'magpie_tts_ensemble-Magpie-Multilingual',
+            voice: 'Magpie-Multilingual.EN-US.Sofia',
+        },
+    };
+
+    assert.equal(
+        getTtsModelName(config),
+        'magpie_tts_ensemble-Magpie-Multilingual',
+    );
 });
