@@ -260,6 +260,152 @@
         });
     }
 
+    // REST ASR can submit an utterance that later returns an empty transcript.
+    // Such an orphan request must not be drawn as though it belonged to the
+    // following successful speech turn. Match each final only to the closest
+    // completed request since the preceding final.
+    function matchAsrRequestIntervalsToFinals(intervals, finals) {
+        if (!Array.isArray(intervals) || !Array.isArray(finals)) return [];
+        const orderedIntervals = intervals.slice().sort(function (a, b) {
+            return Number(a.start) - Number(b.start);
+        });
+        const orderedFinals = finals.slice().sort(function (a, b) {
+            return Number(a.timestamp) - Number(b.timestamp);
+        });
+        const used = new Set();
+        return orderedFinals.map(function (finalEvent, finalIndex) {
+            const finalTime = Number(finalEvent && finalEvent.timestamp);
+            const previousFinalTime = finalIndex > 0
+                ? Number(orderedFinals[finalIndex - 1].timestamp)
+                : -Infinity;
+            if (!Number.isFinite(finalTime)) return null;
+            let matchIndex = -1;
+            orderedIntervals.forEach(function (interval, intervalIndex) {
+                if (used.has(intervalIndex)) return;
+                const start = Number(interval && interval.start);
+                const end = Number(interval && interval.end);
+                if (
+                    Number.isFinite(start)
+                    && Number.isFinite(end)
+                    && start > previousFinalTime
+                    && end <= finalTime + 0.01
+                ) {
+                    matchIndex = intervalIndex;
+                }
+            });
+            if (matchIndex < 0) return null;
+            used.add(matchIndex);
+            return orderedIntervals[matchIndex];
+        }).filter(Boolean);
+    }
+
+    // Do not interpolate utilization across missing telemetry. A gap is
+    // unknown data, not a gradual decay from the previous value.
+    function splitPointsAtTimeGaps(points, maxGapSeconds) {
+        if (!Array.isArray(points) || points.length === 0) return [];
+        const maximumGap = Number.isFinite(Number(maxGapSeconds))
+            ? Math.max(0, Number(maxGapSeconds))
+            : 0.2;
+        const runs = [];
+        let current = [];
+        points.forEach(function (point) {
+            const timestamp = Number(point && point.t);
+            const previous = current.length
+                ? Number(current[current.length - 1].t)
+                : null;
+            if (
+                current.length
+                && Number.isFinite(timestamp)
+                && Number.isFinite(previous)
+                && timestamp - previous > maximumGap
+            ) {
+                runs.push(current);
+                current = [];
+            }
+            current.push(point);
+        });
+        if (current.length) runs.push(current);
+        return runs;
+    }
+
+    // The browser-observed playback segment is the authoritative TTFA point.
+    // Server first-byte timestamps can differ slightly because the browser and
+    // server session clocks are synchronized after the WebSocket is created.
+    function resolveTtsFirstAudioTimes(starts, firstAudios, playbackSegments) {
+        const orderedStarts = (Array.isArray(starts) ? starts : []).slice().sort(function (a, b) {
+            return Number(a.timestamp) - Number(b.timestamp);
+        });
+        const orderedFirstAudios = (Array.isArray(firstAudios) ? firstAudios : []).slice().sort(function (a, b) {
+            return Number(a.timestamp) - Number(b.timestamp);
+        });
+        const segments = (Array.isArray(playbackSegments) ? playbackSegments : []).slice().sort(function (a, b) {
+            return Number(a.startTime) - Number(b.startTime);
+        });
+        if (!orderedStarts.length) {
+            return orderedFirstAudios.map(function (event) {
+                return Number(event.timestamp);
+            }).filter(Number.isFinite);
+        }
+        return orderedStarts.map(function (startEvent, index) {
+            const start = Number(startEvent.timestamp);
+            const nextStart = index + 1 < orderedStarts.length
+                ? Number(orderedStarts[index + 1].timestamp)
+                : Infinity;
+            const observed = segments.find(function (segment) {
+                const timestamp = Number(segment && segment.startTime);
+                return Number.isFinite(timestamp)
+                    && timestamp >= start
+                    && timestamp < nextStart;
+            });
+            if (observed) return Number(observed.startTime);
+            const serverEvent = orderedFirstAudios.find(function (event) {
+                const timestamp = Number(event && event.timestamp);
+                return Number.isFinite(timestamp)
+                    && timestamp >= start
+                    && timestamp < nextStart;
+            });
+            return serverEvent ? Number(serverEvent.timestamp) : null;
+        }).filter(Number.isFinite);
+    }
+
+    // Find the strongest observed GPU sample inside each explicit interval.
+    // The renderer gives these point-in-time peaks a minimum visual width;
+    // this helper intentionally does not widen the measured time window.
+    function buildIntervalPeakMarkers(samples, intervals, minimumValue) {
+        const threshold = Number.isFinite(Number(minimumValue))
+            ? Number(minimumValue)
+            : 5;
+        if (!Array.isArray(samples) || !Array.isArray(intervals)) return [];
+        return intervals.map(function (interval) {
+            const start = Number(interval.start);
+            const end = Number(interval.end);
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+                return null;
+            }
+            let peak = null;
+            samples.forEach(function (sample) {
+                const timestamp = Number(sample && sample.t);
+                const value = Number(sample && sample.gpu);
+                if (
+                    !Number.isFinite(timestamp)
+                    || !Number.isFinite(value)
+                    || timestamp < start
+                    || timestamp > end
+                ) return;
+                if (!peak || value > peak.value) {
+                    peak = {
+                        t: timestamp,
+                        value: value,
+                        sample: sample,
+                        start: start,
+                        end: end,
+                    };
+                }
+            });
+            return peak && peak.value >= threshold ? peak : null;
+        }).filter(Boolean);
+    }
+
     // Keep the ASR legend truthful across fundamentally different transports.
     // REST has one observable request per utterance; Realtime and Riva keep a
     // stream open and expose transcript updates instead.
@@ -516,15 +662,19 @@
     return {
         applySpeechTimingEvent: applySpeechTimingEvent,
         buildBargeInWindows: buildBargeInWindows,
+        buildIntervalPeakMarkers: buildIntervalPeakMarkers,
         buildPeakPreservingPoints: buildPeakPreservingPoints,
         buildTtsSegmentsFromTimeline: buildTtsSegmentsFromTimeline,
         closeTtlBandAt: closeTtlBandAt,
         dedupeTimelineEventsByTimestamp: dedupeTimelineEventsByTimestamp,
         getAsrLegendSpec: getAsrLegendSpec,
         hasDenseTtsAmplitudeTimeline: hasDenseTtsAmplitudeTimeline,
+        matchAsrRequestIntervalsToFinals: matchAsrRequestIntervalsToFinals,
         pairTimelineEvents: pairTimelineEvents,
         rebuildTtsPlaybackSegments: rebuildTtsPlaybackSegments,
         selectFirstPlaybackTimes: selectFirstPlaybackTimes,
+        resolveTtsFirstAudioTimes: resolveTtsFirstAudioTimes,
+        splitPointsAtTimeGaps: splitPointsAtTimeGaps,
         syncLiveSessionClock: syncLiveSessionClock,
         splitAudioSegmentsAt: splitAudioSegmentsAt,
         truncateAudioSegmentsAt: truncateAudioSegmentsAt,

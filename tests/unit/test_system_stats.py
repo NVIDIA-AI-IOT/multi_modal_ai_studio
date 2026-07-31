@@ -63,6 +63,16 @@ def test_cpu_sampler_is_nonblocking(monkeypatch):
     assert calls == [None]
 
 
+def test_stream_sample_cadence_rejects_buffered_bursts():
+    interval = 0.05
+
+    assert system_stats.stream_sample_is_due(10.0, 0.0, interval)
+    assert not system_stats.stream_sample_is_due(10.001, 10.0, interval)
+    assert not system_stats.stream_sample_is_due(10.039, 10.0, interval)
+    assert system_stats.stream_sample_is_due(10.041, 10.0, interval)
+    assert system_stats.stream_sample_is_due(10.05, 10.0, interval)
+
+
 @pytest.mark.parametrize(
     "result",
     [
@@ -170,3 +180,22 @@ def test_gather_system_stats_prefers_nvidia_smi(monkeypatch):
         "cpu_percent": None,
         "gpu_percent": 41.0,
     }
+
+
+def test_stream_failure_retries_nvidia_smi_when_thor_has_no_sysfs_load(
+    monkeypatch,
+):
+    system_stats._nvidia_smi_gpu_supported = False
+    monkeypatch.setattr(
+        system_stats,
+        "_read_jetson_sysfs_gpu_percent",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        system_stats,
+        "_read_nvidia_smi_gpu_percent",
+        lambda: 28.0,
+    )
+
+    assert system_stats.read_gpu_percent_after_stream_failure() == 28.0
+    assert system_stats._nvidia_smi_gpu_supported is None

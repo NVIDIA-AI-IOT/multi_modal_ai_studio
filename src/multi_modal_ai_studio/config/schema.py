@@ -496,7 +496,10 @@ class SessionConfig:
             else:
                 devices_data['video_source'] = cam if cam in ('browser', 'none') else 'browser'
             devices_data.setdefault('video_device_name', devices_data.pop('camera_name', None))
-        if 'microphone' in devices_data and 'audio_input_source' not in devices_data:
+        # Prefer microphone over audio_input_* when both are present. The WebUI
+        # may retain preset defaults such as audio_input_source=browser while
+        # the user has selected a Server USB microphone.
+        if 'microphone' in devices_data:
             mic = devices_data.pop('microphone', 'browser')
             if mic and mic.startswith('alsa:'):
                 devices_data['audio_input_source'] = 'alsa'

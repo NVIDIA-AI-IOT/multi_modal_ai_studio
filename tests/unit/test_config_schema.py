@@ -93,3 +93,20 @@ def test_server_audio_device_config_round_trip(source):
 
     assert restored.devices == config.devices
     assert restored.app == config.app
+
+
+def test_microphone_selector_overrides_stale_browser_input_fields():
+    config = SessionConfig.from_dict(
+        {
+            "devices": {
+                "microphone": "alsa:hw:2,0",
+                "microphone_name": "PowerConf (Server USB)",
+                "audio_input_source": "browser",
+                "audio_input_device": None,
+            }
+        }
+    )
+
+    assert config.devices.audio_input_source == "alsa"
+    assert config.devices.audio_input_device == "hw:2,0"
+    assert config.devices.audio_input_device_name == "PowerConf (Server USB)"
