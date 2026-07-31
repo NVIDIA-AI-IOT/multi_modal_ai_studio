@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from aiohttp import web
@@ -178,6 +178,62 @@ async def _wait_for_task_or_barge_in(
                 await waiter
             except asyncio.CancelledError:
                 pass
+
+
+async def _record_cancelled_tts_events(
+    session: Session,
+    send_event: Callable[[Dict[str, Any]], Awaitable[None]],
+    *,
+    timestamp: float,
+    cancel_requested_at: Optional[float],
+) -> None:
+    """Close a started TTS lifecycle after barge-in.
+
+    Streamed TTS can be cancelled while the LLM is still generating, before
+    execution reaches the normal TTS completion block.  Both paths must emit
+    the same terminal events so saved sessions do not contain an open-ended
+    TTS interval.
+    """
+    turn_id = (
+        session._current_turn.get("turn_id")
+        if session._current_turn
+        else len(session.turns) + 1
+    )
+    cancel_data: Dict[str, Any] = {
+        "reason": "barge_in",
+        "turn_id": turn_id,
+    }
+    if cancel_requested_at is not None:
+        cancel_data["cancel_latency_ms"] = max(
+            0,
+            round((timestamp - cancel_requested_at) * 1000),
+        )
+    session.timeline.add_event(
+        "tts_cancelled",
+        Lane.TTS,
+        data=cancel_data,
+        timestamp=timestamp,
+    )
+    await send_event({
+        "event_type": "tts_cancelled",
+        "lane": "tts",
+        "data": cancel_data,
+        "timestamp": timestamp,
+    })
+
+    complete_data = {"cancelled": True, "reason": "barge_in"}
+    session.timeline.add_event(
+        "tts_complete",
+        Lane.TTS,
+        data=complete_data,
+        timestamp=timestamp,
+    )
+    await send_event({
+        "event_type": "tts_complete",
+        "lane": "tts",
+        "data": complete_data,
+        "timestamp": timestamp,
+    })
 
 
 def _format_llm_error_for_user(exc: Exception) -> str:
@@ -2536,6 +2592,14 @@ async def _run_voice_pipeline(
                                 pass
                     if server_speaker_proc is not None:
                         stop_server_speaker_playback(server_speaker_proc)
+                    if tts_started:
+                        await _record_cancelled_tts_events(
+                            session,
+                            send_event,
+                            timestamp=ts_abort,
+                            cancel_requested_at=barge_in_cancel_requested_at,
+                        )
+                        barge_in_cancel_requested_at = None
                     barge_in.finish_tts()
                     session.end_turn()
                     continue
@@ -2674,41 +2738,21 @@ async def _run_voice_pipeline(
                             tts_interrupted = True
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                     logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs, cancelled=%s)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0, tts_interrupted)
-                    complete_data = {"cancelled": True, "reason": "barge_in"} if tts_interrupted else {}
                     if tts_interrupted:
-                        cancel_data = {
-                            "reason": "barge_in",
-                            "turn_id": (
-                                session._current_turn.get("turn_id")
-                                if session._current_turn
-                                else len(session.turns) + 1
-                            ),
-                        }
-                        if barge_in_cancel_requested_at is not None:
-                            cancel_data["cancel_latency_ms"] = max(
-                                0,
-                                round(
-                                    (
-                                        ts_tts_complete
-                                        - barge_in_cancel_requested_at
-                                    )
-                                    * 1000
-                                ),
-                            )
-                        session.timeline.add_event(
-                            "tts_cancelled",
-                            Lane.TTS,
-                            data=cancel_data,
+                        await _record_cancelled_tts_events(
+                            session,
+                            send_event,
                             timestamp=ts_tts_complete,
+                            cancel_requested_at=barge_in_cancel_requested_at,
                         )
+                    else:
+                        session.timeline.add_event("tts_complete", Lane.TTS)
                         await send_event({
-                            "event_type": "tts_cancelled",
+                            "event_type": "tts_complete",
                             "lane": "tts",
-                            "data": cancel_data,
+                            "data": {},
                             "timestamp": ts_tts_complete,
                         })
-                    session.timeline.add_event("tts_complete", Lane.TTS, data=complete_data)
-                    await send_event({"event_type": "tts_complete", "lane": "tts", "data": complete_data, "timestamp": ts_tts_complete})
                 except Exception as e:
                     logger.exception("TTS error: %s", e)
                 finally:
