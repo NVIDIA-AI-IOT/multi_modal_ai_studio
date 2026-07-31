@@ -55,7 +55,7 @@ from multi_modal_ai_studio.config.schema import (
     TTSConfig,
 )
 from multi_modal_ai_studio import __version__
-from multi_modal_ai_studio.core.session import Session
+from multi_modal_ai_studio.core.session import Session, validate_session_thumbnail
 from multi_modal_ai_studio.core.timeline import Lane
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
@@ -334,8 +334,26 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             tts["api_base"] = tts.pop("openai_url")
         if "riva_server" in tts and "server" not in tts:
             tts["server"] = tts.pop("riva_server")
-        if data.get("tts_model_name") and "riva_model_name" not in tts:
-            tts["riva_model_name"] = data["tts_model_name"]
+        if tts.get("scheme") == "riva":
+            if data.get("tts_model_name") and "riva_model_name" not in tts:
+                tts["riva_model_name"] = data["tts_model_name"]
+            data["tts_model_name"] = (
+                tts.get("riva_model_name")
+                or data.get("tts_model_name")
+                or tts.get("model")
+                or tts.get("voice")
+            )
+        else:
+            # REST/Realtime model and voice are separate. Old clients sent the
+            # voice as tts_model_name and the normalizer then copied it into
+            # riva_model_name. Remove that stale Riva-only metadata and record
+            # the actual model whenever it is available.
+            tts.pop("riva_model_name", None)
+            data["tts_model_name"] = (
+                tts.get("model")
+                or data.get("tts_model_name")
+                or tts.get("voice")
+            )
         data["tts"] = tts
     if "llm" in data:
         llm = dict(data["llm"])
@@ -789,6 +807,7 @@ async def _run_realtime_loop(
                                     setattr(session, attr, val)
                             if getattr(session, "ttl_bands", None):
                                 session.apply_ttl_bands()
+                            session.thumbnail = validate_session_thumbnail(obj.get("thumbnail"))
                             session.app_version = __version__
                             stopped.set()
                             return
@@ -1174,6 +1193,7 @@ async def _run_voice_pipeline(
         trigger=getattr(config.app, "barge_in_trigger", "final"),
         partial_count=getattr(config.app, "barge_in_partial_count", 3),
     )
+    barge_in_cancel_requested_at: Optional[float] = None
 
     logger.info(
         "Voice pipeline devices: audio_input_source=%s audio_input_device=%s use_server_mic=%s",
@@ -1495,9 +1515,43 @@ async def _run_voice_pipeline(
                             if isinstance(ttl_bands, list):
                                 session.ttl_bands = ttl_bands
                                 session.apply_ttl_bands()  # single source of truth: metrics from bands (first audio_amplitude tts)
+                            session.thumbnail = validate_session_thumbnail(obj.get("thumbnail"))
                             session.app_version = __version__
                             stopped.set()
                             return
+                        if obj.get("type") == "client_timeline_event":
+                            event = obj.get("event")
+                            if isinstance(event, dict) and event.get("event_type") == "tts_playback_stopped":
+                                try:
+                                    event_ts = float(event.get("timestamp"))
+                                except (TypeError, ValueError):
+                                    event_ts = -1.0
+                                if event_ts >= 0.0:
+                                    raw_data = event.get("data")
+                                    event_data = dict(raw_data) if isinstance(raw_data, dict) else {}
+                                    # Keep this diagnostic event compact and
+                                    # bounded; the waveform itself is already
+                                    # represented by timeline amplitude data.
+                                    event_data = {
+                                        key: event_data[key]
+                                        for key in (
+                                            "reason",
+                                            "trigger",
+                                            "trigger_timestamp",
+                                            "turn_id",
+                                            "discarded_audio_end",
+                                            "discarded_audio_ms",
+                                            "sources_stopped",
+                                            "playback",
+                                        )
+                                        if key in event_data
+                                    }
+                                    session.timeline.add_event(
+                                        "tts_playback_stopped",
+                                        Lane.AUDIO,
+                                        data=event_data,
+                                        timestamp=event_ts,
+                                    )
                         # VLM: handle multi-frame response from browser
                         if obj.get("type") == "vlm_frames":
                             frames = obj.get("frames", [])
@@ -1560,11 +1614,13 @@ async def _run_voice_pipeline(
 
         Auto-restart: if Riva's gRPC stream dies (idle timeout, server-side limit, or bus contention)
         and the pipeline has not been stopped, the stream is restarted with exponential backoff."""
+        nonlocal barge_in_cancel_requested_at
         last_asr_final_text: Optional[str] = None
         last_asr_final_ts: Optional[float] = None
         last_partial_text: Optional[str] = None
         last_partial_ts: Optional[float] = None
         asr_received_count = 0
+        emitted_inference_windows: set[tuple[float, float]] = set()
         _MAX_ASR_RESTARTS = 10
         _asr_restart_count = 0
         try:
@@ -1574,6 +1630,55 @@ async def _run_voice_pipeline(
                     break
                 if result is None:
                     break
+
+                result_metadata = getattr(result, "metadata", {}) or {}
+                inference_start = result_metadata.get(
+                    "inference_start_time"
+                )
+                inference_end = result_metadata.get("inference_end_time")
+                try:
+                    inference_start = float(inference_start)
+                    inference_end = float(inference_end)
+                except (TypeError, ValueError):
+                    inference_start = None
+                    inference_end = None
+                if (
+                    inference_start is not None
+                    and inference_end is not None
+                    and inference_end >= inference_start
+                ):
+                    inference_key = (
+                        round(inference_start, 6),
+                        round(inference_end, 6),
+                    )
+                    if inference_key not in emitted_inference_windows:
+                        emitted_inference_windows.add(inference_key)
+                        inference_data = {
+                            "backend": result_metadata.get("backend"),
+                            "model": result_metadata.get("model"),
+                            "duration_ms": result_metadata.get(
+                                "inference_duration_ms"
+                            ),
+                            "audio_duration_ms": result_metadata.get(
+                                "audio_duration_ms"
+                            ),
+                        }
+                        for event_type, event_ts in (
+                            ("asr_inference_start", inference_start),
+                            ("asr_inference_end", inference_end),
+                        ):
+                            session.timeline.add_event(
+                                event_type,
+                                Lane.SPEECH,
+                                data=inference_data,
+                                timestamp=event_ts,
+                            )
+                            await send_event({
+                                "event_type": event_type,
+                                "lane": "speech",
+                                "data": inference_data,
+                                "timestamp": event_ts,
+                            })
 
                 asr_error = _asr_result_error_message(result)
                 if asr_error:
@@ -1586,7 +1691,7 @@ async def _run_voice_pipeline(
                     error_data = {
                         "message": asr_error,
                         "stage": "asr",
-                        "backend": (getattr(result, "metadata", {}) or {}).get("backend"),
+                        "backend": result_metadata.get("backend"),
                     }
                     session.timeline.add_event(
                         "error",
@@ -1612,7 +1717,7 @@ async def _run_voice_pipeline(
                     continue
 
                 now_ts = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                ts = (getattr(result, "metadata", {}) or {}).get("event_timestamp")
+                ts = result_metadata.get("event_timestamp")
                 if ts is None:
                     ts = now_ts
                 ev_type = "asr_partial" if not is_final else "asr_final"
@@ -1673,7 +1778,11 @@ async def _run_voice_pipeline(
                         continue
 
                 interruption_was_requested = barge_in.requested.is_set()
-                if barge_in.observe_asr(is_final=is_final, text=text):
+                interruption_active = barge_in.observe_asr(
+                    is_final=is_final,
+                    text=text,
+                )
+                if interruption_active:
                     logger.info(
                         "[barge_in] Backend interruption requested by %s ASR",
                         "final" if is_final else "partial",
@@ -1682,6 +1791,55 @@ async def _run_voice_pipeline(
                     not interruption_was_requested
                     and barge_in.requested.is_set()
                 ):
+                    if interruption_active:
+                        trigger_name = (
+                            "final_transcript" if is_final else "partial_transcript"
+                        )
+                        turn_id = (
+                            session._current_turn.get("turn_id")
+                            if session._current_turn
+                            else len(session.turns) + 1
+                        )
+                        trigger_data = {
+                            "trigger": trigger_name,
+                            "text": text,
+                            "turn_id": turn_id,
+                        }
+                        session.timeline.add_event(
+                            "barge_in_triggered",
+                            Lane.SYSTEM,
+                            data=trigger_data,
+                            timestamp=ts,
+                        )
+                        await send_event({
+                            "event_type": "barge_in_triggered",
+                            "lane": "system",
+                            "data": trigger_data,
+                            "timestamp": ts,
+                        })
+                        cancel_ts = (
+                            time.time() - session.timeline.start_time
+                            if session.timeline.start_time
+                            else ts
+                        )
+                        barge_in_cancel_requested_at = cancel_ts
+                        cancel_data = {
+                            "reason": "barge_in",
+                            "trigger": trigger_name,
+                            "turn_id": turn_id,
+                        }
+                        session.timeline.add_event(
+                            "tts_cancel_requested",
+                            Lane.TTS,
+                            data=cancel_data,
+                            timestamp=cancel_ts,
+                        )
+                        await send_event({
+                            "event_type": "tts_cancel_requested",
+                            "lane": "tts",
+                            "data": cancel_data,
+                            "timestamp": cancel_ts,
+                        })
                     cancel_synthesis = getattr(tts, "cancel_synthesis", None)
                     if callable(cancel_synthesis):
                         cancelled_rpcs = cancel_synthesis()
@@ -1821,7 +1979,7 @@ async def _run_voice_pipeline(
     async def turn_executor() -> None:
         """Process ASR finals one at a time: LLM -> TTS. Waits on finals_queue (fed by asr_consumer).
         Future: can be cancelled when new final arrives for barge-in."""
-        nonlocal speech_start_time
+        nonlocal speech_start_time, barge_in_cancel_requested_at
         turn_index = 0
         max_history = getattr(llm_config, "history_turns", 3)
         conversation_history: list = []
@@ -2399,6 +2557,38 @@ async def _run_voice_pipeline(
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                     logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs, cancelled=%s)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0, tts_interrupted)
                     complete_data = {"cancelled": True, "reason": "barge_in"} if tts_interrupted else {}
+                    if tts_interrupted:
+                        cancel_data = {
+                            "reason": "barge_in",
+                            "turn_id": (
+                                session._current_turn.get("turn_id")
+                                if session._current_turn
+                                else len(session.turns) + 1
+                            ),
+                        }
+                        if barge_in_cancel_requested_at is not None:
+                            cancel_data["cancel_latency_ms"] = max(
+                                0,
+                                round(
+                                    (
+                                        ts_tts_complete
+                                        - barge_in_cancel_requested_at
+                                    )
+                                    * 1000
+                                ),
+                            )
+                        session.timeline.add_event(
+                            "tts_cancelled",
+                            Lane.TTS,
+                            data=cancel_data,
+                            timestamp=ts_tts_complete,
+                        )
+                        await send_event({
+                            "event_type": "tts_cancelled",
+                            "lane": "tts",
+                            "data": cancel_data,
+                            "timestamp": ts_tts_complete,
+                        })
                     session.timeline.add_event("tts_complete", Lane.TTS, data=complete_data)
                     await send_event({"event_type": "tts_complete", "lane": "tts", "data": complete_data, "timestamp": ts_tts_complete})
                 except Exception as e:
@@ -2411,8 +2601,36 @@ async def _run_voice_pipeline(
                         except (asyncio.CancelledError, Exception):
                             pass
                     if server_speaker_proc is not None:
+                        playback_stop_ts = (
+                            time.time() - session.timeline.start_time
+                            if session.timeline.start_time
+                            else 0
+                        )
                         stop_server_speaker_playback(server_speaker_proc)
+                        if tts_interrupted:
+                            playback_data = {
+                                "reason": "barge_in",
+                                "playback": "server",
+                                "turn_id": (
+                                    session._current_turn.get("turn_id")
+                                    if session._current_turn
+                                    else len(session.turns) + 1
+                                ),
+                            }
+                            session.timeline.add_event(
+                                "tts_playback_stopped",
+                                Lane.AUDIO,
+                                data=playback_data,
+                                timestamp=playback_stop_ts,
+                            )
+                            await send_event({
+                                "event_type": "tts_playback_stopped",
+                                "lane": "audio",
+                                "data": playback_data,
+                                "timestamp": playback_stop_ts,
+                            })
                     barge_in.finish_tts()
+                    barge_in_cancel_requested_at = None
 
                 if tts_interrupted:
                     logger.info("[barge_in] TTS stopped; processing queued utterance")
@@ -2532,33 +2750,78 @@ async def _run_voice_pipeline(
     system_stats_task: Optional[asyncio.Task] = None
 
     async def _system_stats_loop() -> None:
-        """Send CPU/GPU at 10 Hz over WebSocket and append to session.system_stats for save."""
+        """Send peak-friendly CPU/GPU samples at 20 Hz."""
         loop = asyncio.get_event_loop()
-        interval = 0.1
-        while not stopped.is_set():
-            try:
-                await asyncio.sleep(interval)
-            except asyncio.CancelledError:
-                break
-            if stopped.is_set():
-                break
-            if session.timeline.start_time is None:
-                continue
-            try:
-                stats = await loop.run_in_executor(None, system_stats_module.gather_system_stats)
-            except Exception as e:
-                logger.debug("System stats gather failed: %s", e)
-                continue
+        interval = system_stats_module.GPU_SAMPLE_INTERVAL_MS / 1000.0
+
+        async def emit_sample(cpu: Optional[float], gpu: Optional[float]) -> None:
             t = time.time() - session.timeline.start_time
-            cpu = stats.get("cpu_percent")
-            gpu = stats.get("gpu_percent")
+            stats = {"cpu_percent": cpu, "gpu_percent": gpu}
+            system_stats_module.set_system_stats_cache(stats)
             session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
             try:
-                await ws.send_str(
-                    json.dumps({"type": "system_stats", "timestamp": t, "cpu_percent": cpu, "gpu_percent": gpu})
-                )
+                await ws.send_str(json.dumps({
+                    "type": "system_stats",
+                    "timestamp": t,
+                    "cpu_percent": cpu,
+                    "gpu_percent": gpu,
+                }))
             except Exception as e:
                 logger.debug("Send system_stats failed: %s", e)
+
+        process: Optional[asyncio.subprocess.Process] = None
+        stream_failed = False
+        try:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *system_stats_module.nvidia_smi_loop_command(),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                while not stopped.is_set():
+                    line = await asyncio.wait_for(
+                        process.stdout.readline(),
+                        timeout=max(0.5, interval * 4),
+                    )
+                    if not line:
+                        stream_failed = True
+                        break
+                    gpu = system_stats_module.parse_nvidia_smi_gpu_percent(line)
+                    if gpu is None:
+                        stream_failed = True
+                        break
+                    await emit_sample(
+                        system_stats_module.read_cpu_percent_nonblocking(),
+                        gpu,
+                    )
+            except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
+                logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
+                stream_failed = True
+        finally:
+            if process is not None and process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+
+        # Older Jetsons may report N/A through nvidia-smi while exposing the
+        # nvgpu devfreq load counter. Keep the same 20 Hz cadence without
+        # launching a subprocess for every sample.
+        if stream_failed and not stopped.is_set():
+            next_sample = loop.time()
+            while not stopped.is_set():
+                gpu = await loop.run_in_executor(
+                    None,
+                    system_stats_module._read_jetson_sysfs_gpu_percent,
+                )
+                await emit_sample(
+                    system_stats_module.read_cpu_percent_nonblocking(),
+                    gpu,
+                )
+                next_sample += interval
+                await asyncio.sleep(max(0.0, next_sample - loop.time()))
 
     # Wait for client to send start_session (both mics); then start ASR stream and turn executor
     await asyncio.wait(

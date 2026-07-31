@@ -64,6 +64,10 @@ const state = {
     bargeInPartialCount: 0,
     /** True after barge-in stopped TTS; ignore further tts_audio until next tts_start */
     ttsPlaybackStoppedByBargeIn: false,
+    /** Last browser-observed playback stop for this response; prevents duplicate partial/final markers. */
+    lastTtsPlaybackStopTimestamp: null,
+    /** Canvas hit regions rebuilt on every render for Barge-in hover details. */
+    timelineBargeInHitRegions: [],
     /** MediaStream used for voice pipeline mic (may be same as previewStream) */
     voiceMicStream: null,
     /** Selected browser microphone deviceId (from enumerateDevices); null = use browser default */
@@ -80,8 +84,10 @@ const state = {
     browserSpeakerMuted: false,
     /** GainNode for browser TTS; all TTS BufferSources connect through this so Q can mute/unmute without stopping playback. */
     ttsGainNode: null,
-    /** Live session: wall-clock time when session_start was received (for amplitude timestamps) */
+    /** Browser wall-clock origin synchronized to the server Timeline at session_start. */
     liveSessionStartTime: 0,
+    /** Prevent a duplicate session_start event from moving the live Timeline origin. */
+    liveSessionClockSynchronized: false,
     /** requestAnimationFrame id for live timeline scroll ticker; cancel when leaving live */
     liveTimelineRafId: null,
     /** Live session: (timestamp_sec, amplitude 0–100) for AUDIO lane waveform; max ~15 sec at ~20 Hz */
@@ -116,6 +122,8 @@ const state = {
     liveSystemStatsPollIntervalId: null,
     /** Live session: have we set initial 15s zoom once */
     liveTimelineInitialZoomSet: false,
+    /** Optional bounded JPEG data URL captured immediately before the live session stops. */
+    liveSessionThumbnail: null,
 
     /** Server health for the configured ASR, LLM, and TTS backends. */
     serverHealth: { asr: null, llm: null, tts: null },
@@ -281,19 +289,27 @@ function renderSessionList() {
         const sid = escapeHtml(session.session_id);
         const safeName = escapeHtml(session.name);
         const pipelineSummary = uiSettings.showPipelineInSessionList && session.config ? getPipelineSummaryHtml(session.config) : '';
+        const thumbnailHtml = uiSettings.showSessionThumbnails && session.has_thumbnail
+            ? `<img class="session-item-thumbnail" src="${getApiBase()}/api/sessions/${encodeURIComponent(session.session_id)}/thumbnail" alt="" loading="lazy">`
+            : '';
 
         return `
             <div class="session-item ${isActive ? 'active' : ''}" data-session-index="${index}">
                 <div class="session-item-body" onclick="selectSession(${index})">
                     <div class="session-item-name">${safeName}</div>
-                    <div class="session-item-meta">
-                        <span>${formatSessionDateOnly(session.created_at)}</span>
-                        <span>${formatDate(session.created_at)}</span>
-                        <span>${metrics.total_turns || 0} turns</span>
-                    </div>
-                    <div class="session-item-metrics">
-                        <span class="metric-badge">TTL: ${formatLatency(metrics.avg_ttl)}</span>
-                        <span class="metric-badge">${session.timeline?.length || 0} events</span>
+                    <div class="session-item-lower">
+                        <div class="session-item-details">
+                            <div class="session-item-meta">
+                                <span>${formatSessionDateOnly(session.created_at)}</span>
+                                <span>${formatDate(session.created_at)}</span>
+                                <span>${metrics.total_turns || 0} turns</span>
+                            </div>
+                            <div class="session-item-metrics">
+                                <span class="metric-badge">TTL: ${formatLatency(metrics.avg_ttl)}</span>
+                                <span class="metric-badge">${session.timeline_event_count ?? session.timeline?.length ?? 0} events</span>
+                            </div>
+                        </div>
+                        ${thumbnailHtml}
                     </div>
                     ${pipelineSummary ? `<div class="session-item-pipeline">${pipelineSummary}</div>` : ''}
                 </div>
@@ -382,17 +398,37 @@ function deleteSession(sessionId) {
         });
 }
 
-function selectSession(index) {
+async function selectSession(index) {
     console.log('selectSession called:', index);
-    state.selectedSession = state.sessions[index];
-    state.isLiveSession = false;
-    state.sessionState = 'stopped';
+    const summary = state.sessions[index];
+    if (!summary) return;
+    try {
+        let session = summary;
+        if (!summary.timeline || !summary.turns) {
+            const response = await fetch(
+                getApiBase() + '/api/sessions/' + encodeURIComponent(summary.session_id)
+            );
+            if (!response.ok) {
+                throw new Error('Server returned ' + response.status);
+            }
+            session = await response.json();
+            session.timeline_event_count = summary.timeline_event_count;
+            session.has_thumbnail = !!summary.has_thumbnail || !!session.thumbnail;
+            state.sessions[index] = session;
+        }
+        state.selectedSession = session;
+        state.isLiveSession = false;
+        state.sessionState = 'stopped';
 
-    renderSessionList();
-    renderSessionDetail();
-    renderTimeline();
-    updateLiveSessionUI();
-    updateHistoricalSessionPreview();
+        renderSessionList();
+        renderSessionDetail();
+        renderTimeline();
+        updateLiveSessionUI();
+        updateHistoricalSessionPreview();
+    } catch (error) {
+        console.error('Failed to load session detail:', error);
+        window.alert('Could not load session: ' + error.message);
+    }
 }
 
 function renderSessionDetail() {
@@ -497,6 +533,7 @@ function updateSessionImageContainerAspect() {
     const container = document.getElementById('session-image');
     const videoFeed = document.getElementById('video-feed');
     const mjpegFeed = document.getElementById('video-feed-mjpeg');
+    const previewImage = document.getElementById('preview-image');
     if (!container) return;
     var w = 0, h = 0;
     if (videoFeed && videoFeed.style.display === 'block' && videoFeed.videoWidth > 0 && videoFeed.videoHeight > 0) {
@@ -505,6 +542,9 @@ function updateSessionImageContainerAspect() {
     } else if (mjpegFeed && mjpegFeed.style.display === 'block' && mjpegFeed.naturalWidth > 0 && mjpegFeed.naturalHeight > 0) {
         w = mjpegFeed.naturalWidth;
         h = mjpegFeed.naturalHeight;
+    } else if (previewImage && previewImage.style.display === 'block' && previewImage.naturalWidth > 0 && previewImage.naturalHeight > 0) {
+        w = previewImage.naturalWidth;
+        h = previewImage.naturalHeight;
     }
     if (w > 0 && h > 0) {
         container.style.aspectRatio = w + ' / ' + h;
@@ -517,6 +557,24 @@ function updateSessionImageContainerAspect() {
         container.style.setProperty('--fullscreen-ar-w', '16');
         container.style.setProperty('--fullscreen-ar-h', '9');
     }
+}
+
+function updateRecordedReviewLayout() {
+    const panel = document.getElementById('chat-panel');
+    if (!panel) return;
+    const isRecordedReview = state.sessionState === 'stopped' && (
+        state.isLiveSession || !!state.selectedSession
+    );
+    const hasThumbnail = isRecordedReview && (
+        state.isLiveSession
+            ? !!state.liveSessionThumbnail
+            : !!(state.selectedSession && state.selectedSession.thumbnail)
+    );
+    panel.classList.toggle('chat-panel--recorded-review', isRecordedReview);
+    panel.classList.toggle(
+        'chat-panel--recorded-review-has-thumbnail',
+        isRecordedReview && hasThumbnail
+    );
 }
 
 /** Set session-meta right block (Session recorded + filename). Two-line layout: left = title only; right = this when available. */
@@ -3270,6 +3328,7 @@ function initTimeline() {
     state.timelineZoom = 1.0;
     state.timelineOffset = 0;
     state.timelineDuration = 0;
+    state.timelineBargeInHitRegions = [];
 
     const canvas = document.getElementById('timeline-canvas');
     if (canvas) {
@@ -3299,6 +3358,7 @@ function renderTimeline() {
     const hasStoppedLiveData = state.isLiveSession && state.sessionState === 'stopped' && state.liveTimelineEvents && state.liveTimelineEvents.length > 0;
     const rawTimeline = inLive ? state.liveTimelineEvents : (hasStoppedLiveData ? state.liveTimelineEvents : (state.selectedSession && (state.selectedSession.timeline && state.selectedSession.timeline.events || state.selectedSession.timeline)));
     const timeline = Array.isArray(rawTimeline) ? rawTimeline : (rawTimeline && rawTimeline.events) || [];
+    state.timelineBargeInHitRegions = [];
     if (!inLive && !hasStoppedLiveData && !state.selectedSession) return;
 
     const canvas = document.getElementById('timeline-canvas');
@@ -3447,7 +3507,23 @@ function renderTimeline() {
     const timelineUserAmp = (!inLive && !hasStoppedLiveData && timeline && timeline.length) ? buildUserAmplitudeFromTimeline(timeline) : [];
     const replayAudioAmplitudeHistory = (timelineUserAmp.length > 0) ? timelineUserAmp : ((!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.audio_amplitude_history) ? state.selectedSession.audio_amplitude_history : null);
     const timelineTtsSegments = (!inLive && !hasStoppedLiveData && timeline && timeline.length) ? buildTtsSegmentsFromTimeline(timeline) : [];
-    const replayTtsSegments = (timelineTtsSegments.length > 0) ? timelineTtsSegments : ((!inLive && !hasStoppedLiveData && state.selectedSession && state.selectedSession.tts_playback_segments) ? state.selectedSession.tts_playback_segments : null);
+    const persistedTtsSegments = (!inLive && !hasStoppedLiveData && state.selectedSession && Array.isArray(state.selectedSession.tts_playback_segments))
+        ? state.selectedSession.tts_playback_segments
+        : [];
+    const rebuiltTtsSegments = (
+        !inLive && !hasStoppedLiveData
+        && window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.rebuildTtsPlaybackSegments === 'function'
+    ) ? window.MMASTimelineHelpers.rebuildTtsPlaybackSegments(
+        timeline,
+        (state.selectedSession && state.selectedSession.ttl_bands) || []
+    ) : [];
+    // Browser-observed playback is authoritative. For recordings made before
+    // it was persisted, rebuild the continuous 25 ms playout from event order;
+    // only then fall back to a coarse first-audio→complete block.
+    const replayTtsSegments = persistedTtsSegments.length > 0
+        ? persistedTtsSegments
+        : (rebuiltTtsSegments.length > 0 ? rebuiltTtsSegments : timelineTtsSegments);
     const replayUserAmplitudeForTtl = replayAudioAmplitudeHistory;
     const liveSessionTime = (state.liveSessionStartTime > 0) ? (Date.now() / 1000 - state.liveSessionStartTime) : null;
     drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP, PADDING_LEFT,
@@ -3729,17 +3805,61 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     const drawLiveWaveforms = inLive || hasStoppedLiveData;
     const getLaneY = (i) => PADDING_TOP + laneYOffsets[i];
     const getLaneHeight = (i) => LANE_HEIGHTS[i];
+    const bargeInWindows = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.buildBargeInWindows === 'function'
+    ) ? window.MMASTimelineHelpers.buildBargeInWindows(timeline) : [];
+
+    function isAiPlaybackDiscardedAt(timestamp) {
+        const t = Number(timestamp);
+        return bargeInWindows.some(function (window) {
+            const limit = window.nextTtsStart == null
+                ? Infinity
+                : Number(window.nextTtsStart);
+            return t >= window.start && t < limit;
+        });
+    }
+
+    function drawHatchedBand(x1, x2, y, h, baseColor, stripeColor, alpha) {
+        const left = Math.max(PADDING_LEFT, x1);
+        const right = Math.min(width - PADDING_RIGHT, x2);
+        const bandWidth = right - left;
+        if (!(bandWidth > 0) || !(h > 0)) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = baseColor;
+        ctx.fillRect(left, y, bandWidth, h);
+        ctx.beginPath();
+        ctx.rect(left, y, bandWidth, h);
+        ctx.clip();
+        ctx.strokeStyle = stripeColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const spacing = 7;
+        for (let offset = -h; offset < bandWidth + h; offset += spacing) {
+            ctx.moveTo(left + offset, y + h);
+            ctx.lineTo(left + offset + h, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
 
     // Infer rectangle events from point event sequences (handles multiple turns)
     const inferredRectangles = [];
 
     // Find all VAD/ASR/TTS events across the entire timeline
-    const speechStarts = timeline.filter(e =>
+    const dedupeSpeechBoundaries = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.dedupeTimelineEventsByTimestamp === 'function'
+    ) ? window.MMASTimelineHelpers.dedupeTimelineEventsByTimestamp : function (events) {
+        return events;
+    };
+    const speechStarts = dedupeSpeechBoundaries(timeline.filter(e =>
         e.event_type === 'user_speech_start' || e.event_type === 'vad_start'
-    );
-    const speechEnds = timeline.filter(e =>
+    ));
+    const speechEnds = dedupeSpeechBoundaries(timeline.filter(e =>
         e.event_type === 'user_speech_end' || e.event_type === 'vad_end'
-    );
+    ));
     const vadSpeechStarts = timeline.filter(e => e.event_type === 'vad_speech_start').sort((a, b) => a.timestamp - b.timestamp);
     const vadSpeechEnds = timeline.filter(e => e.event_type === 'vad_speech_end').sort((a, b) => a.timestamp - b.timestamp);
     const asrPartials = timeline.filter(e => e.event_type === 'asr_partial');
@@ -3750,6 +3870,33 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     const llmStarts = timeline.filter(e => e.event_type === 'llm_start').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const llmFirstTokens = timeline.filter(e => e.event_type === 'llm_first_token').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     const llmCompletes = timeline.filter(e => e.event_type === 'llm_complete').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const pairTimelineEvents = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.pairTimelineEvents === 'function'
+    ) ? window.MMASTimelineHelpers.pairTimelineEvents : function () {
+        return [];
+    };
+    const asrRequestIntervals = pairTimelineEvents(
+        timeline,
+        'asr_inference_start',
+        'asr_inference_end'
+    );
+
+    // REST ASR emits no partial transcripts. Its explicit HTTP request
+    // interval is drawn separately from local endpointing so the short GPU
+    // work is no longer hidden inside one long light-blue finalization band.
+    asrRequestIntervals.forEach(function (interval) {
+        if (interval.end <= interval.start) return;
+        inferredRectangles.push({
+            event_type: 'asr_request',
+            lane: 'speech',
+            start_time: interval.start,
+            end_time: interval.end,
+            timestamp: interval.start,
+            phase: 'asr-request',
+            inferred: true
+        });
+    });
 
     // LLM: prefill (start → first token) and generate (first token → complete). Like Live RIVA WebUI; first-token boundary from pipeline.
     // Match llm_first_token and llm_complete to each llm_start by timestamp
@@ -3857,8 +4004,15 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
 
     // For each turn, create multi-phase ASR visualization (only when we have matching speechStarts / VAD)
     if (!useAsrFinalOnly) speechStarts.forEach((speechStart, turnIdx) => {
-        const speechEnd = speechEnds[turnIdx];
         const asrFinal = asrFinals[turnIdx];
+        const speechEndCandidates = speechEnds.filter(function (event) {
+            const timestamp = Number(event.timestamp || 0);
+            return timestamp >= Number(speechStart.timestamp || 0)
+                && (!asrFinal || timestamp <= Number(asrFinal.timestamp || 0));
+        });
+        const speechEnd = speechEndCandidates.length
+            ? speechEndCandidates[speechEndCandidates.length - 1]
+            : null;
 
         // Find first and last partial for this turn (sort by timestamp so first/last are correct)
         const turnPartials = asrPartials.filter(p =>
@@ -3932,7 +4086,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         // File-style REST ASR returns only a final transcript. Use the local
         // energy-VAD timing instead of inventing partial transcripts:
         // striped dark blue = inferred ASR activity from VAD;
-        // solid light blue = silence confirmation and REST finalization.
+        // solid light blue = endpoint silence confirmation;
+        // solid deep blue = the explicit REST request (added above).
         // Solid dark blue remains reserved for observed partial transcripts.
         if (!firstPartial && speechStart && asrFinal) {
             const vadEndTime = (
@@ -3940,6 +4095,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                     ? turnSpeechEnd.timestamp
                     : asrFinal.timestamp
             );
+            const requestInterval = asrRequestIntervals.find(function (interval) {
+                return interval.start >= speechStart.timestamp
+                    && interval.start <= asrFinal.timestamp + 0.001;
+            }) || null;
             if (vadEndTime > speechStart.timestamp) {
                 inferredRectangles.push({
                     event_type: 'asr_pre',
@@ -3951,12 +4110,18 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                     inferred: true
                 });
             }
-            if (asrFinal.timestamp > vadEndTime) {
+            const endpointWaitEnd = requestInterval
+                ? Math.max(
+                    vadEndTime,
+                    Math.min(requestInterval.start, asrFinal.timestamp)
+                )
+                : asrFinal.timestamp;
+            if (endpointWaitEnd > vadEndTime) {
                 inferredRectangles.push({
-                    event_type: 'asr_finalizing',
+                    event_type: 'asr_endpoint_wait',
                     lane: 'speech',
                     start_time: vadEndTime,
-                    end_time: asrFinal.timestamp,
+                    end_time: endpointWaitEnd,
                     timestamp: vadEndTime,
                     phase: 'post-asr',
                     inferred: true
@@ -4078,11 +4243,14 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
 
         // Special styling for ASR phases
         if (event.phase === 'pre-asr') {
-            // Phase 1: inferred ASR activity from VAD (striped dark blue).
-            // The stripe differentiates inference from solid partial results.
+            // Local energy VAD observed user speech (striped blue).
             fillColor = '#1976D2';
             fillAlpha = 0.5;
             fillPattern = 'diagonal-stripes';
+        } else if (event.phase === 'asr-request') {
+            // Complete REST request interval: upload through response receipt.
+            fillColor = getComputedStyle(document.documentElement).getPropertyValue('--timeline-asr-request').trim() || '#0D47A1';
+            fillAlpha = 0.92;
         } else if (event.phase === 'active-asr') {
             // Phase 2: Active ASR (solid blue)
             fillColor = '#1976D2';  // Darker blue
@@ -4148,6 +4316,67 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     });
 
+    // 1a. Cancellation diagnostics.  The normal magenta TTS band remains the
+    // synthesis lifetime; red/magenta hatching shows time spent cancelling
+    // after browser playback was already stopped.
+    const cancellationLaneIndex = lanes.indexOf(
+        combineSpeechLanes ? 'speech' : 'tts'
+    );
+    if (cancellationLaneIndex !== -1 && bargeInWindows.length > 0) {
+        const laneY = getLaneY(cancellationLaneIndex);
+        const laneH = getLaneHeight(cancellationLaneIndex);
+        const bandY = combineSpeechLanes
+            ? laneY + laneH * 0.55
+            : laneY + laneH * 0.1;
+        const bandH = combineSpeechLanes
+            ? laneH * 0.4
+            : laneH * 0.8;
+        bargeInWindows.forEach(function (window) {
+            let end = window.cancelEnd;
+            if (end == null && inLive && liveSessionTime != null) {
+                end = liveSessionTime;
+            }
+            if (window.nextTtsStart != null) {
+                end = end == null
+                    ? window.nextTtsStart
+                    : Math.min(end, window.nextTtsStart);
+            }
+            if (end == null || end <= window.start) return;
+            drawHatchedBand(
+                PADDING_LEFT + (window.start - timelineOffset) * timeScale,
+                PADDING_LEFT + (end - timelineOffset) * timeScale,
+                bandY,
+                bandH,
+                'rgba(236, 64, 122, 0.35)',
+                'rgba(239, 68, 68, 0.9)',
+                0.9
+            );
+        });
+    }
+
+    // Already-scheduled WebAudio after the stop point was discarded. Show it
+    // only as a pale purple hatched block; the real purple waveform terminates
+    // at the red Barge-in marker.
+    const discardedAudioLaneIndex = lanes.indexOf('audio');
+    if (discardedAudioLaneIndex !== -1 && bargeInWindows.length > 0) {
+        const laneY = getLaneY(discardedAudioLaneIndex);
+        const laneH = getLaneHeight(discardedAudioLaneIndex);
+        bargeInWindows.forEach(function (window) {
+            if (window.discardedEnd == null || window.discardedEnd <= window.start) {
+                return;
+            }
+            drawHatchedBand(
+                PADDING_LEFT + (window.start - timelineOffset) * timeScale,
+                PADDING_LEFT + (window.discardedEnd - timelineOffset) * timeScale,
+                laneY + laneH * 0.14,
+                laneH * 0.72,
+                'rgba(156, 39, 176, 0.18)',
+                'rgba(206, 147, 216, 0.72)',
+                0.85
+            );
+        });
+    }
+
     // 1b. TTS lane: thin light purple vertical line at each tts_first_audio (FFTA boundary)
     const ttsLaneIndex = lanes.indexOf(combineSpeechLanes ? 'speech' : 'tts');
     if (ttsLaneIndex !== -1 && ttsFirstAudios.length > 0) {
@@ -4198,6 +4427,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         const t = event.timestamp || 0;
         const amp = event.amplitude != null ? event.amplitude : 0;
         const inTts = ttsTimeRanges.length > 0 && isInsideTtsSegment(t);
+        if (!isUser && isAiPlaybackDiscardedAt(t)) return;
 
         if (!inLive && !hasStoppedLiveData && isUser) {
             // Replay: skip sparse user bars when we draw the dense user waveform (2b1). Otherwise we get
@@ -4276,13 +4506,24 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 const aiGain = (typeof uiSettings.aiAudioGain === 'number' ? uiSettings.aiAudioGain : 1);
                 const barWidthPx = 2;
                 const tStep = 0.025; // match user waveform density (~40 Hz)
+                // WebAudio may already have several seconds queued. Draw only
+                // up to the current playback head so the purple waveform does
+                // not visually announce audio before it is actually heard.
+                const livePlaybackHead = (
+                    inLive && liveSessionTime != null
+                ) ? liveSessionTime : Infinity;
                 liveTtsSegments.forEach(function (seg) {
                     if (seg.endTime < visibleStart || seg.startTime > visibleEnd) return;
                     const amp = Math.min(100, (seg.amplitude || 0) * aiGain);
                     const ampForBar = Math.max(amp, 2); // small threshold so first/low-amplitude AI audio still shows purple
                     const halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
                     const barHeight = Math.max(1, halfH * 2);
-                    for (let t = Math.max(visibleStart, seg.startTime); t <= Math.min(visibleEnd, seg.endTime); t += tStep) {
+                    const drawEnd = Math.min(
+                        visibleEnd,
+                        seg.endTime,
+                        livePlaybackHead
+                    );
+                    for (let t = Math.max(visibleStart, seg.startTime); t <= drawEnd; t += tStep) {
                         const x = visibleLeft + (t - timelineOffset) * timeScale;
                         if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
                         const y1 = centerY - halfH;
@@ -4352,9 +4593,25 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             const aiGain = (typeof uiSettings.aiAudioGain === 'number' ? uiSettings.aiAudioGain : 1);
             const barWidthPx = 2;
             const tStep = 0.025;
-            // Replay: prefer actual amplitude from timeline; only use segment fill when no timeline TTS amplitude (old sessions).
+            // Replay: prefer browser-observed or reconstructed playout
+            // segments. Raw server timeline amplitudes use generation/send
+            // timestamps and can overlap or leave gaps between queued chunks.
             var hasTimelineTtsAmp = hasDenseTtsAmplitudeTimeline(timeline);
-            if (hasTimelineTtsAmp) {
+            if (replayTtsSegments && replayTtsSegments.length > 0) {
+                replayTtsSegments.forEach(function (seg) {
+                    if (seg.endTime < visibleStart || seg.startTime > visibleEnd) return;
+                    const amp = Math.min(100, (seg.amplitude || 0) * aiGain);
+                    const ampForBar = Math.max(amp, 2);
+                    const halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
+                    for (let t = Math.max(visibleStart, seg.startTime); t <= Math.min(visibleEnd, seg.endTime); t += tStep) {
+                        if (isAiPlaybackDiscardedAt(t)) continue;
+                        const x = visibleLeft + (t - timelineOffset) * timeScale;
+                        if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
+                        const y1 = centerY - halfH;
+                        ctx.fillRect(x, y1, barWidthPx, Math.max(1, halfH * 2));
+                    }
+                });
+            } else if (hasTimelineTtsAmp) {
                 var ttsFromTimeline = [];
                 timeline.filter(function (e) { return e.event_type === 'audio_amplitude' && (e.source === 'tts' || e.source === 'ai'); }).forEach(function (e) {
                     var a = e.amplitude != null ? Number(e.amplitude) : 0;
@@ -4371,6 +4628,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 var ttsDataT1 = ttsFromTimeline.length ? ttsFromTimeline[ttsFromTimeline.length - 1].timestamp : 0;
                 for (var t = visibleStart; t <= visibleEnd; t += tStep) {
                     if (t < ttsDataT0 || t > ttsDataT1) continue;
+                    if (isAiPlaybackDiscardedAt(t)) continue;
                     // maxGapSec=0.25: interpolate within one TTS response (chunk gaps ~50–100ms) but don't draw in silence between two responses (avoids bridge of tiny dots)
                     var ampTl = getAmplitudeAtTime(ttsFromTimeline, t, 0.25);
                     var amp = Math.min(100, ampTl * aiGain);
@@ -4381,19 +4639,6 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                     if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
                     ctx.fillRect(x, centerY - halfH, barWidthPx, Math.max(1, halfH * 2));
                 }
-            } else if (replayTtsSegments && replayTtsSegments.length > 0) {
-                replayTtsSegments.forEach(function (seg) {
-                    if (seg.endTime < visibleStart || seg.startTime > visibleEnd) return;
-                    const amp = Math.min(100, (seg.amplitude || 0) * aiGain);
-                    const ampForBar = Math.max(amp, 2);
-                    const halfH = (Math.min(100, Math.max(0, ampForBar)) / 100) * maxBarHalf;
-                    for (let t = Math.max(visibleStart, seg.startTime); t <= Math.min(visibleEnd, seg.endTime); t += tStep) {
-                        const x = visibleLeft + (t - timelineOffset) * timeScale;
-                        if (x < visibleLeft - barWidthPx || x > visibleRight + barWidthPx) continue;
-                        const y1 = centerY - halfH;
-                        ctx.fillRect(x, y1, barWidthPx, Math.max(1, halfH * 2));
-                    }
-                });
             }
             ctx.globalAlpha = 1.0;
         }
@@ -4635,16 +4880,28 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             return x >= visibleLeft - 2 && x <= visibleRight + 2;
         });
         if (samples.length > 0) {
-            function buildPoints(getPoint) {
-                var points = [];
-                for (var i = 0; i < samples.length; i++) {
-                    var s = samples[i];
-                    var x = PADDING_LEFT + (s.t - timelineOffset) * timeScale;
-                    var val = getPoint(s);
-                    if (val == null) continue;
-                    points.push({ x: x, y: val });
-                }
-                return points;
+            function buildPoints(getValue) {
+                const peakBuilder = (
+                    window.MMASTimelineHelpers
+                    && typeof window.MMASTimelineHelpers.buildPeakPreservingPoints === 'function'
+                ) ? window.MMASTimelineHelpers.buildPeakPreservingPoints : null;
+                const getX = function (sample) {
+                    return PADDING_LEFT + (sample.t - timelineOffset) * timeScale;
+                };
+                const peaks = peakBuilder
+                    ? peakBuilder(samples, getX, getValue)
+                    : samples.map(function (sample) {
+                        return { x: getX(sample), value: getValue(sample) };
+                    });
+                return peaks.filter(function (point) {
+                    return point.value != null && Number.isFinite(Number(point.value));
+                }).map(function (point) {
+                    const value = Math.max(0, Math.min(100, Number(point.value)));
+                    return {
+                        x: point.x,
+                        y: laneY + laneH * (1 - value / 100),
+                    };
+                });
             }
             // Monotonic quadratic control point: smooth but never goes backward in time or overshoots (no hooks/lobes)
             function smoothQuadraticCtrl(p0, p1, pPrev) {
@@ -4729,12 +4986,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             }
             // Full height scale: 0% = bottom (baseline), 100% = top (laneY)
             var cpuPoints = buildPoints(function (s) {
-                var cpu = s.cpu != null ? Math.max(0, Math.min(100, s.cpu)) : null;
-                return cpu != null ? laneY + laneH * (1 - cpu / 100) : null;
+                return s.cpu != null ? Number(s.cpu) : null;
             });
             var gpuPoints = buildPoints(function (s) {
-                var gpu = s.gpu != null ? Math.max(0, Math.min(100, s.gpu)) : null;
-                return gpu != null ? laneY + laneH * (1 - gpu / 100) : null;
+                return s.gpu != null ? Number(s.gpu) : null;
             });
             // Clip to lane bounds so quadratic curves never render below 0% (baseline)
             ctx.save();
@@ -4744,8 +4999,128 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             // Draw CPU area first (transparent blue), then GPU area (transparent green); overlap blends darker
             drawAreaAndLine(cpuPoints, '#2196F3', '#2196F3', 0.45);
             drawAreaAndLine(gpuPoints, '#4CAF50', '#4CAF50', 0.45);
+
+            // Preserve a point-in-time ASR GPU peak even when the 100–300 ms
+            // request occupies only one or two telemetry samples. The marker
+            // has a minimum screen width but remains anchored to the actual
+            // sample timestamp.
+            const buildIntervalPeakMarkers = (
+                window.MMASTimelineHelpers
+                && typeof window.MMASTimelineHelpers.buildIntervalPeakMarkers === 'function'
+            ) ? window.MMASTimelineHelpers.buildIntervalPeakMarkers : function () {
+                return [];
+            };
+            const asrGpuPeaks = buildIntervalPeakMarkers(
+                liveSystemStats,
+                asrRequestIntervals,
+                5
+            );
+            asrGpuPeaks.forEach(function (peak) {
+                const x = PADDING_LEFT + (peak.t - timelineOffset) * timeScale;
+                if (x < visibleLeft || x > visibleRight) return;
+                const value = Math.max(0, Math.min(100, Number(peak.value)));
+                const y = laneY + laneH * (1 - value / 100);
+                ctx.fillStyle = 'rgba(118, 185, 0, 0.28)';
+                ctx.fillRect(x - 2.5, y, 5, Math.max(1, baseline - y));
+                ctx.strokeStyle = '#76B900';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, baseline);
+                ctx.stroke();
+                ctx.fillStyle = '#76B900';
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.font = 'bold 9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.fillText(
+                    Math.round(value) + '%',
+                    x,
+                    Math.min(baseline - 10, y + 4)
+                );
+            });
             ctx.restore();
         }
+    }
+
+    // 5. Exact playback-stop marker on top of every lane. This is deliberately
+    // drawn last so the red cut remains visible over waveforms and bands.
+    state.timelineBargeInHitRegions = [];
+    if (bargeInWindows.length > 0) {
+        const markerColor = (
+            getComputedStyle(document.documentElement)
+                .getPropertyValue('--timeline-barge-in')
+                .trim()
+            || '#EF4444'
+        );
+        const markerTop = PADDING_TOP;
+        const markerBottom = (
+            getLaneY(lanes.length - 1)
+            + getLaneHeight(lanes.length - 1)
+        );
+        bargeInWindows.forEach(function (window) {
+            const x = PADDING_LEFT
+                + (window.start - timelineOffset) * timeScale;
+            if (x < PADDING_LEFT - 2 || x > width - PADDING_RIGHT + 2) return;
+            ctx.save();
+            ctx.strokeStyle = markerColor;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(x, markerTop);
+            ctx.lineTo(x, markerBottom);
+            ctx.stroke();
+
+            const label = '■ Barge-in';
+            ctx.font = 'bold 9px sans-serif';
+            const labelWidth = ctx.measureText(label).width + 10;
+            const labelX = Math.max(
+                PADDING_LEFT,
+                Math.min(x - labelWidth / 2, width - PADDING_RIGHT - labelWidth)
+            );
+            const labelY = 2;
+            ctx.fillStyle = markerColor;
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') {
+                ctx.roundRect(labelX, labelY, labelWidth, 15, 3);
+            } else {
+                ctx.rect(labelX, labelY, labelWidth, 15);
+            }
+            ctx.fill();
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, labelX + labelWidth / 2, labelY + 7.5);
+            ctx.restore();
+
+            const data = window.stopEvent.data || {};
+            const triggerTimestamp = data.trigger_timestamp == null
+                ? NaN
+                : Number(data.trigger_timestamp);
+            const stopLatencyMs = Number.isFinite(triggerTimestamp)
+                ? Math.max(0, Math.round((window.start - triggerTimestamp) * 1000))
+                : null;
+            const cancelLatencyMs = window.cancelEnd != null
+                ? Math.max(0, Math.round((window.cancelEnd - window.start) * 1000))
+                : null;
+            state.timelineBargeInHitRegions.push({
+                x: x,
+                y1: labelY,
+                y2: markerBottom,
+                width: Math.max(12, labelWidth),
+                title: 'Barge-in playback stopped',
+                trigger: data.trigger || 'unknown',
+                turnId: data.turn_id,
+                playback: data.playback || 'browser',
+                stopTime: window.start,
+                stopLatencyMs: stopLatencyMs,
+                cancelLatencyMs: cancelLatencyMs,
+                discardedAudioMs: data.discarded_audio_ms,
+                cancellationPending: window.cancelEnd == null,
+            });
+        });
     }
 }
 
@@ -5078,6 +5453,14 @@ function startMicWaveform(stream) {
 
 /** Build the voice config object sent to the server (WS config message or start_session). Uses currentConfig and sets audio_output_* from devices.speaker so saved sessions have correct speaker. */
 function buildVoiceConfig() {
+    var configuredTtsModelName = (
+        window.MMASConfigHelpers
+        && typeof window.MMASConfigHelpers.getTtsModelName === 'function'
+    ) ? window.MMASConfigHelpers.getTtsModelName({ tts: currentConfig.tts }) : (
+        currentConfig.tts
+            ? (currentConfig.tts.model || currentConfig.tts.voice || null)
+            : null
+    );
     var config = {
         asr: { ...currentConfig.asr },
         llm: { ...currentConfig.llm },
@@ -5088,7 +5471,7 @@ function buildVoiceConfig() {
         device_types: { mic: getDeviceDisplayType('mic'), camera: getDeviceDisplayType('camera'), speaker: getDeviceDisplayType('speaker') },
         asr_model_name: (currentConfig.asr && currentConfig.asr.model) ? String(currentConfig.asr.model).replace(/\(.*\)/, '').trim() : null,
         llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
-        tts_model_name: (currentConfig.tts && (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model)) ? (currentConfig.tts.riva_model_name || currentConfig.tts.voice || currentConfig.tts.model) : null
+        tts_model_name: configuredTtsModelName
     };
     if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
     if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
@@ -5137,12 +5520,22 @@ function buildVoiceConfig() {
     if (spk && (spk.indexOf('alsa:') === 0 || spk.indexOf('pyaudio:') === 0)) {
         config.devices.audio_output_device_name = getDeviceDisplayLabel('speaker') || undefined;
     }
-    var ttsModelSelect = document.getElementById('tts-model-select');
-    var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
-    var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
-    if (sentRivaModelName) {
-        config.tts.riva_model_name = sentRivaModelName;
-        config.tts_model_name = sentRivaModelName;
+    var isRivaTts = config.tts && (
+        config.tts.backend === 'riva' || config.tts.scheme === 'riva'
+    );
+    if (isRivaTts) {
+        var ttsModelSelect = document.getElementById('tts-model-select');
+        var dropdownVal = (ttsModelSelect && ttsModelSelect.value && String(ttsModelSelect.value).trim()) || null;
+        var sentRivaModelName = (currentConfig.tts && currentConfig.tts.riva_model_name) || dropdownVal || null;
+        if (sentRivaModelName) {
+            config.tts.riva_model_name = sentRivaModelName;
+            config.tts_model_name = sentRivaModelName;
+        }
+    } else {
+        // Do not let stale Riva discovery metadata leak into REST/Realtime
+        // session records. Voice remains independently available as tts.voice.
+        delete config.tts.riva_model_name;
+        config.tts_model_name = configuredTtsModelName;
     }
     if (config.llm.ollama_url === undefined && config.llm.api_base) config.llm.ollama_url = (config.llm.api_base || '').replace(/\/v1\/?$/, '');
     return config;
@@ -5671,9 +6064,12 @@ function updateLiveSessionUI() {
             setSessionMetaRight(recordedLine, filenameHtml);
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
-            if (imagePlaceholder) {
-                imagePlaceholder.style.display = 'flex';
-                updateImagePlaceholderContent();
+            const hasThumbnail = !!state.liveSessionThumbnail;
+            if (sessionImageEl) sessionImageEl.style.display = hasThumbnail ? '' : 'none';
+            if (imagePlaceholder) imagePlaceholder.style.display = 'none';
+            if (previewImage) {
+                if (hasThumbnail) previewImage.src = state.liveSessionThumbnail;
+                previewImage.style.display = hasThumbnail ? 'block' : 'none';
             }
             if (videoFeed) videoFeed.style.display = 'none';
             if (sessionControlOverlay) sessionControlOverlay.style.display = 'none';
@@ -5682,7 +6078,7 @@ function updateLiveSessionUI() {
             renderTimeline();
             if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         }
-        previewImage.style.display = 'none';
+        if (state.sessionState !== 'stopped') previewImage.style.display = 'none';
         updateChatInputVisibility();
         if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
     } else {
@@ -5698,6 +6094,7 @@ function updateLiveSessionUI() {
         setSessionMetaRight('', '');
         updateChatInputVisibility();
     }
+    updateRecordedReviewLayout();
     updateSessionImageContainerAspect();
 }
 
@@ -5751,15 +6148,15 @@ function updateHistoricalSessionPreview() {
 
         videoFeed.style.display = 'none';
         const sessionImageEl = document.getElementById('session-image');
-        if (sessionImageEl) sessionImageEl.style.display = 'none';
-
         if (session.thumbnail) {
             previewImage.src = session.thumbnail;
             previewImage.style.display = 'block';
             imagePlaceholder.style.display = 'none';
+            if (sessionImageEl) sessionImageEl.style.display = '';
         } else {
             previewImage.style.display = 'none';
             imagePlaceholder.style.display = 'none';
+            if (sessionImageEl) sessionImageEl.style.display = 'none';
         }
 
         sessionMeta.style.display = 'flex';
@@ -5791,6 +6188,7 @@ function startNewSession() {
     state.isLiveSession = true;
     state.sessionState = 'setup';
     state.selectedSession = null;
+    state.liveSessionThumbnail = null;
 
     // Restore saved default config; apply env prefills; then layer server preset if present
     const saved = getDefaultConfig();
@@ -5949,15 +6347,36 @@ function handleVoiceWsMessage(ev) {
         } else if (msg.type === 'event' && msg.event) {
             const evt = msg.event;
             if (evt.event_type === 'session_start') {
-                if (state.liveSessionStartTime <= 0) {
-                        state.liveSessionStartTime = Date.now() / 1000;
-                        startLiveSystemStatsPoll();
+                var hadNoSessionClock = state.liveSessionStartTime <= 0;
+                if (!state.liveSessionClockSynchronized) {
+                    var receivedAt = Date.now() / 1000;
+                    var previousOrigin = state.liveSessionStartTime;
+                    state.liveSessionStartTime = (
+                        window.MMASTimelineHelpers
+                        && typeof window.MMASTimelineHelpers.syncLiveSessionClock === 'function'
+                    )
+                        ? window.MMASTimelineHelpers.syncLiveSessionClock(
+                            receivedAt,
+                            evt.timestamp
+                        )
+                        : receivedAt - Math.max(0, Number(evt.timestamp) || 0);
+                    state.liveSessionClockSynchronized = true;
+                    if (previousOrigin > 0 && uiSettings.showDebugInfo) {
+                        console.log(
+                            '[Timeline] Synchronized browser clock to server session_start; corrected',
+                            Math.round((state.liveSessionStartTime - previousOrigin) * 1000),
+                            'ms startup offset'
+                        );
+                    }
+                }
+                if (hadNoSessionClock) {
+                    startLiveSystemStatsPoll();
                     state.liveAudioAmplitudeHistory = [];
                     state._userAmplitudeSmoothBuf = [];
                 }
                 // Flush Server USB amplitude received before session_start so AUDIO lane has data from the first sample.
-                // When Server USB mic is used, client sets liveSessionStartTime before sending start_session so
-                // user_amplitude may already be pushing into liveAudioAmplitudeHistory; do not clear it.
+                // Server USB amplitude may already be buffered or streaming;
+                // preserve it while changing only the browser clock origin.
                 if (state.pendingServerMicAmplitude && state.pendingServerMicAmplitude.length) {
                     state.liveAudioAmplitudeHistory = state.liveAudioAmplitudeHistory || [];
                     state.pendingServerMicAmplitude.forEach(function (s) {
@@ -6000,7 +6419,11 @@ function handleVoiceWsMessage(ev) {
                         state.bargeInPartialCount = (state.bargeInPartialCount || 0) + 1;
                         var need = Math.max(1, Math.min(20, parseInt(app.barge_in_partial_count, 10) || 3));
                         if (state.bargeInPartialCount >= need) {
-                            stopTtsPlayback();
+                            stopTtsPlayback({
+                                reason: 'barge_in',
+                                trigger: 'partial_transcript',
+                                triggerTimestamp: pt,
+                            });
                             state.bargeInPartialCount = 0;
                         }
                     } else {
@@ -6013,7 +6436,15 @@ function handleVoiceWsMessage(ev) {
                 var appFinal = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
                 if (appFinal.barge_in_enabled && appFinal.barge_in_trigger !== 'partial') {
                     var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
-                    if (finalTxt.length > 0) stopTtsPlayback();
+                    if (finalTxt.length > 0) {
+                        stopTtsPlayback({
+                            reason: 'barge_in',
+                            trigger: 'final_transcript',
+                            triggerTimestamp: (
+                                evt.timestamp != null ? Number(evt.timestamp) : null
+                            ),
+                        });
+                    }
                 }
                         state.liveAsrInterimText = '';
                         syncFullscreenOverlays();
@@ -6061,6 +6492,7 @@ function handleVoiceWsMessage(ev) {
             state.activeTtsSources = [];
             state.bargeInPartialCount = 0;
             state.ttsPlaybackStoppedByBargeIn = false;
+            state.lastTtsPlaybackStopTimestamp = null;
             if (isServerSpeakerSelected()) state.ttsNextStartTime = -1;
             if (state.ttsAudioContext) {
                 if (state.ttsAudioContext.state === 'suspended') state.ttsAudioContext.resume();
@@ -6423,6 +6855,7 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
+        state.liveSessionClockSynchronized = false;
         if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
         if (!state.ttsAudioContext) {
             state.ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -6491,6 +6924,7 @@ function startSessionRecording() {
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
+        state.liveSessionClockSynchronized = false;
         if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
         scheduleLiveTimelineTick();
         updateLiveSessionUI();
@@ -6797,10 +7231,62 @@ function recordTtsSegmentOnly(base64Data, sampleRate, skipSegmentPush) {
     closeLiveTtlBandFromPlayback();
 }
 
-/** Stop all scheduled TTS playback (barge-in). Stops every source in activeTtsSources and resets schedule. */
-function stopTtsPlayback() {
+/** Add a browser-observed event locally and persist it through the voice WebSocket. */
+function recordClientTimelineEvent(event) {
+    if (!event || !event.event_type) return;
+    if (!Array.isArray(state.liveTimelineEvents)) state.liveTimelineEvents = [];
+    state.liveTimelineEvents.push(event);
+    if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+        state.voiceWs.send(JSON.stringify({
+            type: 'client_timeline_event',
+            event: event,
+        }));
+    }
+}
+
+/**
+ * Stop all scheduled TTS playback.
+ *
+ * For a Barge-in stop, capture the browser's actual stop timestamp and the
+ * already-scheduled audio that was discarded. Session/connection teardown
+ * calls this without options and intentionally emits no Barge-in marker.
+ */
+function stopTtsPlayback(options) {
+    options = options || {};
+    var sources = state.activeTtsSources || [];
+    var ctx = state.ttsAudioContext;
+    var cutoff = state.liveSessionStartTime > 0
+        ? Math.max(0, Date.now() / 1000 - state.liveSessionStartTime)
+        : null;
+    var split = null;
+    if (
+        cutoff != null
+        && Array.isArray(state.liveTtsAmplitudeHistory)
+        && window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.splitAudioSegmentsAt === 'function'
+    ) {
+        split = window.MMASTimelineHelpers.splitAudioSegmentsAt(
+            state.liveTtsAmplitudeHistory,
+            cutoff
+        );
+    }
+    var discardedEnd = split ? split.discardedEnd : null;
+    if (
+        cutoff != null
+        && ctx && typeof ctx.currentTime === 'number'
+        && typeof state.ttsNextStartTime === 'number'
+    ) {
+        var scheduledEnd = cutoff + Math.max(
+            0,
+            state.ttsNextStartTime - ctx.currentTime
+        );
+        if (scheduledEnd > cutoff) {
+            discardedEnd = discardedEnd == null
+                ? scheduledEnd
+                : Math.max(discardedEnd, scheduledEnd);
+        }
+    }
     try {
-        var sources = state.activeTtsSources || [];
         for (var i = 0; i < sources.length; i++) {
             var s = sources[i];
             if (s && typeof s.stop === 'function') {
@@ -6814,18 +7300,60 @@ function stopTtsPlayback() {
     state.ttsEligibleForCurrentTtl = false;
     state.firstTtsPlayTimeThisResponse = null;
     state.earliestTtsPlayTimeAboveThreshold = null;
-    var ctx = state.ttsAudioContext;
     if (ctx && typeof ctx.currentTime === 'number') state.ttsNextStartTime = ctx.currentTime;
     if (
-        state.liveSessionStartTime > 0
+        cutoff != null
         && Array.isArray(state.liveTtsAmplitudeHistory)
         && window.MMASTimelineHelpers
     ) {
-        var cutoff = Math.max(0, Date.now() / 1000 - state.liveSessionStartTime);
-        state.liveTtsAmplitudeHistory = window.MMASTimelineHelpers.truncateAudioSegmentsAt(
-            state.liveTtsAmplitudeHistory,
-            cutoff
-        );
+        state.liveTtsAmplitudeHistory = split
+            ? split.played
+            : window.MMASTimelineHelpers.truncateAudioSegmentsAt(
+                state.liveTtsAmplitudeHistory,
+                cutoff
+            );
+    }
+    var isBargeIn = options.reason === 'barge_in';
+    var stoppedAudibleOrScheduledAudio = (
+        cutoff != null
+        && discardedEnd != null
+        && discardedEnd > cutoff + 0.005
+    );
+    if (
+        isBargeIn
+        && stoppedAudibleOrScheduledAudio
+        && state.lastTtsPlaybackStopTimestamp == null
+    ) {
+        state.lastTtsPlaybackStopTimestamp = cutoff;
+        var ttsStartEvents = (state.liveTimelineEvents || []).filter(function (event) {
+            return event.event_type === 'tts_start'
+                && Number(event.timestamp) <= cutoff;
+        });
+        var event = {
+            event_type: 'tts_playback_stopped',
+            lane: 'audio',
+            timestamp: cutoff,
+            data: {
+                reason: 'barge_in',
+                trigger: options.trigger || 'unknown',
+                trigger_timestamp: (
+                    options.triggerTimestamp != null
+                    && Number.isFinite(Number(options.triggerTimestamp))
+                        ? Number(options.triggerTimestamp)
+                        : null
+                ),
+                turn_id: ttsStartEvents.length || null,
+                discarded_audio_end: discardedEnd,
+                discarded_audio_ms: Math.max(
+                    0,
+                    Math.round((discardedEnd - cutoff) * 1000)
+                ),
+                sources_stopped: sources.length,
+                playback: 'browser',
+            },
+        };
+        recordClientTimelineEvent(event);
+        renderTimeline();
     }
 }
 
@@ -6960,9 +7488,68 @@ function updateSpeakerButton() {
     }
 }
 
+/**
+ * Capture the currently visible camera frame as a small, portable session preview.
+ * Works with browser/local video and the server-camera MJPEG <img> path.
+ */
+function captureSessionThumbnail() {
+    if (!uiSettings.recordPreviewInSessionHistory) return null;
+
+    const videoFeed = document.getElementById('video-feed');
+    const mjpegFeed = document.getElementById('video-feed-mjpeg');
+    let source = null;
+    let sourceWidth = 0;
+    let sourceHeight = 0;
+
+    const videoReady = (
+        videoFeed && videoFeed.readyState >= 2
+        && videoFeed.videoWidth > 0 && videoFeed.videoHeight > 0
+    );
+    const mjpegReady = (
+        mjpegFeed && mjpegFeed.complete
+        && mjpegFeed.naturalWidth > 0 && mjpegFeed.naturalHeight > 0
+    );
+
+    if (videoReady && videoFeed.style.display === 'block') {
+        source = videoFeed;
+        sourceWidth = videoFeed.videoWidth;
+        sourceHeight = videoFeed.videoHeight;
+    } else if (mjpegReady && mjpegFeed.style.display === 'block') {
+        source = mjpegFeed;
+        sourceWidth = mjpegFeed.naturalWidth;
+        sourceHeight = mjpegFeed.naturalHeight;
+    } else if (videoReady) {
+        source = videoFeed;
+        sourceWidth = videoFeed.videoWidth;
+        sourceHeight = videoFeed.videoHeight;
+    } else if (mjpegReady) {
+        source = mjpegFeed;
+        sourceWidth = mjpegFeed.naturalWidth;
+        sourceHeight = mjpegFeed.naturalHeight;
+    }
+    if (!source || sourceWidth <= 0 || sourceHeight <= 0) return null;
+
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.min(320, sourceWidth);
+        canvas.height = Math.max(1, Math.round(canvas.width * sourceHeight / sourceWidth));
+        const context = canvas.getContext('2d');
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
+        let dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+        // The server accepts at most 128 KiB decoded. A 320px image should be
+        // well below that, but retry lower quality for unusually noisy frames.
+        if (dataUrl.length > 174800) dataUrl = canvas.toDataURL('image/jpeg', 0.45);
+        return dataUrl.length <= 174800 ? dataUrl : null;
+    } catch (error) {
+        console.warn('Could not capture session thumbnail:', error);
+        return null;
+    }
+}
+
 function stopSessionRecording() {
     if (state.sessionState !== 'live') return;
 
+    state.liveSessionThumbnail = captureSessionThumbnail();
     stopTtsPlayback();
     stopLiveSystemStatsPoll();
 
@@ -6973,7 +7560,9 @@ function stopSessionRecording() {
     if (state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
         state.voiceWs.send(JSON.stringify({
             type: 'stop',
-            ttl_bands: state.liveTtlBands || []
+            ttl_bands: state.liveTtlBands || [],
+            tts_playback_segments: state.liveTtsAmplitudeHistory || [],
+            thumbnail: state.liveSessionThumbnail
         }));
         // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for
         // the 2nd turn when the stream ended with only partials) and session_saved. Let the server
@@ -7017,11 +7606,13 @@ function setupEventHandlers() {
     // Session image container: match aspect to video/mjpeg to avoid gray letterboxing
     const videoFeed = document.getElementById('video-feed');
     const mjpegFeed = document.getElementById('video-feed-mjpeg');
+    const previewImage = document.getElementById('preview-image');
     if (videoFeed) {
         videoFeed.addEventListener('loadedmetadata', updateSessionImageContainerAspect);
         videoFeed.addEventListener('resize', updateSessionImageContainerAspect);
     }
     if (mjpegFeed) mjpegFeed.addEventListener('load', updateSessionImageContainerAspect);
+    if (previewImage) previewImage.addEventListener('load', updateSessionImageContainerAspect);
 
     // Theme: Auto / Light / Dark (matches Live RIVA WebUI – Lucide icons)
     const themeToggle = document.getElementById('theme-toggle');
@@ -7469,6 +8060,69 @@ function initTimelineCanvasPan() {
     });
 }
 
+// Hover details for the exact Barge-in playback-stop marker. Canvas elements
+// are not individually focusable, so hit regions are rebuilt during drawing
+// and this single DOM tooltip follows the corresponding red marker.
+function initTimelineEventTooltip() {
+    const canvas = document.getElementById('timeline-canvas');
+    const tooltip = document.getElementById('timeline-event-tooltip');
+    const container = document.getElementById('timeline-content');
+    if (!canvas || !tooltip || !container) return;
+
+    function hideTooltip() {
+        tooltip.hidden = true;
+    }
+
+    canvas.addEventListener('mousemove', function (event) {
+        const rect = canvas.getBoundingClientRect();
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        const regions = state.timelineBargeInHitRegions || [];
+        const hit = regions.find(function (region) {
+            const halfWidth = Math.max(7, Number(region.width || 0) / 2);
+            return Math.abs(localX - region.x) <= halfWidth
+                && localY >= region.y1
+                && localY <= region.y2;
+        });
+        if (!hit) {
+            hideTooltip();
+            return;
+        }
+
+        const rows = [
+            '<strong>Barge-in playback stopped</strong>',
+            'Time: ' + Number(hit.stopTime).toFixed(3) + ' s',
+            'Trigger: ' + escapeHtml(String(hit.trigger || 'unknown')),
+            'Playback: ' + escapeHtml(String(hit.playback || 'browser')),
+        ];
+        if (hit.turnId != null) rows.push('Cancelled turn: ' + escapeHtml(String(hit.turnId)));
+        if (hit.stopLatencyMs != null) rows.push('Trigger → stop: ' + hit.stopLatencyMs + ' ms');
+        if (hit.cancelLatencyMs != null) {
+            rows.push('Stop → backend cancelled: ' + hit.cancelLatencyMs + ' ms');
+        } else if (hit.cancellationPending) {
+            rows.push('Backend cancellation: pending');
+        }
+        if (hit.discardedAudioMs != null) {
+            rows.push('Scheduled audio discarded: ' + Math.round(Number(hit.discardedAudioMs)) + ' ms');
+        }
+        tooltip.innerHTML = rows.join('<br>');
+        tooltip.hidden = false;
+
+        const margin = 8;
+        let left = localX + 12;
+        let top = localY + 12;
+        if (left + tooltip.offsetWidth > container.clientWidth - margin) {
+            left = localX - tooltip.offsetWidth - 12;
+        }
+        if (top + tooltip.offsetHeight > container.clientHeight - margin) {
+            top = localY - tooltip.offsetHeight - 12;
+        }
+        tooltip.style.left = Math.max(margin, left) + 'px';
+        tooltip.style.top = Math.max(margin, top) + 'px';
+    });
+    canvas.addEventListener('mouseleave', hideTooltip);
+}
+
 // ===== Timeline Scrollbar Interaction =====
 function initTimelineScrollbar() {
     const scrollTrack = document.getElementById('timeline-scroll-track');
@@ -7631,14 +8285,15 @@ function getPipelineTableHtml(config, options) {
     const llmModelFull = config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—');
     const asrModel = pipelineModelLabel(asrModelFull);
     const llmModel = pipelineModelLabel(llmModelFull);
-    // Prefer the configured model for REST TTS; Riva uses its discovered model name.
+    // REST/Realtime model and voice are distinct. The helper also repairs the
+    // display of older sessions whose top-level tts_model_name was the voice.
     const isRivaTts = config.tts && (config.tts.backend === 'riva' || config.tts.scheme === 'riva');
-    const ttsLabelFull = config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
-        : (config.tts && (config.tts.riva_model_name || config.tts.model || config.tts.voice))
-            ? (isRivaTts
-                ? (config.tts.riva_model_name || config.tts.model || config.tts.voice)
-                : (config.tts.model || config.tts.voice))
-            : (config.tts ? (isRivaTts ? 'RIVA' : 'Default') : '—');
+    const configuredTtsLabel = (
+        window.MMASConfigHelpers
+        && typeof window.MMASConfigHelpers.getTtsModelName === 'function'
+    ) ? window.MMASConfigHelpers.getTtsModelName(config) : null;
+    const ttsLabelFull = configuredTtsLabel
+        || (config.tts ? (isRivaTts ? 'RIVA' : 'Default') : '—');
     const ttsLabel = pipelineModelLabel(ttsLabelFull);
     /* Segment label: model name only; tooltip shows "ASR: ..." / "VLM: ..." / "TTS: ..." on hover */
     const asrLabel = isTextOnly ? 'n/a' : asrModel;
@@ -7702,12 +8357,14 @@ function getPipelineSummaryHtml(config) {
     const asrModel = pipelineModelLabel(config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet'));
     const llmModel = pipelineModelLabel(config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—'));
     const isRivaTtsSummary = config.tts && (config.tts.backend === 'riva' || config.tts.scheme === 'riva');
-    const ttsLabel = pipelineModelLabel(config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
-        : (config.tts && (config.tts.riva_model_name || config.tts.model || config.tts.voice))
-            ? (isRivaTtsSummary
-                ? (config.tts.riva_model_name || config.tts.model || config.tts.voice)
-                : (config.tts.model || config.tts.voice))
-            : (config.tts ? (isRivaTtsSummary ? 'RIVA' : 'Default') : '—'));
+    const configuredTtsSummary = (
+        window.MMASConfigHelpers
+        && typeof window.MMASConfigHelpers.getTtsModelName === 'function'
+    ) ? window.MMASConfigHelpers.getTtsModelName(config) : null;
+    const ttsLabel = pipelineModelLabel(
+        configuredTtsSummary
+        || (config.tts ? (isRivaTtsSummary ? 'RIVA' : 'Default') : '—')
+    );
     const asr = isTextOnly ? 'n/a' : ('ASR: ' + asrModel);
     const mid = hasCamera ? ('VLM: ' + llmModel) : ('LLM: ' + llmModel);
     const tts = hasSpeaker ? ('TTS: ' + ttsLabel) : 'n/a';
@@ -8076,6 +8733,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Initializing timeline canvas panning...');
     try {
         initTimelineCanvasPan();
+        initTimelineEventTooltip();
         console.log('Timeline canvas panning initialized');
     } catch (error) {
         console.error('Error initializing timeline canvas panning:', error);

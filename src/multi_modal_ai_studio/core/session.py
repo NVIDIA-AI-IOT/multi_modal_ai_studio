@@ -12,6 +12,8 @@ A Session represents a complete conversational interaction with:
 Sessions can be saved to JSON and loaded for later analysis.
 """
 
+import base64
+import binascii
 import json
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -22,6 +24,34 @@ from typing import Optional, Dict, Any, List
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.config.schema import SessionConfig
 from multi_modal_ai_studio.core.timeline import Timeline, TimelineEvent, Lane, EventType
+
+SESSION_THUMBNAIL_PREFIX = "data:image/jpeg;base64,"
+MAX_SESSION_THUMBNAIL_BYTES = 128 * 1024
+
+
+def decode_session_thumbnail(value: Any) -> Optional[bytes]:
+    """Decode a bounded JPEG data URL, returning None for invalid input."""
+    if not isinstance(value, str) or not value.startswith(SESSION_THUMBNAIL_PREFIX):
+        return None
+    encoded = value[len(SESSION_THUMBNAIL_PREFIX):]
+    # Reject an oversized payload before allocating decoded bytes.
+    if not encoded or len(encoded) > ((MAX_SESSION_THUMBNAIL_BYTES + 2) // 3) * 4:
+        return None
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if not decoded or len(decoded) > MAX_SESSION_THUMBNAIL_BYTES:
+        return None
+    # JPEG SOI/EOI prevents another data type being persisted under image/jpeg.
+    if not decoded.startswith(b"\xff\xd8") or not decoded.endswith(b"\xff\xd9"):
+        return None
+    return decoded
+
+
+def validate_session_thumbnail(value: Any) -> Optional[str]:
+    """Return a valid bounded JPEG data URL, otherwise None."""
+    return value if decode_session_thumbnail(value) is not None else None
 
 
 @dataclass
@@ -121,6 +151,10 @@ class Session:
         self.timeline = Timeline()
         self.turns: List[Turn] = []
         self.system_stats: List[Dict[str, Any]] = []  # [{t, cpu, gpu}, ...] session-relative, from client
+        self.tts_playback_segments: List[Dict[str, Any]] = []
+        self.audio_amplitude_history: List[Dict[str, Any]] = []
+        self.ttl_bands: List[Dict[str, Any]] = []
+        self.thumbnail: Optional[str] = None
         self._current_turn: Optional[Dict[str, Any]] = None
         self._metrics: Optional[SessionMetrics] = None
 
@@ -373,6 +407,7 @@ class Session:
             "ttl_bands": getattr(self, "ttl_bands", None) or [],
             "app_version": getattr(self, "app_version", None) or __version__,
             "capture_health": getattr(self, "capture_health", None),
+            "thumbnail": validate_session_thumbnail(getattr(self, "thumbnail", None)),
         }
 
     def save(self, path: Path) -> None:
@@ -424,6 +459,7 @@ class Session:
         session.audio_amplitude_history = data.get("audio_amplitude_history") or []
         session.ttl_bands = data.get("ttl_bands") or []
         session.app_version = data.get("app_version")
+        session.thumbnail = validate_session_thumbnail(data.get("thumbnail"))
         session.apply_ttl_bands()  # so loaded session metrics match band-based TTL
 
         # Parse created_at (support Z for UTC from saved JSON); store naive UTC

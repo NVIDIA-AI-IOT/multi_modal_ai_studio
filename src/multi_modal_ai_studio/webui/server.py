@@ -28,6 +28,7 @@ load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
 from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig
+from multi_modal_ai_studio.core.session import decode_session_thumbnail
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.riva import list_riva_tts_voices_sync
@@ -210,6 +211,7 @@ class WebUIServer:
     def setup_routes(self):
         """Setup HTTP routes."""
         self.app.router.add_get('/api/sessions', self.handle_list_sessions)
+        self.app.router.add_get('/api/sessions/{session_id}/thumbnail', self.handle_get_session_thumbnail)
         self.app.router.add_get('/api/sessions/{session_id}', self.handle_get_session)
         self.app.router.add_patch('/api/sessions/{session_id}', self.handle_patch_session)
         self.app.router.add_delete('/api/sessions/{session_id}', self.handle_delete_session)
@@ -287,9 +289,9 @@ class WebUIServer:
         return response
 
     async def handle_list_sessions(self, request):
-        """API endpoint to list all sessions."""
+        """API endpoint to list lightweight session summaries."""
         try:
-            sessions = self.load_all_sessions()
+            sessions = self.load_all_sessions(summaries=True)
             return web.json_response(sessions)
         except Exception as e:
             logger.error(f"Error loading sessions: {e}")
@@ -303,15 +305,14 @@ class WebUIServer:
         session_id = request.match_info['session_id']
 
         try:
-            sessions = self.load_all_sessions()
-            session = next((s for s in sessions if s['session_id'] == session_id), None)
-
-            if session is None:
+            path = self._session_file_path(session_id)
+            if path is None:
                 return web.json_response(
                     {"error": "Session not found"},
                     status=404
                 )
-
+            with open(path, "r") as session_file:
+                session = json.load(session_file)
             return web.json_response(session)
         except Exception as e:
             logger.error(f"Error loading session {session_id}: {e}")
@@ -319,6 +320,27 @@ class WebUIServer:
                 {"error": str(e)},
                 status=500
             )
+
+    async def handle_get_session_thumbnail(self, request: web.Request) -> web.Response:
+        """Return the optional embedded session preview as a JPEG."""
+        session_id = request.match_info["session_id"]
+        path = self._session_file_path(session_id)
+        if path is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        try:
+            with open(path, "r") as session_file:
+                session = json.load(session_file)
+            image = decode_session_thumbnail(session.get("thumbnail"))
+            if image is None:
+                return web.json_response({"error": "Session thumbnail not found"}, status=404)
+            return web.Response(
+                body=image,
+                content_type="image/jpeg",
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+        except Exception as e:
+            logger.error("Error loading session thumbnail %s: %s", session_id, e)
+            return web.json_response({"error": str(e)}, status=500)
 
     def _session_file_path(self, session_id: str) -> Optional[Path]:
         """Resolve session JSON file path; return None if session_id is invalid (e.g. path traversal)."""
@@ -889,7 +911,62 @@ class WebUIServer:
             await asyncio.get_running_loop().run_in_executor(None, cap.release)
         return response
 
-    def load_all_sessions(self) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _session_list_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        """Keep only fields needed by the pipeline summary in the session list."""
+        config = config if isinstance(config, dict) else {}
+        summary: Dict[str, Any] = {}
+        top_level_keys = ("asr_model_name", "llm_model_name", "tts_model_name")
+        for key in top_level_keys:
+            if key in config:
+                summary[key] = config[key]
+        section_keys = {
+            "asr": ("backend", "scheme", "model"),
+            "llm": ("backend", "scheme", "model"),
+            "tts": ("backend", "scheme", "riva_model_name", "model", "voice"),
+            "devices": (
+                "microphone",
+                "audio_input_source",
+                "camera",
+                "video_source",
+                "speaker",
+                "audio_output_source",
+            ),
+        }
+        for section, keys in section_keys.items():
+            values = config.get(section)
+            if isinstance(values, dict):
+                summary[section] = {
+                    key: values[key]
+                    for key in keys
+                    if key in values
+                }
+        return summary
+
+    @classmethod
+    def _session_list_summary(cls, session: Dict[str, Any]) -> Dict[str, Any]:
+        """Return list metadata without timeline, audio, turns, or secrets."""
+        timeline = session.get("timeline")
+        if isinstance(timeline, dict):
+            events = timeline.get("events")
+            event_count = len(events) if isinstance(events, list) else 0
+        else:
+            event_count = len(timeline) if isinstance(timeline, list) else 0
+        return {
+            "session_id": session.get("session_id"),
+            "name": session.get("name"),
+            "created_at": session.get("created_at"),
+            "config": cls._session_list_config(session.get("config") or {}),
+            "metrics": session.get("metrics") or {},
+            "timeline_event_count": event_count,
+            "app_version": session.get("app_version"),
+            "has_thumbnail": decode_session_thumbnail(session.get("thumbnail")) is not None,
+        }
+
+    def load_all_sessions(
+        self,
+        summaries: bool = False,
+    ) -> List[Dict[str, Any]]:
         """Load all session JSON files from session directory.
 
         Returns:
@@ -906,7 +983,11 @@ class WebUIServer:
             try:
                 with open(session_file, 'r') as f:
                     session_data = json.load(f)
-                    sessions.append(session_data)
+                    sessions.append(
+                        self._session_list_summary(session_data)
+                        if summaries
+                        else session_data
+                    )
             except Exception as e:
                 logger.error(f"Error loading {session_file}: {e}")
 
