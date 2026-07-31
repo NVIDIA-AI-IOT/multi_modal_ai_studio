@@ -27,6 +27,8 @@ const state = {
     })(),
     /** MediaStream from getUserMedia for camera/mic preview (setup mode); stop on STOP or config change */
     previewStream: null,
+    /** Invalidates asynchronous camera/mic preview results after a device change. */
+    previewGeneration: 0,
     /** Mic waveform: last 2000ms amplitude ring buffer (one value per ~16ms at 60fps) */
     micAmplitudeBuffer: [],
     micWaveformAnimId: null,
@@ -846,8 +848,24 @@ function _normalizePresetToFrontend(preset) {
     }
     if (out.devices) {
         if (out.devices.video_source && !out.devices.camera) out.devices.camera = out.devices.video_source;
-        if (out.devices.audio_input_source && !out.devices.microphone) out.devices.microphone = out.devices.audio_input_source;
-        if (out.devices.audio_output_source && !out.devices.speaker) out.devices.speaker = out.devices.audio_output_source;
+        if (out.devices.audio_input_source && !out.devices.microphone) {
+            if (out.devices.audio_input_source === 'alsa') {
+                out.devices.microphone = 'alsa:' + (out.devices.audio_input_device || 'default');
+            } else if (out.devices.audio_input_source === 'usb') {
+                out.devices.microphone = 'pyaudio:' + (out.devices.audio_input_device || '');
+            } else {
+                out.devices.microphone = out.devices.audio_input_source;
+            }
+        }
+        if (out.devices.audio_output_source && !out.devices.speaker) {
+            if (out.devices.audio_output_source === 'alsa') {
+                out.devices.speaker = 'alsa:' + (out.devices.audio_output_device || 'default');
+            } else if (out.devices.audio_output_source === 'usb') {
+                out.devices.speaker = 'pyaudio:' + (out.devices.audio_output_device || '');
+            } else {
+                out.devices.speaker = out.devices.audio_output_source;
+            }
+        }
     }
     return out;
 }
@@ -3971,10 +3989,20 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     ) ? window.MMASTimelineHelpers.pairTimelineEvents : function () {
         return [];
     };
-    const asrRequestIntervals = pairTimelineEvents(
+    const allAsrRequestIntervals = pairTimelineEvents(
         timeline,
         'asr_inference_start',
         'asr_inference_end'
+    );
+    const matchAsrRequestIntervalsToFinals = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.matchAsrRequestIntervalsToFinals === 'function'
+    ) ? window.MMASTimelineHelpers.matchAsrRequestIntervalsToFinals : function (intervals) {
+        return intervals;
+    };
+    const asrRequestIntervals = matchAsrRequestIntervalsToFinals(
+        allAsrRequestIntervals,
+        asrFinals
     );
 
     // REST ASR emits no partial transcripts. Its explicit HTTP request
@@ -4507,8 +4535,22 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         ctx.lineWidth = lineWidth;
         const laneY = getLaneY(ttsLaneIndex);
         const laneH = getLaneHeight(ttsLaneIndex);
-        ttsFirstAudios.forEach(function (ev) {
-            const t = ev.timestamp != null ? ev.timestamp : 0;
+        const observedPlaybackSegments = (inLive || hasStoppedLiveData)
+            ? (liveTtsSegments || [])
+            : (replayTtsSegments || []);
+        const resolveTtsFirstAudioTimes = (
+            window.MMASTimelineHelpers
+            && typeof window.MMASTimelineHelpers.resolveTtsFirstAudioTimes === 'function'
+        ) ? window.MMASTimelineHelpers.resolveTtsFirstAudioTimes : function (_starts, firstAudios) {
+            return firstAudios.map(function (event) {
+                return Number(event.timestamp || 0);
+            });
+        };
+        resolveTtsFirstAudioTimes(
+            ttsStarts,
+            ttsFirstAudios,
+            observedPlaybackSegments
+        ).forEach(function (t) {
             const x = PADDING_LEFT + (t - timelineOffset) * timeScale;
             if (x < PADDING_LEFT - 2 || x > width - PADDING_RIGHT + 2) return;
             ctx.beginPath();
@@ -4605,16 +4647,19 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 const userGain = (typeof uiSettings.userAudioGain === 'number' ? uiSettings.userAudioGain : 1);
                 const barWidthPx = 2;
                 const tStep = 0.025; // same as TTS (~40 Hz) for matching visual density
+                const firstUserTs = liveAmplitudeHistory.length ? (liveAmplitudeHistory[0].timestamp != null ? liveAmplitudeHistory[0].timestamp : liveAmplitudeHistory[0][0]) : 0;
                 const lastUserTs = liveAmplitudeHistory.length ? (liveAmplitudeHistory[liveAmplitudeHistory.length - 1].timestamp != null ? liveAmplitudeHistory[liveAmplitudeHistory.length - 1].timestamp : liveAmplitudeHistory[liveAmplitudeHistory.length - 1][0]) : 0;
                 for (let t = visibleStart; t <= visibleEnd; t += tStep) {
-                    const rawAmp = (inLive && t > lastUserTs) ? 0 : getAmplitudeAtTime(liveAmplitudeHistory, t);
+                    // Draw collected silence as a 1 px center line, but do not
+                    // imply capture outside the timestamp range we received.
+                    if (t < firstUserTs || t > lastUserTs) continue;
+                    const rawAmp = getAmplitudeAtTime(liveAmplitudeHistory, t);
                     const amp = Math.min(100, rawAmp * userGain);
-                    if (amp <= 0) continue;
                     ctx.fillStyle = getMutedAtTime(liveAmplitudeHistory, t) ? audioColorMuted : audioColorGreen;
                     const x = visibleLeft + (t - timelineOffset) * timeScale;
                     const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
-                    const y1 = centerY - halfH;
                     const barHeight = Math.max(1, halfH * 2);
+                    const y1 = centerY - barHeight / 2;
                     ctx.fillRect(x, y1, barWidthPx, barHeight);
                 }
                 ctx.globalAlpha = 1.0;
@@ -4682,12 +4727,11 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             for (let t = visibleStart; t <= visibleEnd; t += tStep) {
                 if (t < userT0 || t > userT1) continue;
                 const amp = Math.min(100, getAmplitudeAtTime(replayAudioAmplitudeHistory, t) * userGain);
-                if (amp <= 0) continue;
                 ctx.fillStyle = getMutedAtTime(replayAudioAmplitudeHistory, t) ? audioColorMuted : audioColorGreen;
                 const x = visibleLeft + (t - timelineOffset) * timeScale;
                 const halfH = (Math.min(100, Math.max(0, amp)) / 100) * maxBarHalf;
-                const y1 = centerY - halfH;
                 const barHeight = Math.max(1, halfH * 2);
+                const y1 = centerY - barHeight / 2;
                 ctx.fillRect(x, y1, barWidthPx, barHeight);
             }
             ctx.globalAlpha = 1.0;
@@ -5021,6 +5065,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                     return {
                         x: point.x,
                         y: laneY + laneH * (1 - value / 100),
+                        t: Number(point.sample && point.sample.t),
                     };
                 });
             }
@@ -5118,8 +5163,18 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             ctx.rect(visibleLeft, laneY, visibleRight - visibleLeft, laneH);
             ctx.clip();
             // Draw CPU area first (transparent blue), then GPU area (transparent green); overlap blends darker
-            drawAreaAndLine(cpuPoints, '#2196F3', '#2196F3', 0.45);
-            drawAreaAndLine(gpuPoints, '#4CAF50', '#4CAF50', 0.45);
+            const splitPointsAtTimeGaps = (
+                window.MMASTimelineHelpers
+                && typeof window.MMASTimelineHelpers.splitPointsAtTimeGaps === 'function'
+            ) ? window.MMASTimelineHelpers.splitPointsAtTimeGaps : function (points) {
+                return [points];
+            };
+            splitPointsAtTimeGaps(cpuPoints, 0.2).forEach(function (run) {
+                drawAreaAndLine(run, '#2196F3', '#2196F3', 0.45);
+            });
+            splitPointsAtTimeGaps(gpuPoints, 0.2).forEach(function (run) {
+                drawAreaAndLine(run, '#4CAF50', '#4CAF50', 0.45);
+            });
 
             ctx.restore();
         }
@@ -5576,6 +5631,21 @@ function buildVoiceConfig() {
             config.tts.realtime_url = (config.asr.realtime_url || 'wss://api.openai.com/v1/realtime').trim();
         }
     }
+    // Prefer the canonical microphone selector over stale audio_input_* fields.
+    // Presets commonly start with audio_input_source=browser; without syncing
+    // these fields here, choosing an ALSA microphone only updates the label and
+    // the server continues to use browser audio.
+    var mic = (config.devices && config.devices.microphone) ? String(config.devices.microphone) : '';
+    if (mic.startsWith('alsa:')) {
+        config.devices.audio_input_source = 'alsa';
+        config.devices.audio_input_device = mic.slice(5) || 'default';
+    } else if (mic.startsWith('pyaudio:')) {
+        config.devices.audio_input_source = 'usb';
+        config.devices.audio_input_device = mic.slice(8) || '';
+    } else if (mic === 'browser' || mic === 'none') {
+        config.devices.audio_input_source = mic;
+        config.devices.audio_input_device = null;
+    }
     var spk = (config.devices && config.devices.speaker) ? String(config.devices.speaker) : '';
     if (spk.startsWith('alsa:')) {
         config.devices.audio_output_source = 'alsa';
@@ -5593,7 +5663,7 @@ function buildVoiceConfig() {
     if (cam && (cam.indexOf('/dev/') === 0 || config.devices.video_source === 'usb')) {
         config.devices.video_device_name = getDeviceDisplayLabel('camera') || undefined;
     }
-    var mic = (config.devices.microphone) ? String(config.devices.microphone) : '';
+    mic = (config.devices.microphone) ? String(config.devices.microphone) : '';
     if (mic && (mic.indexOf('alsa:') === 0 || mic.indexOf('pyaudio:') === 0)) {
         config.devices.audio_input_device_name = getDeviceDisplayLabel('mic') || undefined;
     }
@@ -5680,6 +5750,9 @@ function startMicWaveformFromServer() {
 
 /** Stop camera/mic preview stream and clear video/img elements. Call on STOP or when leaving live session. */
 function stopPreviewStream() {
+    // Any getUserMedia/WebRTC result still in flight belongs to an older
+    // camera selection and must not re-attach after Camera is set to None.
+    state.previewGeneration += 1;
     // Keep Server USB voice WS open when we're in setup with Server USB selected, so a refresh (e.g. updateLiveSessionUI) doesn't close and immediately reopen it and hit "Device or resource busy".
     if (!(state.sessionState === 'setup' && isServerMicSelected())) {
     stopMicWaveform();
@@ -5772,6 +5845,7 @@ function startPreviewStream(options) {
     }
 
     if (!keepServerCamera) stopPreviewStream();
+    const previewGeneration = state.previewGeneration;
     if (wantAudio && isServerMicSelected()) {
         if (window._micWaveformDebug) console.log('[MicWaveform] startPreviewStream: calling startMicWaveformFromServer (wantAudio, Server USB selected)');
         startMicWaveformFromServer();
@@ -5785,6 +5859,7 @@ function startPreviewStream(options) {
         var streamUrl = getApiBase() + '/api/camera/stream?device=' + deviceParam;
         var wsUrl = (getApiBase().replace(/^https/, 'wss').replace(/^http/, 'ws') || ('wss://' + window.location.host)) + '/ws/camera-webrtc?device=' + deviceParam;
         function fallbackToMjpeg() {
+            if (previewGeneration !== state.previewGeneration) return;
             // Close WebRTC so the server releases the camera device before MJPEG opens it
             if (state.cameraWebrtcWs) {
                 try { state.cameraWebrtcWs.close(); } catch (e) {}
@@ -5812,6 +5887,15 @@ function startPreviewStream(options) {
         state.cameraWebrtcPc = pc;
         pc.addTransceiver('video', { direction: 'recvonly' });
         pc.ontrack = function (e) {
+            if (
+                previewGeneration !== state.previewGeneration
+                || (currentConfig.devices || {}).camera === 'none'
+            ) {
+                if (e.streams && e.streams[0]) {
+                    e.streams[0].getTracks().forEach(function (track) { track.stop(); });
+                }
+                return;
+            }
             // Always show video from server camera WebRTC - during setup AND live session
             if (e.streams && e.streams[0] && videoFeed) {
                 videoFeed.srcObject = e.streams[0];
@@ -5902,7 +5986,14 @@ function startPreviewStream(options) {
             var audioOnlyConstraint = state.selectedBrowserMicId ? { deviceId: { exact: state.selectedBrowserMicId } } : true;
             navigator.mediaDevices.getUserMedia({ video: false, audio: audioOnlyConstraint })
                 .then(function (stream) {
-                    if (!state.isLiveSession || state.sessionState !== 'setup') { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+                    if (
+                        previewGeneration !== state.previewGeneration
+                        || !state.isLiveSession
+                        || state.sessionState !== 'setup'
+                    ) {
+                        stream.getTracks().forEach(function (t) { t.stop(); });
+                        return;
+                    }
                     if (state.previewStream) state.previewStream.getTracks().forEach(function (t) { t.stop(); });
                     state.previewStream = stream;
                     updateDeviceIndicators();
@@ -5932,7 +6023,12 @@ function startPreviewStream(options) {
     var audioConstraint = wantAudioForPreview ? (state.selectedBrowserMicId ? { deviceId: { exact: state.selectedBrowserMicId } } : true) : false;
     navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: audioConstraint })
         .then(function (stream) {
-            if (!state.isLiveSession || state.sessionState !== 'setup') {
+            if (
+                previewGeneration !== state.previewGeneration
+                || !state.isLiveSession
+                || state.sessionState !== 'setup'
+                || (wantBrowserVideo && (currentConfig.devices || {}).camera === 'none')
+            ) {
                 stream.getTracks().forEach(function (t) { t.stop(); });
                 return;
             }
@@ -5956,6 +6052,7 @@ function startPreviewStream(options) {
             }
         })
         .catch(function (err) {
+            if (previewGeneration !== state.previewGeneration) return;
             var isRetryAttempt = state.cameraPreviewRetryScheduled;
             if (isRetryAttempt) {
                 console.warn('[Preview] Camera still unavailable (' + (err.name || 'Error') + '). Use "Retry camera preview" or set Camera to None.');
@@ -6103,13 +6200,42 @@ function updateLiveSessionUI() {
             setSessionMetaRight('', '');
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
-            if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             var mjpegFeedLive = document.getElementById('video-feed-mjpeg');
+            var liveDv = currentConfig.devices || {};
+            var liveCam = liveDv.camera != null ? liveDv.camera : liveDv.video_source;
+            var hasConfiguredLiveVideo = (
+                liveCam !== 'none'
+                && liveCam != null
+                && liveCam !== undefined
+            );
+            if (!hasConfiguredLiveVideo) {
+                // Camera=None is authoritative even if a previous asynchronous
+                // getUserMedia/WebRTC callback left a video element populated.
+                if (state.previewStream) {
+                    state.previewStream.getVideoTracks().forEach(function (track) { track.stop(); });
+                }
+                if (videoFeed) {
+                    videoFeed.srcObject = null;
+                    videoFeed.src = '';
+                    videoFeed.style.display = 'none';
+                }
+                if (mjpegFeedLive) {
+                    mjpegFeedLive.src = '';
+                    mjpegFeedLive.style.display = 'none';
+                }
+                if (imagePlaceholder) {
+                    imagePlaceholder.style.display = 'flex';
+                    updateImagePlaceholderContent();
+                }
+            } else if (imagePlaceholder) {
+                imagePlaceholder.style.display = 'none';
+            }
             var hasWebRTC = videoFeed && videoFeed.srcObject && videoFeed.srcObject.getVideoTracks().length > 0;
             var hasMjpeg = mjpegFeedLive && mjpegFeedLive.src && mjpegFeedLive.src !== '';
-            var liveDv = currentConfig.devices || {};
             var hasLocalVideo = (liveDv.camera === 'local' || liveDv.video_source === 'local') && videoFeed && videoFeed.src && videoFeed.src.indexOf('/api/videos/file') !== -1;
-            if (hasLocalVideo) {
+            if (!hasConfiguredLiveVideo) {
+                // Feeds were explicitly hidden above.
+            } else if (hasLocalVideo) {
                 videoFeed.style.display = 'block';
                 videoFeed.loop = true;
                 videoFeed.muted = true;
@@ -6144,7 +6270,9 @@ function updateLiveSessionUI() {
             setSessionMetaRight(recordedLine, filenameHtml);
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
             document.getElementById('config-panel')?.classList.remove('config-panel--start-ready');
-            const hasThumbnail = !!state.liveSessionThumbnail;
+            var stoppedDv = currentConfig.devices || {};
+            var stoppedCam = stoppedDv.camera != null ? stoppedDv.camera : stoppedDv.video_source;
+            const hasThumbnail = stoppedCam !== 'none' && !!state.liveSessionThumbnail;
             if (sessionImageEl) sessionImageEl.style.display = hasThumbnail ? '' : 'none';
             if (imagePlaceholder) imagePlaceholder.style.display = 'none';
             if (previewImage) {
@@ -6228,10 +6356,25 @@ function updateHistoricalSessionPreview() {
 
         videoFeed.style.display = 'none';
         const sessionImageEl = document.getElementById('session-image');
-        if (session.thumbnail) {
+        const recordedDevices = (session.config && session.config.devices) || {};
+        const recordedCamera = recordedDevices.camera != null
+            ? recordedDevices.camera
+            : recordedDevices.video_source;
+        const recordedHasVideo = (
+            recordedCamera !== 'none'
+            && recordedCamera != null
+            && recordedCamera !== undefined
+        );
+        if (session.thumbnail && recordedHasVideo) {
             previewImage.src = session.thumbnail;
             previewImage.style.display = 'block';
             imagePlaceholder.style.display = 'none';
+            if (sessionImageEl) sessionImageEl.style.display = '';
+        } else if (!recordedHasVideo) {
+            previewImage.src = '';
+            previewImage.style.display = 'none';
+            imagePlaceholder.style.display = 'flex';
+            updateImagePlaceholderContent();
             if (sessionImageEl) sessionImageEl.style.display = '';
         } else {
             previewImage.style.display = 'none';
@@ -7575,6 +7718,18 @@ function updateSpeakerButton() {
 function captureSessionThumbnail() {
     if (!uiSettings.recordPreviewInSessionHistory) return null;
 
+    const configuredDevices = currentConfig.devices || {};
+    const configuredCamera = configuredDevices.camera != null
+        ? configuredDevices.camera
+        : configuredDevices.video_source;
+    if (
+        configuredCamera === 'none'
+        || configuredCamera == null
+        || configuredCamera === undefined
+    ) {
+        return null;
+    }
+
     const videoFeed = document.getElementById('video-feed');
     const mjpegFeed = document.getElementById('video-feed-mjpeg');
     let source = null;
@@ -7595,14 +7750,6 @@ function captureSessionThumbnail() {
         sourceWidth = videoFeed.videoWidth;
         sourceHeight = videoFeed.videoHeight;
     } else if (mjpegReady && mjpegFeed.style.display === 'block') {
-        source = mjpegFeed;
-        sourceWidth = mjpegFeed.naturalWidth;
-        sourceHeight = mjpegFeed.naturalHeight;
-    } else if (videoReady) {
-        source = videoFeed;
-        sourceWidth = videoFeed.videoWidth;
-        sourceHeight = videoFeed.videoHeight;
-    } else if (mjpegReady) {
         source = mjpegFeed;
         sourceWidth = mjpegFeed.naturalWidth;
         sourceHeight = mjpegFeed.naturalHeight;

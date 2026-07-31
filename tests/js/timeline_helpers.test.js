@@ -9,17 +9,21 @@ const test = require('node:test');
 const {
     applySpeechTimingEvent,
     buildBargeInWindows,
+    buildIntervalPeakMarkers,
     buildPeakPreservingPoints,
     buildTtsSegmentsFromTimeline,
     closeTtlBandAt,
     dedupeTimelineEventsByTimestamp,
     getAsrLegendSpec,
     hasDenseTtsAmplitudeTimeline,
+    matchAsrRequestIntervalsToFinals,
     pairTimelineEvents,
     rebuildTtsPlaybackSegments,
     selectFirstPlaybackTimes,
+    resolveTtsFirstAudioTimes,
     splitAudioSegmentsAt,
     syncLiveSessionClock,
+    splitPointsAtTimeGaps,
     truncateAudioSegmentsAt,
 } = require('../../src/multi_modal_ai_studio/webui/static/timeline_helpers.js');
 
@@ -81,8 +85,40 @@ test('turn-scoped first audio survives a short barge-in playback gap', () => {
             ],
         ]
     );
-
     assert.deepEqual(playbackTimes, [12.645, 22.784]);
+});
+
+test('ASR request matching excludes an empty request before the next speech turn', () => {
+    const matched = matchAsrRequestIntervalsToFinals([
+        { start: 4.263, end: 4.629 },
+        { start: 8.245, end: 8.523 },
+        { start: 10.639, end: 11.101 },
+    ], [
+        { timestamp: 4.630 },
+        { timestamp: 11.102 },
+    ]);
+
+    assert.deepEqual(matched.map(interval => [interval.start, interval.end]), [
+        [4.263, 4.629],
+        [10.639, 11.101],
+    ]);
+});
+
+test('ASR GPU marker selects only the strongest sample inside each request', () => {
+    const markers = buildIntervalPeakMarkers([
+        { t: 1.9, gpu: 99 },
+        { t: 2.02, gpu: 41 },
+        { t: 2.08, gpu: 96 },
+        { t: 2.2, gpu: 88 },
+        { t: 5.1, gpu: 3 },
+    ], [
+        { start: 2.0, end: 2.1 },
+        { start: 5.0, end: 5.2 },
+    ], 5);
+
+    assert.equal(markers.length, 1);
+    assert.equal(markers[0].t, 2.08);
+    assert.equal(markers[0].value, 96);
 });
 
 test('GPU plotting retains the peak when samples share a screen pixel', () => {
@@ -98,6 +134,39 @@ test('GPU plotting retains the peak when samples share a screen pixel', () => {
     );
 
     assert.deepEqual(points.map(point => point.value), [73, 4]);
+});
+
+test('utilization plotting splits rather than interpolating missing telemetry', () => {
+    const runs = splitPointsAtTimeGaps([
+        { t: 6.30, value: 56 },
+        { t: 6.35, value: 56 },
+        { t: 8.28, value: 0 },
+        { t: 8.33, value: 0 },
+    ], 0.2);
+
+    assert.deepEqual(runs.map(run => run.map(point => point.t)), [
+        [6.30, 6.35],
+        [8.28, 8.33],
+    ]);
+});
+
+test('TTFA prefers the browser-observed playback start over server first bytes', () => {
+    const times = resolveTtsFirstAudioTimes(
+        [
+            { timestamp: 5.020 },
+            { timestamp: 11.492 },
+        ],
+        [
+            { timestamp: 6.196 },
+            { timestamp: 12.714 },
+        ],
+        [
+            { startTime: 5.974, endTime: 5.999 },
+            { startTime: 12.493, endTime: 12.518 },
+        ],
+    );
+
+    assert.deepEqual(times, [5.974, 12.493]);
 });
 
 test('ASR boundary aliases at the same timestamp count as one turn boundary', () => {

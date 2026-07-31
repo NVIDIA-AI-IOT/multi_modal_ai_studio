@@ -39,13 +39,17 @@ try:
     from multi_modal_ai_studio.devices.playback import (
         start_server_speaker_playback,
         stop_server_speaker_playback,
+        write_server_speaker_audio,
     )
 except ImportError:
     # playback.py may be missing on some branches (e.g. upstream main); stub so app still starts.
     def start_server_speaker_playback(device: str, sample_rate: int, proc_holder: Optional[list] = None):
         return None
 
-    def stop_server_speaker_playback(proc) -> None:
+    def stop_server_speaker_playback(proc, immediate: bool = False) -> None:
+        pass
+
+    def write_server_speaker_audio(proc, audio: bytes) -> None:
         pass
 
 from multi_modal_ai_studio.config.schema import (
@@ -656,7 +660,11 @@ async def _run_realtime_loop(
                         if realtime_barge_in.observe_asr(is_final=False, text=ev.text):
                             realtime_tts_cancelled = True
                             if server_speaker_proc is not None:
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                             logger.info("[barge_in] Realtime Server speaker stopped by partial ASR")
                 if ev.kind == "transcript_completed":
@@ -668,7 +676,11 @@ async def _run_realtime_loop(
                         if realtime_barge_in.observe_asr(is_final=True, text=ev.text):
                             realtime_tts_cancelled = True
                             if server_speaker_proc is not None:
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                             logger.info("[barge_in] Realtime Server speaker stopped by final ASR")
                 if ev.kind == "output_transcript_delta":
@@ -737,10 +749,17 @@ async def _run_realtime_loop(
                             )
                         if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                             try:
-                                server_speaker_proc.stdin.write(ev.audio)
-                                server_speaker_proc.stdin.flush()
+                                await asyncio.to_thread(
+                                    write_server_speaker_audio,
+                                    server_speaker_proc,
+                                    ev.audio,
+                                )
                             except (BrokenPipeError, OSError):
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                     b64 = base64.b64encode(ev.audio).decode("ascii")
                     payload = {
@@ -770,7 +789,10 @@ async def _run_realtime_loop(
             pass
         finally:
             if server_speaker_proc is not None:
-                stop_server_speaker_playback(server_speaker_proc)
+                await asyncio.to_thread(
+                    stop_server_speaker_playback,
+                    server_speaker_proc,
+                )
 
     async def receive_loop() -> None:
         nonlocal _user_amplitude_sent, mic_muted
@@ -2227,11 +2249,18 @@ async def _run_voice_pipeline(
                                 )
                         if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                             try:
-                                server_speaker_proc.stdin.write(chunk.audio)
-                                server_speaker_proc.stdin.flush()
+                                await asyncio.to_thread(
+                                    write_server_speaker_audio,
+                                    server_speaker_proc,
+                                    chunk.audio,
+                                )
                             except (BrokenPipeError, OSError) as e:
                                 logger.debug("Server speaker write failed: %s", e)
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                     amplitude_segments: List[Dict[str, Any]] = []
                     if session.timeline.start_time is not None and chunk.audio:
@@ -2596,32 +2625,38 @@ async def _run_voice_pipeline(
                                         )
                                 if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                                     try:
-                                        server_speaker_proc.stdin.write(chunk.audio)
-                                        server_speaker_proc.stdin.flush()
+                                        await asyncio.to_thread(
+                                            write_server_speaker_audio,
+                                            server_speaker_proc,
+                                            chunk.audio,
+                                        )
                                     except (BrokenPipeError, OSError) as e:
                                         logger.debug("Server speaker write failed (aplay may have exited): %s", e)
-                                        stop_server_speaker_playback(server_speaker_proc)
+                                        await asyncio.to_thread(
+                                            stop_server_speaker_playback,
+                                            server_speaker_proc,
+                                            True,
+                                        )
                                         server_speaker_proc = None
                             amplitude_segments: List[Dict[str, Any]] = []
                             if session.timeline.start_time is not None and chunk.audio:
-                                amps = _pcm_rms_slices(
+                                raw_segments, tts_amplitude_next_t = _pcm_amplitude_segments(
                                     chunk.audio,
                                     sample_rate=chunk.sample_rate,
+                                    start_time=tts_amplitude_next_t,
                                     window_s=_amplitude_window_s,
                                 )
-                                ts_send = time.time() - session.timeline.start_time
-                                for i, a in enumerate(amps):
-                                    t_start = ts_send - (len(amps) - i) * _amplitude_window_s
-                                    t_end = t_start + _amplitude_window_s
+                                for segment in raw_segments:
                                     session.timeline.add_audio_amplitude(
-                                        amplitude=a, source="tts", timestamp=t_start
+                                        amplitude=segment["amplitude"],
+                                        source="tts",
+                                        timestamp=segment["startTime"],
                                     )
                                     amplitude_segments.append({
-                                        "startTime": round(t_start, 3),
-                                        "endTime": round(t_end, 3),
-                                        "amplitude": round(a, 2),
+                                        "startTime": round(segment["startTime"], 3),
+                                        "endTime": round(segment["endTime"], 3),
+                                        "amplitude": round(segment["amplitude"], 2),
                                     })
-                                tts_amplitude_next_t = ts_send
                             b64 = base64.b64encode(chunk.audio).decode("ascii")
                             payload = {
                                 "type": "tts_audio",
@@ -2689,7 +2724,11 @@ async def _run_voice_pipeline(
                             if session.timeline.start_time
                             else 0
                         )
-                        stop_server_speaker_playback(server_speaker_proc)
+                        await asyncio.to_thread(
+                            stop_server_speaker_playback,
+                            server_speaker_proc,
+                            tts_interrupted,
+                        )
                         if tts_interrupted:
                             playback_data = {
                                 "reason": "barge_in",
@@ -2854,6 +2893,8 @@ async def _run_voice_pipeline(
 
         process: Optional[asyncio.subprocess.Process] = None
         stream_failed = False
+        last_stream_emit = 0.0
+        pending_gpu_peak: Optional[float] = None
         try:
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -2873,10 +2914,29 @@ async def _run_voice_pipeline(
                     if gpu is None:
                         stream_failed = True
                         break
+                    pending_gpu_peak = (
+                        gpu
+                        if pending_gpu_peak is None
+                        else max(pending_gpu_peak, gpu)
+                    )
+                    now = loop.time()
+                    # nvidia-smi can buffer several lines while the GPU is
+                    # busy, then deliver them within microseconds. Sampling
+                    # psutil for every buffered line produces false 33/50/100%
+                    # CPU spikes. Coalesce bursts back to the requested 20 Hz
+                    # cadence while retaining the interval's GPU peak.
+                    if not system_stats_module.stream_sample_is_due(
+                        now,
+                        last_stream_emit,
+                        interval,
+                    ):
+                        continue
                     await emit_sample(
                         system_stats_module.read_cpu_percent_nonblocking(),
-                        gpu,
+                        pending_gpu_peak,
                     )
+                    pending_gpu_peak = None
+                    last_stream_emit = now
             except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
                 logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
                 stream_failed = True
@@ -2890,20 +2950,34 @@ async def _run_voice_pipeline(
                     await process.wait()
 
         # Older Jetsons may report N/A through nvidia-smi while exposing the
-        # nvgpu devfreq load counter. Keep the same 20 Hz cadence without
-        # launching a subprocess for every sample.
+        # nvgpu devfreq load counter. Thor has no such load path, so retry a
+        # one-shot nvidia-smi query at a lower cadence if the persistent stream
+        # exits. CPU samples retain the 20 Hz cadence.
         if stream_failed and not stopped.is_set():
             next_sample = loop.time()
+            next_gpu_fallback_sample = loop.time()
             while not stopped.is_set():
-                gpu = await loop.run_in_executor(
-                    None,
-                    system_stats_module._read_jetson_sysfs_gpu_percent,
-                )
+                gpu = None
+                now = loop.time()
+                if now >= next_gpu_fallback_sample:
+                    gpu = await loop.run_in_executor(
+                        None,
+                        system_stats_module.read_gpu_percent_after_stream_failure,
+                    )
+                    next_gpu_fallback_sample = (
+                        now
+                        + system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS
+                        / 1000.0
+                    )
                 await emit_sample(
                     system_stats_module.read_cpu_percent_nonblocking(),
                     gpu,
                 )
-                next_sample += interval
+                # A one-shot nvidia-smi fallback can take longer than 50 ms.
+                # Do not emit a burst of near-zero-interval CPU samples to
+                # "catch up"; psutil would quantize those into false 50/67%
+                # spikes. Resume the cadence from the current time instead.
+                next_sample = max(next_sample + interval, loop.time() + interval)
                 await asyncio.sleep(max(0.0, next_sample - loop.time()))
 
     # Wait for client to send start_session (both mics); then start ASR stream and turn executor

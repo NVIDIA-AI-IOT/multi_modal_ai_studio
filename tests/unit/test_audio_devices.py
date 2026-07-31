@@ -148,3 +148,31 @@ def test_alsa_playback_retries_immediate_process_failure(monkeypatch):
 
     assert playback.start_server_speaker_playback("default", 16000) is None
     assert len(attempts) == playback.PLAYBACK_RETRIES
+
+
+def test_server_speaker_write_and_immediate_barge_in_stop():
+    class FakeProcess:
+        def __init__(self):
+            self.stdin = io.BytesIO()
+            self.terminated = False
+            self.wait_timeout = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout):
+            self.wait_timeout = timeout
+            return 0
+
+    process = FakeProcess()
+    playback.write_server_speaker_audio(process, b"\x01\x02")
+    assert process.stdin.getvalue() == b"\x01\x02"
+
+    playback.stop_server_speaker_playback(process, immediate=True)
+
+    assert process.terminated
+    assert process.stdin.closed
+    assert process.wait_timeout == 0.5

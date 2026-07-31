@@ -102,14 +102,32 @@ def start_server_speaker_playback(
     return None
 
 
-def stop_server_speaker_playback(proc: Optional[subprocess.Popen]) -> None:
+def write_server_speaker_audio(proc: subprocess.Popen, audio: bytes) -> None:
+    """Write PCM to aplay.
+
+    This call intentionally remains synchronous because aplay applies natural
+    backpressure at the speaker's playback rate. Async callers must run it in
+    a worker thread so microphone capture and ASR are not stalled.
+    """
+    if proc.stdin is None or proc.stdin.closed:
+        raise BrokenPipeError("aplay stdin is unavailable")
+    proc.stdin.write(audio)
+    proc.stdin.flush()
+
+
+def stop_server_speaker_playback(
+    proc: Optional[subprocess.Popen],
+    immediate: bool = False,
+) -> None:
     """Close stdin and wait for aplay to finish, or terminate if it doesn't exit."""
     if proc is None:
         return
     try:
+        if immediate and proc.poll() is None:
+            proc.terminate()
         if proc.stdin and not proc.stdin.closed:
             proc.stdin.close()
-        proc.wait(timeout=2)
+        proc.wait(timeout=0.5 if immediate else 2)
     except subprocess.TimeoutExpired:
         proc.terminate()
         try:
