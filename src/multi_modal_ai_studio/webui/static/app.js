@@ -2778,6 +2778,9 @@ function updateConfig(section, key, value) {
     if (section === 'app' && key === 'enable_timeline') {
         updateTimelinePanelVisibility();
     }
+    if (section === 'asr' && (key === 'backend' || key === 'scheme')) {
+        updateAsrTimelineLegend(currentConfig);
+    }
     refreshPipelineDisplay();
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
 
@@ -3323,12 +3326,72 @@ function updateTimelinePanelVisibility() {
     }
 }
 
+/** Match ASR legend semantics to the transport recorded by this session. */
+function updateAsrTimelineLegend(config) {
+    const specBuilder = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.getAsrLegendSpec === 'function'
+    ) ? window.MMASTimelineHelpers.getAsrLegendSpec : null;
+    if (!specBuilder) return;
+    const spec = specBuilder(config || currentConfig || {});
+
+    function updateItem(name, label, title) {
+        const item = document.querySelector(
+            '[data-timeline-legend="' + name + '"]'
+        );
+        if (!item) return null;
+        const labelElement = item.querySelector('.legend-label');
+        if (labelElement) labelElement.textContent = label;
+        item.title = title;
+        item.dataset.asrLegendMode = spec.mode;
+        return item;
+    }
+
+    updateItem(
+        'speech-vad',
+        spec.speechLabel,
+        spec.speechTitle
+    );
+    updateItem(
+        'endpoint-phase',
+        spec.endpointLabel,
+        spec.endpointTitle
+    );
+    const activeItem = updateItem(
+        'asr-active',
+        spec.activeLabel,
+        spec.activeTitle
+    );
+    if (activeItem) {
+        const swatch = activeItem.querySelector('.legend-color');
+        if (swatch) {
+            swatch.classList.remove(
+                'legend-color-asr-active',
+                'legend-color-asr-request',
+                'legend-color-asr-streaming'
+            );
+            swatch.classList.add(
+                spec.activeSwatch === 'request'
+                    ? 'legend-color-asr-request'
+                    : 'legend-color-asr-streaming'
+            );
+        }
+    }
+    const gpuItem = updateItem(
+        'gpu-peak',
+        spec.gpuLabel,
+        spec.gpuTitle
+    );
+    if (gpuItem) gpuItem.hidden = !spec.showGpuPeak;
+}
+
 /** Clear timeline when starting New Voice Chat (no selected session). */
 function initTimeline() {
     state.timelineZoom = 1.0;
     state.timelineOffset = 0;
     state.timelineDuration = 0;
     state.timelineBargeInHitRegions = [];
+    updateAsrTimelineLegend(currentConfig);
 
     const canvas = document.getElementById('timeline-canvas');
     if (canvas) {
@@ -3358,6 +3421,12 @@ function renderTimeline() {
     const hasStoppedLiveData = state.isLiveSession && state.sessionState === 'stopped' && state.liveTimelineEvents && state.liveTimelineEvents.length > 0;
     const rawTimeline = inLive ? state.liveTimelineEvents : (hasStoppedLiveData ? state.liveTimelineEvents : (state.selectedSession && (state.selectedSession.timeline && state.selectedSession.timeline.events || state.selectedSession.timeline)));
     const timeline = Array.isArray(rawTimeline) ? rawTimeline : (rawTimeline && rawTimeline.events) || [];
+    const legendConfig = (
+        !state.isLiveSession
+        && state.selectedSession
+        && state.selectedSession.config
+    ) ? state.selectedSession.config : currentConfig;
+    updateAsrTimelineLegend(legendConfig);
     state.timelineBargeInHitRegions = [];
     if (!inLive && !hasStoppedLiveData && !state.selectedSession) return;
 

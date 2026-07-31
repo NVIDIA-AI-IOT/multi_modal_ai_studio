@@ -233,16 +233,16 @@
                     <h3>Timeline</h3>
                     <div class="timeline-legend" aria-label="Timeline color legend">
                         <span class="legend-item" data-timeline-legend="speech-vad" title="Energy VAD detected user speech">
-                            <span class="legend-color legend-color-speech-vad" aria-hidden="true"></span>Speech / VAD
+                            <span class="legend-color legend-color-speech-vad" aria-hidden="true"></span><span class="legend-label">Speech / VAD</span>
                         </span>
-                        <span class="legend-item" data-timeline-legend="endpoint-wait" title="Waiting for the configured silence duration">
-                            <span class="legend-color legend-color-endpoint-wait" aria-hidden="true"></span>Endpoint Wait
+                        <span class="legend-item" data-timeline-legend="endpoint-phase" title="Speech endpointing and final transcript completion">
+                            <span class="legend-color legend-color-endpoint-phase" aria-hidden="true"></span><span class="legend-label">Endpoint / Finalize</span>
                         </span>
-                        <span class="legend-item" data-timeline-legend="asr-request" title="ASR REST request: audio upload through response receipt">
-                            <span class="legend-color legend-color-asr-request" aria-hidden="true"></span>ASR Request
+                        <span class="legend-item" data-timeline-legend="asr-active" title="Observed recognition activity; exact meaning depends on the ASR backend">
+                            <span class="legend-color legend-color-asr-active" aria-hidden="true"></span><span class="legend-label">ASR Active</span>
                         </span>
                         <span class="legend-item" data-timeline-legend="gpu-peak" title="Peak GPU utilization observed during an ASR request">
-                            <span class="legend-gpu-peak" aria-hidden="true"></span>GPU Peak
+                            <span class="legend-gpu-peak" aria-hidden="true"></span><span class="legend-label">GPU Peak</span>
                         </span>
                         <span class="legend-item" data-timeline-legend="llm-prefill" title="LLM prefill: request start to first token">
                             <span class="legend-color legend-color-llm-prefill" aria-hidden="true"></span>LLM Prefill

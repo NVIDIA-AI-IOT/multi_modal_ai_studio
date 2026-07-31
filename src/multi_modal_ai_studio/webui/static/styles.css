@@ -3358,8 +3358,13 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     );
 }
 
-.legend-color-endpoint-wait {
+.legend-color-endpoint-phase {
     background: var(--timeline-vad);
+}
+
+.legend-color-asr-active,
+.legend-color-asr-streaming {
+    background: var(--timeline-asr);
 }
 
 .legend-color-asr-request {
