@@ -14,6 +14,7 @@ const {
     buildTtsSegmentsFromTimeline,
     closeTtlBandAt,
     dedupeTimelineEventsByTimestamp,
+    getAsrLegendSpec,
     hasDenseTtsAmplitudeTimeline,
     pairTimelineEvents,
     rebuildTtsPlaybackSegments,
@@ -21,6 +22,39 @@ const {
     syncLiveSessionClock,
     truncateAudioSegmentsAt,
 } = require('../../src/multi_modal_ai_studio/webui/static/timeline_helpers.js');
+
+test('ASR legend describes REST request timing', () => {
+    const spec = getAsrLegendSpec({
+        asr: {
+            scheme: 'openai-rest',
+            api_base: 'http://localhost:8081/v1',
+            // Stale fields from a previous UI selection must not override the
+            // explicit backend.
+            riva_server: 'localhost:50051',
+        },
+    });
+
+    assert.equal(spec.mode, 'rest');
+    assert.equal(spec.activeLabel, 'ASR Request');
+    assert.equal(spec.endpointLabel, 'Endpoint Wait');
+    assert.equal(spec.showGpuPeak, true);
+});
+
+test('ASR legend describes persistent streaming transports', () => {
+    const realtime = getAsrLegendSpec({
+        asr: { scheme: 'openai-realtime' },
+    });
+    const riva = getAsrLegendSpec({
+        asr: { scheme: 'riva', riva_server: 'localhost:50051' },
+    });
+
+    assert.equal(realtime.activeLabel, 'Streaming ASR');
+    assert.equal(realtime.endpointLabel, 'Finalization');
+    assert.equal(realtime.showGpuPeak, false);
+    assert.equal(riva.activeLabel, 'Streaming ASR');
+    assert.equal(riva.endpointLabel, 'Endpoint / Finalize');
+    assert.equal(riva.showGpuPeak, false);
+});
 
 test('ASR request starts and ends pair without crossing the next request', () => {
     const intervals = pairTimelineEvents([
