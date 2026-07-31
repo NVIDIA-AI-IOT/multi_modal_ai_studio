@@ -304,7 +304,7 @@ class _FakeTTSSession:
 
 
 @pytest.mark.asyncio
-async def test_openai_rest_tts_chunks_long_completed_llm_response():
+async def test_openai_rest_tts_preserves_normal_completed_llm_response():
     backend = OpenAIRestTTSBackend(
         TTSConfig(
             scheme="openai-rest",
@@ -317,17 +317,41 @@ async def test_openai_rest_tts_chunks_long_completed_llm_response():
     fake_session = _FakeTTSSession()
     backend._session = fake_session
     text = (
-        "The history of robotics includes ancient automata and modern machines. "
-        "Robots now use advanced perception, planning, and control systems. "
-    ) * 3
+        "The development of artificial intelligence and machine learning has "
+        "significantly advanced robotics, enabling robots to learn from "
+        "environments, adapt to new tasks, and perform complex operations "
+        "autonomously. This evolution has transformed industries such as "
+        "manufacturing, healthcare, logistics, and exploration."
+    )
+
+    chunks = [chunk async for chunk in backend.synthesize_stream(text)]
+
+    assert fake_session.inputs == [text]
+    assert chunks
+    assert not any(chunk.is_final for chunk in chunks[:-1])
+    assert chunks[-1].is_final
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_only_splits_above_service_input_limit():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="nvidia/magpie_tts_multilingual_357m",
+            voice="Sofia",
+            sample_rate=22050,
+        )
+    )
+    fake_session = _FakeTTSSession()
+    backend._session = fake_session
+    text = ("A complete sentence about robotics and artificial intelligence. " * 100)
 
     chunks = [chunk async for chunk in backend.synthesize_stream(text)]
 
     assert len(fake_session.inputs) > 1
     assert all(len(item) <= MAX_REST_TTS_CHARS for item in fake_session.inputs)
     assert " ".join(fake_session.inputs).split() == text.split()
-    assert chunks
-    assert not any(chunk.is_final for chunk in chunks[:-1])
     assert chunks[-1].is_final
 
 

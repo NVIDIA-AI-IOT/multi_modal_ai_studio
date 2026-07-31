@@ -24,6 +24,35 @@ _cache: Dict[str, Any] = {}
 _cache_time: float = 0.0
 _nvidia_smi_gpu_supported: Optional[bool] = None
 GPU_SAMPLE_INTERVAL_MS = 50
+GPU_SUBPROCESS_FALLBACK_INTERVAL_MS = 200
+STREAM_SAMPLE_MIN_INTERVAL_RATIO = 0.8
+
+
+def stream_sample_is_due(
+    now: float,
+    last_emit: float,
+    interval: float,
+) -> bool:
+    """Reject buffered telemetry lines that arrive much faster than requested."""
+    return (
+        not last_emit
+        or now - last_emit >= interval * STREAM_SAMPLE_MIN_INTERVAL_RATIO
+    )
+
+
+def read_gpu_percent_after_stream_failure() -> Optional[float]:
+    """Read GPU utilization after the persistent nvidia-smi stream exits.
+
+    Thor does not expose the legacy nvgpu devfreq load path. Retry a one-shot
+    nvidia-smi query when sysfs is unavailable instead of returning None for
+    the rest of the session.
+    """
+    gpu_percent = _read_jetson_sysfs_gpu_percent()
+    if gpu_percent is not None:
+        return gpu_percent
+    global _nvidia_smi_gpu_supported
+    _nvidia_smi_gpu_supported = None
+    return _read_nvidia_smi_gpu_percent()
 
 
 def nvidia_smi_loop_command(interval_ms: int = GPU_SAMPLE_INTERVAL_MS) -> list[str]:

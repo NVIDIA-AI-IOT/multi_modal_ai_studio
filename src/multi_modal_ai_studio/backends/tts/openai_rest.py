@@ -21,9 +21,10 @@ from multi_modal_ai_studio.config.schema import TTSConfig
 
 logger = logging.getLogger(__name__)
 
-# The local Magpie endpoint buffers a complete do_tts() call before returning
-# HTTP audio. Keep requests bounded even when LLM-to-TTS streaming is disabled.
-MAX_REST_TTS_CHARS = 50
+# Preserve complete short answers while bounding Magpie's time-to-first-audio.
+# Longer responses split at sentence/phrase boundaries rather than the former
+# 50-character limit that restarted prosody every few words.
+MAX_REST_TTS_CHARS = 400
 
 
 @dataclass
