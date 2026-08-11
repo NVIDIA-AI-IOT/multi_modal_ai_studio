@@ -134,6 +134,7 @@ python -m multi_modal_ai_studio --mode headless \
 |-----|-------------|
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
 | [Open Models on Jetson](docs/setup_open_models_jetson.md) | Public Nemotron ASR + LLM + Magpie TTS |
+| [Faster Qwen3-TTS on Jetson](docs/setup_faster_qwen3_tts.md) | CUDA and OpenAI-compatible Qwen3-TTS evaluation |
 | [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
 | [Riva Setup](docs/setup_riva.md) | NVIDIA Riva ASR/TTS (Jetson/ARM64) |
 | [VLM Guide](docs/vlm_guide.md) | Vision-language models, frame capture, tuning |
