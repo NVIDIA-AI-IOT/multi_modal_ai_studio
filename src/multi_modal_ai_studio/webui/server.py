@@ -21,10 +21,11 @@ import sys
 import wave
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-from aiohttp import web
+from aiohttp import ClientError, ClientSession, ClientTimeout, web
 
 # Load .env so OPENAI_API_KEY (and others) are available for prefills and backends
 load_dotenv()
@@ -52,14 +53,242 @@ _TTS_PREVIEW_MAX_PCM_BYTES = 4 * 1024 * 1024
 _TTS_PREVIEW_TIMEOUT_SECONDS = 45
 
 
+def _canonical_language_tag(value: str) -> str:
+    """Return a stable BCP-47-like spelling for provider language tags."""
+    parts = str(value or "").strip().replace("_", "-").split("-")
+    parts = [part for part in parts if part]
+    if not parts:
+        return ""
+    canonical = [parts[0].lower()]
+    for part in parts[1:]:
+        canonical.append(part.upper() if len(part) in (2, 3) else part)
+    return "-".join(canonical)
+
+
+def _parse_openai_tts_metadata(payload: Any, requested_model: str = "") -> Dict[str, Any]:
+    """Extract optional TTS model, voice and language metadata from `/v1/models`.
+
+    OpenAI-compatible servers are not required to expose these extensions.
+    Speaches does, so preserve a generic empty result for other providers.
+    """
+    raw_models = payload.get("data", []) if isinstance(payload, dict) else []
+    models = [item for item in raw_models if isinstance(item, dict)]
+    tts_models = [
+        item for item in models
+        if item.get("task") == "text-to-speech" or isinstance(item.get("voices"), list)
+    ]
+    model_ids = [str(item.get("id")) for item in tts_models if item.get("id")]
+    selected = next(
+        (item for item in tts_models if str(item.get("id", "")) == requested_model),
+        None,
+    )
+    if selected is None and len(tts_models) == 1:
+        selected = tts_models[0]
+
+    voices = []
+    languages: Set[str] = set()
+    if selected is not None:
+        raw_voices = selected.get("voices", [])
+        if isinstance(raw_voices, list):
+            for raw_voice in raw_voices:
+                if isinstance(raw_voice, str):
+                    voice = {"id": raw_voice, "name": raw_voice}
+                elif isinstance(raw_voice, dict):
+                    voice_id = raw_voice.get("id") or raw_voice.get("name")
+                    if not voice_id:
+                        continue
+                    voice = {
+                        "id": str(voice_id),
+                        "name": str(raw_voice.get("name") or voice_id),
+                    }
+                    language = _canonical_language_tag(raw_voice.get("language", ""))
+                    if language:
+                        voice["language"] = language
+                        languages.add(language)
+                    if raw_voice.get("gender"):
+                        voice["gender"] = str(raw_voice["gender"])
+                else:
+                    continue
+                voices.append(voice)
+
+        raw_languages = selected.get("language", [])
+        if isinstance(raw_languages, str):
+            raw_languages = [raw_languages]
+        if isinstance(raw_languages, list):
+            for raw_language in raw_languages:
+                language = _canonical_language_tag(raw_language)
+                if language and language != "multilingual":
+                    languages.add(language)
+
+    return {
+        "model": str(selected.get("id")) if selected and selected.get("id") else None,
+        "models": model_ids,
+        "voices": voices,
+        "languages": sorted(languages),
+        "sample_rate": selected.get("sample_rate") if selected else None,
+    }
+
+
+def _merge_openai_tts_models(
+    local_payload: Any,
+    registry_payload: Any = None,
+) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Merge local and registry TTS records and annotate model availability."""
+    def tts_items(payload: Any) -> List[Dict[str, Any]]:
+        raw = payload.get("data", []) if isinstance(payload, dict) else []
+        return [
+            item for item in raw
+            if isinstance(item, dict)
+            and item.get("id")
+            and (
+                item.get("task") == "text-to-speech"
+                or isinstance(item.get("voices"), list)
+            )
+        ]
+
+    local_items = tts_items(local_payload)
+    registry_items = tts_items(registry_payload)
+    local_ids = {str(item["id"]) for item in local_items}
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for item in local_items + registry_items:
+        model_id = str(item["id"])
+        if model_id not in by_id:
+            by_id[model_id] = item
+
+    choices = []
+    for model_id, item in by_id.items():
+        languages = item.get("language", [])
+        if isinstance(languages, str):
+            languages = [languages]
+        choices.append({
+            "id": model_id,
+            "downloaded": model_id in local_ids,
+            "languages": [str(language) for language in languages if language],
+        })
+    choices.sort(key=lambda item: (not item["downloaded"], item["id"].lower()))
+    return {"data": list(by_id.values()), "object": "list"}, choices
+
+
+def _parse_openai_asr_models(
+    local_payload: Any,
+    registry_payload: Any = None,
+) -> List[Dict[str, Any]]:
+    """Combine local and provider-registry ASR models, marking local entries."""
+    def asr_items(payload: Any) -> List[Dict[str, Any]]:
+        raw = payload.get("data", []) if isinstance(payload, dict) else []
+        return [
+            item for item in raw
+            if isinstance(item, dict)
+            and item.get("id")
+            and item.get("task") == "automatic-speech-recognition"
+        ]
+
+    local_items = asr_items(local_payload)
+    registry_items = asr_items(registry_payload)
+    local_ids = {str(item["id"]) for item in local_items}
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for item in local_items + registry_items:
+        model_id = str(item["id"])
+        if model_id in by_id:
+            continue
+        languages = item.get("language", [])
+        if isinstance(languages, str):
+            languages = [languages]
+        by_id[model_id] = {
+            "id": model_id,
+            "downloaded": model_id in local_ids,
+            "languages": [str(language) for language in languages if language],
+        }
+    return sorted(
+        by_id.values(),
+        key=lambda item: (not item["downloaded"], item["id"].lower()),
+    )
+
+
+_TTS_LANGUAGE_PROBE_TEXT = {
+    "en": "Hello.",
+    "es": "Hola.",
+    "fr": "Bonjour.",
+    "de": "Hallo.",
+    "ja": "こんにちは。",
+    "zh": "你好。",
+    "hi": "नमस्ते।",
+    "it": "Ciao.",
+    "pt": "Olá.",
+}
+
+
+def _is_loopback_api_base(api_base: str) -> bool:
+    """Limit active language qualification to free, machine-local providers."""
+    try:
+        return (urlparse(api_base).hostname or "").lower() in {
+            "localhost", "127.0.0.1", "::1",
+        }
+    except ValueError:
+        return False
+
+
+async def _probe_openai_tts_languages(
+    session: ClientSession,
+    *,
+    api_base: str,
+    model: str,
+    voices: List[Dict[str, Any]],
+    headers: Dict[str, str],
+) -> Set[str]:
+    """Return provider-reported languages that produce non-empty PCM at runtime."""
+    first_voice_by_language: Dict[str, str] = {}
+    for voice in voices:
+        language = _canonical_language_tag(voice.get("language", ""))
+        voice_id = voice.get("id") or voice.get("name")
+        if language and voice_id and language not in first_voice_by_language:
+            first_voice_by_language[language] = str(voice_id)
+
+    supported: Set[str] = set()
+    for language, voice_id in first_voice_by_language.items():
+        base_language = language.split("-", 1)[0]
+        sample = _TTS_LANGUAGE_PROBE_TEXT.get(base_language)
+        if not sample:
+            continue
+        request = {
+            "model": model,
+            "input": sample,
+            "voice": voice_id,
+            "language": base_language,
+            "response_format": "pcm",
+            "speed": 1.0,
+        }
+        try:
+            async with session.post(
+                f"{api_base}/audio/speech",
+                json=request,
+                headers={"Content-Type": "application/json", **headers},
+            ) as response:
+                audio = await response.read()
+                if response.status < 400 and audio:
+                    supported.add(language)
+        except (asyncio.TimeoutError, ClientError, OSError):
+            logger.info(
+                "TTS language runtime probe failed: model=%s language=%s voice=%s",
+                model,
+                language,
+                voice_id,
+            )
+    return supported
+
+
 def _tts_preview_text(language: str) -> str:
     """Return a short sample sentence appropriate for the selected language."""
     language = (language or "en-US").lower()
     samples = {
-        "ja": "こんにちは。これは選択した音声のサンプルです。",
+        "ja": "日本語音声のサンプルを再生します。",
+        "zh": "你好。这是一段中文语音示例。",
         "es": "Hola. Esta es una muestra de la voz seleccionada.",
         "fr": "Bonjour. Voici un exemple de la voix sélectionnée.",
         "de": "Hallo. Dies ist eine Vorschau der ausgewählten Stimme.",
+        "hi": "नमस्ते। यह चुनी गई आवाज़ का एक नमूना है।",
+        "it": "Ciao. Questo è un esempio della voce selezionata.",
+        "pt": "Olá. Esta é uma amostra da voz selecionada.",
     }
     return samples.get(
         language.split("-", 1)[0],
@@ -270,6 +499,7 @@ class WebUIServer:
         self._session_dir_override: Optional[str] = None  # "sessions" | "mock_sessions" | None
         self.ssl_context = ssl_context
         self.initial_config = initial_config
+        self._openai_tts_language_cache: Dict[tuple, Set[str]] = {}
         self.app = web.Application()
         self.app["session_dir"] = self.session_dir
         self.app["_server"] = self  # so voice pipeline can read current effective session dir
@@ -291,7 +521,9 @@ class WebUIServer:
         self.app.router.add_get('/api/llm/models', self.handle_llm_models)
         self.app.router.add_post('/api/llm/warmup', self.handle_llm_warmup)
         self.app.router.add_get('/api/asr/models', self.handle_asr_models)
+        self.app.router.add_post('/api/asr/openai-models', self.handle_openai_asr_models)
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
+        self.app.router.add_post('/api/tts/openai-metadata', self.handle_openai_tts_metadata)
         self.app.router.add_post('/api/tts/preview', self.handle_tts_preview)
         self.app.router.add_get('/api/health/llm', self.handle_health_llm)
         self.app.router.add_get('/api/health/riva', self.handle_health_riva)
@@ -722,6 +954,52 @@ class WebUIServer:
                 status=500
             )
 
+    async def handle_openai_asr_models(self, request: web.Request) -> web.Response:
+        """List local and registry ASR models from an OpenAI-compatible provider."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"error": "Request body must be JSON"}, status=400)
+        api_base = (body.get("api_base") or "").strip().rstrip("/")
+        api_key = (body.get("api_key") or "").strip()
+        if not api_base:
+            return web.json_response({"error": "api_base is required"}, status=400)
+
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=20)) as session:
+                async with session.get(
+                    f"{api_base}/models?task=automatic-speech-recognition",
+                    headers=headers,
+                ) as response:
+                    local_body = await response.text()
+                    if response.status >= 400:
+                        return web.json_response(
+                            {"error": f"Model discovery failed ({response.status}): {local_body[:300]}"},
+                            status=502,
+                        )
+                    local_payload = json.loads(local_body)
+
+                registry_payload: Any = None
+                registry_available = False
+                async with session.get(
+                    f"{api_base}/registry?task=automatic-speech-recognition",
+                    headers=headers,
+                ) as response:
+                    if response.status < 400:
+                        registry_payload = json.loads(await response.text())
+                        registry_available = True
+
+            models = _parse_openai_asr_models(local_payload, registry_payload)
+            return web.json_response({
+                "models": models,
+                "registry_available": registry_available,
+                "downloaded_count": sum(1 for model in models if model["downloaded"]),
+            })
+        except (asyncio.TimeoutError, ClientError, json.JSONDecodeError, OSError) as e:
+            logger.warning("OpenAI REST ASR model discovery failed for %s: %s", api_base, e)
+            return web.json_response({"error": str(e), "models": []}, status=502)
+
     async def handle_tts_voices(self, request: web.Request) -> web.Response:
         """List available TTS voices and model name(s) from Riva (query: server=host:port, optional language=en-US)."""
         server = (request.query.get("server") or "").strip()
@@ -748,6 +1026,93 @@ class WebUIServer:
         except Exception as e:
             logger.exception("Failed to list Riva TTS voices")
             return web.json_response({"error": str(e), "voices": [], "model_name": None, "model_names": []}, status=500)
+
+    async def handle_openai_tts_metadata(self, request: web.Request) -> web.Response:
+        """Discover optional model/voice/language metadata from an OpenAI REST API."""
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return web.json_response({"error": "Request body must be JSON"}, status=400)
+        api_base = (body.get("api_base") or "").strip().rstrip("/")
+        model = (body.get("model") or "").strip()
+        api_key = (body.get("api_key") or "").strip()
+        if not api_base:
+            return web.json_response(
+                {"error": "api_base query parameter is required"},
+                status=400,
+            )
+
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=20)) as session:
+                async with session.get(f"{api_base}/models", headers=headers) as response:
+                    body = await response.text()
+                    if response.status >= 400:
+                        return web.json_response(
+                            {"error": f"Model discovery failed ({response.status}): {body[:300]}"},
+                            status=502,
+                        )
+                    local_payload = json.loads(body)
+                registry_payload: Any = None
+                registry_available = False
+                async with session.get(
+                    f"{api_base}/registry?task=text-to-speech",
+                    headers=headers,
+                ) as response:
+                    if response.status < 400:
+                        registry_payload = json.loads(await response.text())
+                        registry_available = True
+
+                payload, model_choices = _merge_openai_tts_models(
+                    local_payload,
+                    registry_payload,
+                )
+                metadata = _parse_openai_tts_metadata(payload, model)
+                metadata["model_choices"] = model_choices
+                metadata["registry_available"] = registry_available
+                metadata["downloaded_count"] = sum(
+                    1 for choice in model_choices if choice["downloaded"]
+                )
+                selected_model = metadata.get("model") or model
+                selected_model_downloaded = any(
+                    choice["id"] == selected_model and choice["downloaded"]
+                    for choice in model_choices
+                )
+                metadata["selected_model_downloaded"] = selected_model_downloaded
+                reported_languages = set(metadata.get("languages", []))
+                if (
+                    selected_model
+                    and metadata.get("voices")
+                    and selected_model_downloaded
+                    and _is_loopback_api_base(api_base)
+                ):
+                    cache_key = (api_base, selected_model)
+                    supported_languages = self._openai_tts_language_cache.get(cache_key)
+                    if supported_languages is None:
+                        supported_languages = await _probe_openai_tts_languages(
+                            session,
+                            api_base=api_base,
+                            model=selected_model,
+                            voices=metadata["voices"],
+                            headers=headers,
+                        )
+                        self._openai_tts_language_cache[cache_key] = supported_languages
+                    metadata["reported_languages"] = sorted(reported_languages)
+                    metadata["unsupported_languages"] = sorted(
+                        reported_languages - supported_languages
+                    )
+                    metadata["reported_voice_count"] = len(metadata["voices"])
+                    metadata["languages"] = sorted(supported_languages)
+                    metadata["voices"] = [
+                        voice for voice in metadata["voices"]
+                        if not voice.get("language")
+                        or voice.get("language") in supported_languages
+                    ]
+                    metadata["language_qualification"] = "runtime-probed"
+            return web.json_response(metadata)
+        except (asyncio.TimeoutError, ClientError, json.JSONDecodeError, OSError) as e:
+            logger.warning("OpenAI REST TTS metadata discovery failed for %s: %s", api_base, e)
+            return web.json_response({"error": str(e)}, status=502)
 
     async def handle_tts_preview(self, request: web.Request) -> web.Response:
         """Synthesize a short, browser-playable preview for the selected voice."""

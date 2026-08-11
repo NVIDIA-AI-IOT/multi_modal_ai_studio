@@ -150,6 +150,22 @@ test('utilization plotting splits rather than interpolating missing telemetry', 
     ]);
 });
 
+test('GPU fallback samples remain continuous despite 250 ms cadence jitter', () => {
+    const runs = splitPointsAtTimeGaps([
+        { t: 4.9826, value: 87.2 },
+        { t: 5.2391, value: 84.1 },
+        { t: 5.4972, value: 99.7 },
+        { t: 5.7535, value: 99.6 },
+        // A missed 250 ms fallback sample must still create a gap.
+        { t: 6.2704, value: 99.4 },
+    ], 0.4);
+
+    assert.deepEqual(runs.map(run => run.map(point => point.t)), [
+        [4.9826, 5.2391, 5.4972, 5.7535],
+        [6.2704],
+    ]);
+});
+
 test('TTFA prefers the browser-observed playback start over server first bytes', () => {
     const times = resolveTtsFirstAudioTimes(
         [

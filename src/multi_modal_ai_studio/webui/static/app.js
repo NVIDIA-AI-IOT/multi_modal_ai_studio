@@ -616,7 +616,9 @@ function renderConfig() {
             if (currentConfig.llm.enable_vision && currentConfig.llm.vision_video_encode) setTimeout(checkVideoEncodeAndShowBanner, 0);
         }
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
+        if (tab === 'asr' && (currentConfig.asr.backend === 'openai-rest' || currentConfig.asr.scheme === 'openai-rest')) setTimeout(() => fetchOpenAIASRModels(), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+        if (tab === 'tts' && (currentConfig.tts.backend === 'openai-rest' || currentConfig.tts.scheme === 'openai-rest')) setTimeout(() => fetchOpenAITTSMetadata(), 0);
         if (tab === 'device') {
             setTimeout(populateAllDeviceDropdowns, 0);
             // Retry camera/mic preview when user opens Devices tab (e.g. after fixing camera device)
@@ -636,7 +638,13 @@ function renderConfig() {
     }
 
     const config = session.config || {};
-    let tabConfig = { ...defaultConfig[configKey], ...(config[configKey] || {}) };
+    const recordedTabConfig = config[configKey] || {};
+    let tabConfig = (configKey === 'asr' || configKey === 'tts')
+        ? window.MMASConfigHelpers.mergeRecordedSpeechConfig(
+            defaultConfig[configKey],
+            recordedTabConfig
+        )
+        : { ...defaultConfig[configKey], ...recordedTabConfig };
 
     contentEl.innerHTML = renderEditableConfigForm(tab, tabConfig, true, config);
     if (tab === 'device') setTimeout(populateAllDeviceDropdowns, 0);
@@ -1253,11 +1261,17 @@ function renderConfigSection(title, data) {
 function renderEditableConfigForm(tab, config, readonly = false, sessionConfig = null) {
     switch (tab) {
         case 'asr':
-            return renderASRConfig(config, readonly);
+            return renderASRConfig(
+                window.MMASConfigHelpers.normalizeSpeechBackendConfig(config),
+                readonly
+            );
         case 'llm':
             return renderLLMConfig(config, readonly);
         case 'tts':
-            return renderTTSConfig(config, readonly);
+            return renderTTSConfig(
+                window.MMASConfigHelpers.normalizeSpeechBackendConfig(config),
+                readonly
+            );
         case 'device':
             return renderDeviceConfig(config, readonly, readonly && sessionConfig ? sessionConfig.device_labels : null);
         case 'app':
@@ -1410,15 +1424,19 @@ function renderASRConfig(config, readonly = false) {
             <div class="backend-content" style="display: ${config.backend === 'openai-rest' ? 'block' : 'none'}">
                 <div class="form-group">
                     <label>API Endpoint</label>
-                    <input type="text" ${disabled} value="${config.api_base || config.openai_url || 'http://localhost:8081/v1'}"
+                    <input type="text" ${disabled} id="asr-rest-api-base" value="${config.api_base || config.openai_url || 'http://localhost:8081/v1'}"
                            onchange="updateConfig('asr', 'api_base', this.value)">
                 </div>
 
                 <div class="form-group">
                     <label>Model</label>
-                    <input type="text" ${disabled} value="${config.model || 'nvidia/nemotron-3.5-asr-streaming-0.6b'}"
-                           onchange="updateConfig('asr', 'model', this.value)">
-                    ${!readonly ? '<span class="input-hint">e.g., nvidia/nemotron-3.5-asr-streaming-0.6b or whisper-1</span>' : ''}
+                    ${readonly
+                        ? `<input type="text" value="${escapeHtml(config.model || '')}" readonly class="readonly-config-input">`
+                        : `<select id="asr-rest-model-select" class="config-select" onchange="updateConfig('asr', 'model', this.value)">
+                               <option value="${escapeHtml(config.model || '')}" selected>${escapeHtml(config.model || 'Loading...')}</option>
+                           </select>`
+                    }
+                    ${!readonly ? '<div id="asr-rest-model-hint" class="input-hint">Discovering ASR models from the provider…</div>' : ''}
                 </div>
             </div>
 
@@ -1774,21 +1792,12 @@ function toggleVlmSettings() {
 function renderTTSConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
-    const restVoiceLabels = {
-        alloy: 'Alloy', echo: 'Echo', fable: 'Fable', onyx: 'Onyx',
-        nova: 'Nova', shimmer: 'Shimmer', Aria: 'Magpie Aria',
-        Jason: 'Magpie Jason', John: 'Magpie John', Leo: 'Magpie Leo',
-        Sofia: 'Magpie Sofia'
-    };
-    const configuredRestVoice = config.voice || 'alloy';
-    const restVoices = Object.keys(restVoiceLabels);
-    if (!restVoices.includes(configuredRestVoice)) restVoices.unshift(configuredRestVoice);
-    const restVoiceOptions = restVoices.map(function (voice) {
-        const label = restVoiceLabels[voice] || (voice + ' (configured)');
-        return '<option value="' + escapeHtml(voice) + '"' +
-            (voice === configuredRestVoice ? ' selected' : '') + '>' +
-            escapeHtml(label) + '</option>';
-    }).join('');
+    const configuredRestVoice = config.voice || '';
+    const configuredRestLanguage = config.language || 'en-US';
+    const configuredRestModel = config.model || '';
+    const restVoiceOptions = configuredRestVoice
+        ? '<option value="' + escapeHtml(configuredRestVoice) + '" selected>' + escapeHtml(configuredRestVoice) + ' (configured)</option>'
+        : '<option value="">Default</option>';
 
     return `
         <div class="config-form ${roClass}">
@@ -1869,8 +1878,26 @@ function renderTTSConfig(config, readonly = false) {
             <div class="backend-content" style="display: ${config.backend === 'openai-rest' ? 'block' : 'none'}">
                 <div class="form-group">
                     <label>API Endpoint</label>
-                    <input type="text" ${disabled} value="${config.api_base || config.openai_url || 'http://localhost:8082/v1'}"
+                    <input type="text" ${disabled} id="tts-rest-api-base" value="${config.api_base || config.openai_url || 'http://localhost:8082/v1'}"
                            onchange="updateConfig('tts', 'api_base', this.value)">
+                </div>
+
+                <div class="form-group">
+                    <label>Model</label>
+                    ${readonly
+                        ? `<input type="text" value="${escapeHtml(configuredRestModel)}" readonly class="readonly-config-input">`
+                        : `<select id="tts-rest-model-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'model', this.value)">
+                               <option value="${escapeHtml(configuredRestModel)}" selected>${escapeHtml(configuredRestModel || 'Loading...')}</option>
+                           </select>`
+                    }
+                    ${!readonly ? '<div id="tts-rest-model-hint" class="input-hint">Discovering TTS models from the provider…</div>' : ''}
+                </div>
+
+                <div class="form-group">
+                    <label>Language</label>
+                    <select ${disabled} id="tts-rest-language-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'language', this.value)">
+                        <option value="${escapeHtml(configuredRestLanguage)}" selected>${escapeHtml(configuredRestLanguage)} (configured)</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
@@ -1881,14 +1908,8 @@ function renderTTSConfig(config, readonly = false) {
                         </select>
                         ${!readonly ? '<button type="button" id="tts-rest-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>' : ''}
                     </div>
+                    ${!readonly ? '<div id="tts-rest-metadata-hint" class="input-hint">Discovering voices and languages from the selected model…</div>' : ''}
                     ${!readonly ? '<div id="tts-rest-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
-                </div>
-
-                <div class="form-group">
-                    <label>Model</label>
-                    <input type="text" ${disabled} value="${config.model || 'nvidia/magpie_tts_multilingual_357m'}"
-                           onchange="updateConfig('tts', 'model', this.value)">
-                    ${!readonly ? '<span class="input-hint">e.g., nvidia/magpie_tts_multilingual_357m or tts-1</span>' : ''}
                 </div>
             </div>
 
@@ -1918,15 +1939,15 @@ function renderTTSConfig(config, readonly = false) {
             </div>
 
             <!-- Common Settings (Language only for non-RIVA backends) -->
-            <div class="form-group" style="display: ${config.backend === 'riva' ? 'none' : 'block'}">
+            <div class="form-group" style="display: ${config.backend === 'riva' || config.scheme === 'riva' || config.backend === 'openai-rest' || config.scheme === 'openai-rest' ? 'none' : 'block'}">
                 <label>Language</label>
                 <select ${disabled} value="${config.language}" onchange="updateConfig('tts', 'language', this.value)">
-                    <option value="en-US" ${config.language === 'en-US' ? 'selected' : ''}>English (US)</option>
-                    <option value="en-GB" ${config.language === 'en-GB' ? 'selected' : ''}>English (UK)</option>
-                    <option value="es-ES" ${config.language === 'es-ES' ? 'selected' : ''}>Spanish</option>
-                    <option value="fr-FR" ${config.language === 'fr-FR' ? 'selected' : ''}>French</option>
-                    <option value="de-DE" ${config.language === 'de-DE' ? 'selected' : ''}>German</option>
-                    <option value="ja-JP" ${config.language === 'ja-JP' ? 'selected' : ''}>Japanese</option>
+                           <option value="en-US" ${config.language === 'en-US' ? 'selected' : ''}>English (US)</option>
+                           <option value="en-GB" ${config.language === 'en-GB' ? 'selected' : ''}>English (UK)</option>
+                           <option value="es-ES" ${config.language === 'es-ES' ? 'selected' : ''}>Spanish</option>
+                           <option value="fr-FR" ${config.language === 'fr-FR' ? 'selected' : ''}>French</option>
+                           <option value="de-DE" ${config.language === 'de-DE' ? 'selected' : ''}>German</option>
+                           <option value="ja-JP" ${config.language === 'ja-JP' ? 'selected' : ''}>Japanese</option>
                 </select>
             </div>
 
@@ -2781,10 +2802,16 @@ function updateConfig(section, key, value) {
 
     const contentEl = document.getElementById('config-tab-content');
     const configKey = state.activeConfigTab === 'device' ? 'devices' : state.activeConfigTab;
-    const skipRerender =
+    const skipRerender = (
         state.activeConfigTab === 'llm' &&
         section === 'llm' &&
-        (key === 'model' || key === 'cheap_model');
+        (key === 'model' || key === 'cheap_model')
+    ) || (
+        state.activeConfigTab === 'asr' &&
+        section === 'asr' &&
+        key === 'model' &&
+        (currentConfig.asr.backend === 'openai-rest' || currentConfig.asr.scheme === 'openai-rest')
+    );
 
     // Re-render the config panel only when the change affects conditional UI.
     if (!skipRerender) {
@@ -2797,8 +2824,14 @@ function updateConfig(section, key, value) {
         if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) {
             setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         }
+        if (state.activeConfigTab === 'asr' && (currentConfig.asr.backend === 'openai-rest' || currentConfig.asr.scheme === 'openai-rest')) {
+            setTimeout(() => fetchOpenAIASRModels(), 0);
+        }
         if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) {
             setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
+        }
+        if (state.activeConfigTab === 'tts' && (currentConfig.tts.backend === 'openai-rest' || currentConfig.tts.scheme === 'openai-rest')) {
+            setTimeout(() => fetchOpenAITTSMetadata(), 0);
         }
     }
     if (section === 'devices') {
@@ -2944,6 +2977,65 @@ async function fetchASRModels(server) {
     }
 }
 
+async function fetchOpenAIASRModels() {
+    const config = currentConfig.asr || {};
+    const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+    const select = document.getElementById('asr-rest-model-select');
+    const hint = document.getElementById('asr-rest-model-hint');
+    if (!apiBase || !select) return;
+    if (hint) hint.textContent = 'Discovering ASR models from the provider…';
+
+    try {
+        const response = await fetch('/api/asr/openai-models', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                api_base: apiBase,
+                api_key: config.api_key || '',
+            }),
+        });
+        const data = await response.json().catch(function () { return {}; });
+        if (!window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
+        if (!response.ok) throw new Error(data.error || ('Request failed: ' + response.status));
+
+        const models = Array.isArray(data.models) ? data.models : [];
+        const configured = String(currentConfig.asr.model || '');
+        if (configured && !models.some(function (model) { return String(model.id) === configured; })) {
+            models.unshift({id: configured, downloaded: false, configuredOnly: true, languages: []});
+        }
+        if (!models.length) {
+            select.innerHTML = configured
+                ? '<option value="' + escapeHtml(configured) + '" selected>' + escapeHtml(configured) + '</option>'
+                : '<option value="">No ASR models reported</option>';
+            if (hint) hint.textContent = 'The provider did not report any ASR models.';
+            return;
+        }
+
+        const selected = configured || String(models[0].id || '');
+        select.innerHTML = models.map(function (model) {
+            const id = String(model.id || '');
+            const details = [];
+            if (model.downloaded) details.push('downloaded');
+            if (model.configuredOnly) details.push('configured; not reported');
+            if (Array.isArray(model.languages) && model.languages.length && model.languages.length <= 3) {
+                details.push(model.languages.join(', '));
+            }
+            const label = id + (details.length ? ' — ' + details.join('; ') : '');
+            return '<option value="' + escapeHtml(id) + '"' +
+                (id === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+        }).join('');
+        select.value = selected;
+        if (hint) {
+            hint.textContent = data.registry_available
+                ? models.length + ' compatible models reported; ' + (data.downloaded_count || 0) + ' downloaded locally. Undownloaded models are fetched on first use.'
+                : models.length + ' locally available models reported by this provider.';
+        }
+    } catch (error) {
+        if (hint) hint.textContent = 'Model discovery failed: ' + (error.message || String(error));
+        console.error('fetchOpenAIASRModels failed:', error);
+    }
+}
+
 async function fetchTTSVoices(server, language) {
     if (!server) return;
     language = language || currentConfig.tts.language || 'en-US';
@@ -3012,6 +3104,168 @@ async function fetchTTSVoices(server, language) {
         if (modelSelect) modelSelect.innerHTML = '<option value="">Default</option><option value="">Error loading models</option>';
         if (reloadHint) reloadHint.textContent = 'Network error: ' + (e.message || String(e));
         console.error('fetchTTSVoices failed:', e);
+    }
+}
+
+function restTTSFallbackVoices(apiBase, model) {
+    const normalizedModel = String(model || '').toLowerCase();
+    const normalizedApiBase = String(apiBase || '').toLowerCase();
+    if (normalizedModel.indexOf('nvidia/magpie') === 0) {
+        return ['Aria', 'Jason', 'John', 'Leo', 'Sofia'].map(function (id) {
+            return { id: id, name: id };
+        });
+    }
+    if (
+        normalizedApiBase.indexOf('api.openai.com') !== -1
+        || normalizedModel === 'tts-1'
+        || normalizedModel === 'tts-1-hd'
+        || normalizedModel.indexOf('gpt-4o-mini-tts') !== -1
+    ) {
+        return ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map(function (id) {
+            return { id: id, name: id };
+        });
+    }
+    return [];
+}
+
+function restTTSLanguageLabel(language) {
+    const labels = {
+        'en-US': 'English (US)', 'en-GB': 'English (UK)', en: 'English',
+        ja: 'Japanese', es: 'Spanish', 'fr-FR': 'French', fr: 'French',
+        de: 'German', zh: 'Chinese', hi: 'Hindi', it: 'Italian',
+        'pt-BR': 'Portuguese (Brazil)'
+    };
+    return labels[language] || language;
+}
+
+/** Populate OpenAI REST TTS model extensions exposed by providers such as Speaches. */
+async function fetchOpenAITTSMetadata() {
+    const config = currentConfig.tts || {};
+    const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+    const model = String(config.model || '');
+    const voiceSelect = document.getElementById('tts-rest-voice-select');
+    const languageSelect = document.getElementById('tts-rest-language-select');
+    const modelSelect = document.getElementById('tts-rest-model-select');
+    const modelHint = document.getElementById('tts-rest-model-hint');
+    const hint = document.getElementById('tts-rest-metadata-hint');
+    if (!apiBase || !voiceSelect || !languageSelect) return;
+    if (hint) hint.textContent = 'Discovering voices and languages from the selected model…';
+
+    let data = {};
+    let discoveryError = '';
+    try {
+        const response = await fetch('/api/tts/openai-metadata', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                api_base: apiBase,
+                model: model,
+                api_key: config.api_key || '',
+            }),
+        });
+        data = await response.json().catch(function () { return {}; });
+        if (!window.MMASConfigHelpers.matchesOpenAiTtsDiscovery(currentConfig.tts, apiBase, model)) return;
+        if (!response.ok) discoveryError = data.error || ('HTTP ' + response.status);
+    } catch (error) {
+        if (!window.MMASConfigHelpers.matchesOpenAiTtsDiscovery(currentConfig.tts, apiBase, model)) return;
+        discoveryError = error && error.message ? error.message : String(error);
+    }
+
+    let voices = Array.isArray(data.voices) ? data.voices : [];
+    const modelChoices = Array.isArray(data.model_choices) ? data.model_choices.slice() : [];
+    if (modelSelect) {
+        if (model && !modelChoices.some(function (choice) { return String(choice.id) === model; })) {
+            modelChoices.unshift({id: model, downloaded: false, configuredOnly: true, languages: []});
+        }
+        if (modelChoices.length) {
+            modelSelect.innerHTML = modelChoices.map(function (choice) {
+                const id = String(choice.id || '');
+                const details = [];
+                if (choice.downloaded) details.push('downloaded');
+                if (choice.configuredOnly) details.push('configured; not reported');
+                if (Array.isArray(choice.languages) && choice.languages.length && choice.languages.length <= 3) {
+                    details.push(choice.languages.join(', '));
+                }
+                const label = id + (details.length ? ' — ' + details.join('; ') : '');
+                return '<option value="' + escapeHtml(id) + '"' +
+                    (id === model ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+            }).join('');
+            modelSelect.value = model;
+        }
+    }
+    if (modelHint) {
+        if (data.registry_available) {
+            modelHint.textContent = modelChoices.length + ' compatible models reported; ' +
+                (data.downloaded_count || 0) + ' downloaded locally. Undownloaded models are fetched on first use.';
+        } else if (modelChoices.length) {
+            modelHint.textContent = modelChoices.length + ' locally available models reported by this provider.';
+        } else {
+            modelHint.textContent = discoveryError
+                ? 'Model discovery failed: ' + discoveryError
+                : 'The provider did not report TTS models.';
+        }
+    }
+    const dynamicVoiceCount = voices.length;
+    const reportedVoiceCount = Number(data.reported_voice_count) || dynamicVoiceCount;
+    if (!voices.length) voices = restTTSFallbackVoices(apiBase, model);
+    const languages = Array.isArray(data.languages) ? data.languages.slice() : [];
+    const configuredLanguage = window.MMASConfigHelpers.normalizeLanguageTag(config.language || 'en-US');
+    const normalizedLanguages = [];
+    languages.forEach(function (language) {
+        const normalized = window.MMASConfigHelpers.normalizeLanguageTag(language);
+        if (normalized && normalizedLanguages.indexOf(normalized) === -1) normalizedLanguages.push(normalized);
+    });
+    if (configuredLanguage && normalizedLanguages.indexOf(configuredLanguage) === -1) {
+        normalizedLanguages.unshift(configuredLanguage);
+    }
+    if (!normalizedLanguages.length) normalizedLanguages.push(configuredLanguage || 'en-US');
+    languageSelect.innerHTML = normalizedLanguages.map(function (language) {
+        const configuredOnly = languages.length && !languages.some(function (reported) {
+            return window.MMASConfigHelpers.normalizeLanguageTag(reported) === language;
+        });
+        const label = restTTSLanguageLabel(language) + (configuredOnly ? ' (configured; not reported)' : '');
+        return '<option value="' + escapeHtml(language) + '"' +
+            (language === configuredLanguage ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+    }).join('');
+
+    const configuredVoice = String(config.voice || '');
+    const voiceResolution = window.MMASConfigHelpers.resolveTtsVoiceSelection(
+        voices, configuredLanguage, configuredVoice, dynamicVoiceCount > 0
+    );
+    const optionVoices = voiceResolution.voices;
+    const selectedVoice = voiceResolution.selectedVoice;
+    if (selectedVoice !== configuredVoice) {
+        currentConfig.tts.voice = selectedVoice;
+        refreshPipelineDisplay();
+    }
+    voiceSelect.innerHTML = optionVoices.map(function (voice) {
+        const id = String((voice && (voice.id || voice.name)) || voice);
+        const name = String((voice && voice.name) || id);
+        const details = [];
+        if (voice && voice.language) details.push(window.MMASConfigHelpers.normalizeLanguageTag(voice.language));
+        if (voice && voice.gender) details.push(String(voice.gender));
+        let label = name + (details.length ? ' — ' + details.join(', ') : '');
+        if (voice && voice.configuredOnly) label += ' (configured; not reported)';
+        return '<option value="' + escapeHtml(id) + '"' +
+            (id === selectedVoice ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+    }).join('');
+
+    if (hint) {
+        if (dynamicVoiceCount) {
+            hint.textContent = (data.language_qualification === 'runtime-probed'
+                ? 'Runtime-qualified ' + dynamicVoiceCount + ' of ' + reportedVoiceCount + ' reported voices and ' + languages.length + ' languages'
+                : 'Discovered ' + dynamicVoiceCount + ' voices and ' + languages.length + ' languages') +
+                ' from ' + (data.model || model) + '; showing ' + optionVoices.length +
+                ' voices for ' + configuredLanguage + '.';
+            if (Array.isArray(data.unsupported_languages) && data.unsupported_languages.length) {
+                hint.textContent += ' Reported but non-working here: ' + data.unsupported_languages.join(', ') + '.';
+            }
+        } else if (voices.length) {
+            hint.textContent = 'The provider did not report voice metadata; showing model-specific fallback voices.';
+        } else {
+            hint.textContent = 'The provider did not report voice metadata. The configured value is preserved.';
+        }
+        if (discoveryError) hint.textContent += ' Discovery error: ' + discoveryError;
     }
 }
 
@@ -5307,7 +5561,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             splitPointsAtTimeGaps(cpuPoints, 0.2).forEach(function (run) {
                 drawAreaAndLine(run, '#2196F3', '#2196F3', 0.45);
             });
-            splitPointsAtTimeGaps(gpuPoints, 0.2).forEach(function (run) {
+            // The final one-shot nvidia-smi fallback samples GPU at 250 ms.
+            // Allow subprocess jitter, while a missed fallback sample
+            // (roughly 500 ms) still creates a visible gap.
+            splitPointsAtTimeGaps(gpuPoints, 0.4).forEach(function (run) {
                 drawAreaAndLine(run, '#4CAF50', '#4CAF50', 0.45);
             });
 

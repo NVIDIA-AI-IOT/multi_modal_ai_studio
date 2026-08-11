@@ -31,6 +31,94 @@
         return true;
     }
 
+    function normalizeLanguageTag(value) {
+        const parts = String(value || '').trim().replace(/_/g, '-').split('-').filter(Boolean);
+        if (!parts.length) return '';
+        return [parts[0].toLowerCase()].concat(parts.slice(1).map(function (part) {
+            return (part.length === 2 || part.length === 3) ? part.toUpperCase() : part;
+        })).join('-');
+    }
+
+    /**
+     * Saved session schemas use `scheme`, while the editable UI historically
+     * used `backend`. Backfill either alias without mutating recorded data so
+     * read-only session review selects the backend that actually ran.
+     */
+    function normalizeSpeechBackendConfig(config) {
+        const normalized = Object.assign({}, config || {});
+        const backend = normalized.backend || normalized.scheme || 'riva';
+        normalized.backend = backend;
+        if (!normalized.scheme) normalized.scheme = backend;
+        return normalized;
+    }
+
+    /** Merge UI defaults only after the recorded speech backend is normalized. */
+    function mergeRecordedSpeechConfig(defaults, recorded) {
+        return Object.assign(
+            {},
+            defaults || {},
+            normalizeSpeechBackendConfig(recorded)
+        );
+    }
+
+    /** Reject an asynchronous REST discovery response after endpoint/model changes. */
+    function matchesOpenAiTtsDiscovery(config, requestedApiBase, requestedModel) {
+        if (!config || !requestedApiBase) return false;
+        const isRest = config.backend === 'openai-rest' || config.scheme === 'openai-rest';
+        if (!isRest) return false;
+        const currentApiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+        const currentModel = String(config.model || '');
+        return currentApiBase === String(requestedApiBase).replace(/\/$/, '')
+            && currentModel === String(requestedModel || '');
+    }
+
+    /** Reject an asynchronous REST ASR model response after endpoint/backend changes. */
+    function matchesOpenAiAsrDiscovery(config, requestedApiBase) {
+        if (!config || !requestedApiBase) return false;
+        const isRest = config.backend === 'openai-rest' || config.scheme === 'openai-rest';
+        if (!isRest) return false;
+        const currentApiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+        return currentApiBase === String(requestedApiBase).replace(/\/$/, '');
+    }
+
+    /** Filter provider voice records by a selected language without dropping untagged voices. */
+    function ttsVoicesForLanguage(voices, selectedLanguage) {
+        const selected = normalizeLanguageTag(selectedLanguage);
+        if (!Array.isArray(voices) || !selected) return Array.isArray(voices) ? voices.slice() : [];
+        const selectedBase = selected.split('-', 1)[0];
+        return voices.filter(function (voice) {
+            const language = normalizeLanguageTag(voice && voice.language);
+            if (!language) return true;
+            if (selected.includes('-')) return language === selected;
+            return language.split('-', 1)[0] === selectedBase;
+        });
+    }
+
+    /**
+     * Resolve the REST TTS voice list and selected value for a language.
+     * A provider-qualified list is authoritative: a configured voice from a
+     * different language must not leak into the new language's options.
+     */
+    function resolveTtsVoiceSelection(voices, selectedLanguage, configuredVoice, providerQualified) {
+        const configured = String(configuredVoice || '');
+        const options = ttsVoicesForLanguage(voices, selectedLanguage);
+        const hasConfigured = options.some(function (voice) {
+            return String((voice && (voice.id || voice.name)) || voice) === configured;
+        });
+
+        if (!providerQualified && configured && !hasConfigured) {
+            options.unshift({id: configured, name: configured, configuredOnly: true});
+        }
+        if (!providerQualified && !options.length) {
+            options.push({id: configured, name: configured || 'Default', configuredOnly: true});
+        }
+
+        const selectedVoice = hasConfigured
+            ? configured
+            : String((options[0] && (options[0].id || options[0].name)) || options[0] || '');
+        return {voices: options, selectedVoice: selectedVoice};
+    }
+
     /**
      * Return the model identifier used for pipeline/session metadata.
      *
@@ -60,5 +148,12 @@
     return {
         getTtsModelName,
         matchesRivaDiscovery,
+        matchesOpenAiAsrDiscovery,
+        matchesOpenAiTtsDiscovery,
+        mergeRecordedSpeechConfig,
+        normalizeLanguageTag,
+        normalizeSpeechBackendConfig,
+        resolveTtsVoiceSelection,
+        ttsVoicesForLanguage,
     };
 }));
