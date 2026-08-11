@@ -5307,7 +5307,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             splitPointsAtTimeGaps(cpuPoints, 0.2).forEach(function (run) {
                 drawAreaAndLine(run, '#2196F3', '#2196F3', 0.45);
             });
-            splitPointsAtTimeGaps(gpuPoints, 0.2).forEach(function (run) {
+            // The final one-shot nvidia-smi fallback samples GPU at 250 ms.
+            // Allow subprocess jitter, while a missed fallback sample
+            // (roughly 500 ms) still creates a visible gap.
+            splitPointsAtTimeGaps(gpuPoints, 0.4).forEach(function (run) {
                 drawAreaAndLine(run, '#4CAF50', '#4CAF50', 0.45);
             });
 
