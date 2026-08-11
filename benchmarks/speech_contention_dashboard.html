@@ -1,0 +1,1145 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Speech Contention Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101414;
+      --panel: #1b2121;
+      --panel-2: #242b2b;
+      --text: #f4f7f7;
+      --muted: #a9b5b5;
+      --green: #76b900;
+      --orange: #ff9f1a;
+      --magenta: #eb3d7d;
+      --cyan: #3da5d9;
+      --red: #ff5d5d;
+      --border: #394444;
+      --controlled: #244226;
+      --varied: #574315;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 18px 28px;
+      background: rgba(16, 20, 20, .94);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+    h1, h2, h3 { margin: 0; }
+    h1 { font-size: 22px; letter-spacing: .02em; }
+    h2 { margin-bottom: 14px; font-size: 20px; }
+    h3 { font-size: 16px; }
+    button {
+      border: 1px solid var(--green);
+      border-radius: 7px;
+      padding: 8px 14px;
+      color: #fff;
+      background: #315000;
+      cursor: pointer;
+    }
+    main { max-width: 1500px; margin: 0 auto; padding: 24px; }
+    .note {
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--green);
+      background: var(--panel);
+      color: var(--muted);
+    }
+    .overview {
+      margin-bottom: 24px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .run-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 18px;
+    }
+    .run-nav a {
+      padding: 7px 11px;
+      border: 1px solid var(--cyan);
+      border-radius: 999px;
+      color: #d9f4ff;
+      text-decoration: none;
+      background: #173848;
+    }
+    .experiment-table-wrap { overflow-x: auto; }
+    .experiment-table {
+      width: 100%;
+      min-width: 980px;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    .experiment-table th, .experiment-table td {
+      padding: 10px;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    .experiment-table th:first-child, .experiment-table td:first-child {
+      border-left: 1px solid var(--border);
+    }
+    .experiment-table thead th { border-top: 1px solid var(--border); }
+    .experiment-table a { color: #9adfff; font-weight: 650; }
+    .controlled { background: var(--controlled); }
+    .varied { background: var(--varied); }
+    .condition-key {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .condition-key span::before {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-right: 6px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      vertical-align: -2px;
+      content: "";
+    }
+    .condition-key .fixed::before { background: var(--controlled); }
+    .condition-key .changed::before { background: var(--varied); }
+    .run {
+      margin: 22px 0 38px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .run-header {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .meta { color: var(--muted); font-size: 13px; }
+    .summary {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-variant-numeric: tabular-nums;
+    }
+    .summary th, .summary td {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: right;
+    }
+    .summary th:first-child, .summary td:first-child { text-align: left; }
+    .trials {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 16px;
+    }
+    .trial {
+      min-width: 0;
+      padding: 15px;
+      border-radius: 9px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+    }
+    .overlap-panel {
+      margin: 4px 0 20px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--panel-2);
+    }
+    .overlap-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .timeline-legend {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .timeline-legend > span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .timeline-legend > span::before {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border-radius: 2px;
+      vertical-align: -1px;
+      content: "";
+    }
+    .timeline-legend .llm-prefill::before { background: #ff9800; }
+    .timeline-legend .llm-generate::before { background: #ffb74d; }
+    .timeline-legend .tts-generate::before { background: #ec407a; }
+    .timeline-legend .ai-audio::before,
+    .timeline-legend .underrun::before { display: none; }
+    .legend-waveform {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1px;
+      width: 17px;
+      height: 12px;
+      color: #9c27b0;
+    }
+    .legend-waveform i {
+      display: block;
+      width: 2px;
+      border-radius: 1px;
+      background: currentColor;
+    }
+    .legend-waveform i:nth-child(1),
+    .legend-waveform i:nth-child(5) { height: 4px; }
+    .legend-waveform i:nth-child(2),
+    .legend-waveform i:nth-child(4) { height: 8px; }
+    .legend-waveform i:nth-child(3) { height: 12px; }
+    .legend-underrun-icon {
+      display: inline-block;
+      width: 3px;
+      height: 12px;
+      border-radius: 1px;
+      background: #ff5d5d;
+      box-shadow: 0 0 0 1px rgba(255, 93, 93, .18);
+    }
+    .overlap-timeline { height: 245px; }
+    .trial-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .run-picker {
+      display: inline-flex;
+      align-items: center;
+      overflow: hidden;
+      flex: 0 0 auto;
+      border: 1px solid #425252;
+      border-radius: 999px;
+      color: var(--muted);
+      background: #263131;
+      font-size: 10px;
+      line-height: 1;
+    }
+    .run-picker-label { padding: 4px 5px 4px 7px; }
+    .run-pill {
+      min-width: 22px;
+      padding: 4px 6px;
+      border: 0;
+      border-left: 1px solid #425252;
+      color: #bdc9c9;
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+    }
+    .run-pill:hover { color: #fff; background: #394747; }
+    .run-pill[aria-selected="true"] {
+      color: #071011;
+      background: var(--cyan);
+      font-weight: 750;
+    }
+    .run-pill:focus-visible {
+      position: relative;
+      z-index: 1;
+      outline: 2px solid #fff;
+      outline-offset: -2px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(70px, 1fr));
+      gap: 7px;
+      margin-bottom: 12px;
+    }
+    .metric {
+      padding: 8px;
+      border-radius: 6px;
+      background: #161b1b;
+    }
+    .metric label { display: block; color: var(--muted); font-size: 11px; }
+    .metric strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 105px;
+      margin: 7px 0 12px;
+      border-radius: 5px;
+      background: #111;
+    }
+    .plot-label { color: var(--muted); font-size: 12px; }
+    .waveform-player {
+      position: relative;
+      overflow: hidden;
+      margin: 7px 0 12px;
+      border-radius: 5px;
+      background: #111;
+      cursor: crosshair;
+    }
+    .waveform-player canvas { margin: 0; }
+    .waveform-player audio { display: none; }
+    .waveform-play-button {
+      position: absolute;
+      z-index: 3;
+      top: calc(50% - 8px);
+      left: 8px;
+      width: 31px;
+      height: 31px;
+      padding: 0 0 0 2px;
+      transform: translateY(-50%);
+      border: 1px solid rgba(255,255,255,.72);
+      border-radius: 50%;
+      color: #fff;
+      background: rgba(11,18,18,.74);
+      box-shadow: 0 2px 8px rgba(0,0,0,.45);
+      font-size: 14px;
+      line-height: 29px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .waveform-play-button:hover { background: rgba(30,48,48,.92); }
+    .waveform-play-button[data-playing="true"] {
+      padding-left: 0;
+      color: var(--green);
+    }
+    .waveform-play-button:focus-visible {
+      outline: 2px solid #fff;
+      outline-offset: 2px;
+    }
+    .waveform-playhead {
+      position: absolute;
+      z-index: 2;
+      top: 0;
+      bottom: 15px;
+      left: 0;
+      width: 2px;
+      transform: translateX(-1px);
+      background: #fff;
+      box-shadow: 0 0 5px rgba(255,255,255,.78);
+      pointer-events: none;
+    }
+    .waveform-time {
+      position: absolute;
+      z-index: 3;
+      right: 5px;
+      bottom: 17px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      color: #dce5e5;
+      background: rgba(0,0,0,.62);
+      font-size: 9px;
+      font-variant-numeric: tabular-nums;
+      pointer-events: none;
+    }
+    .shared-time-scale {
+      margin: 12px 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    .error { color: var(--red); white-space: pre-wrap; }
+    .empty { padding: 50px; color: var(--muted); text-align: center; }
+    @media (max-width: 700px) {
+      main { padding: 12px; }
+      .trials { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Speech Contention Lab</h1>
+    <button id="refresh">Refresh results</button>
+  </header>
+  <main>
+    <div class="note">
+      Compare <b>TTS only</b>, <b>LLM only</b>, and <b>overlap</b>.
+      “Clean” is the generated PCM concatenated without timing gaps.
+      “Simulated live playout” inserts silence where measured chunk delivery
+      would have exhausted the configured playback buffer.
+    </div>
+    <div id="content" class="empty">Loading results…</div>
+  </main>
+  <script>
+    const colors = {
+      waveform: '#eb3d7d',
+      chunks: '#3da5d9',
+      gpu: '#76b900',
+      underrun: '#ff5d5d',
+      grid: '#394444',
+    };
+
+    const fmt = (value, digits = 3) =>
+      value === null || value === undefined ? '—' : Number(value).toFixed(digits);
+
+    function shortRelease(release) {
+      const match = String(release || '').match(/# R(\d+).*REVISION:\s*([\d.]+)/s);
+      return match ? `R${match[1]}.${match[2].replace(/\.0$/, '')}` : '—';
+    }
+
+    function migMode(run) {
+      const match = String(run.host?.nvidia_smi || '').match(/,\s*(Enabled|Disabled)\s*,/i);
+      return match ? match[1] : '—';
+    }
+
+    function workloadName(run) {
+      return Number(run.configuration?.llm_max_tokens || 0) <= 64 ? 'Short' : 'Standard';
+    }
+
+    function overlapModeLabel(mode, units, actualUnits = null) {
+      if (mode === 'mmas-units') {
+        return `MMAS phrase-aware ${units ?? 10} units`;
+      }
+      if (mode === 'strict-units') {
+        return `Strict wait ${units ?? '?'} units`;
+      }
+      if (mode === 'after-llm') {
+        return 'After LLM completion';
+      }
+      return 'Simultaneous';
+    }
+
+    function overview(runs) {
+      const links = runs.map(run =>
+        `<a href="#run-${run.run_id}">${run.label || run.run_id}</a>`).join('');
+      const rows = runs.map(run => {
+        const config = run.configuration || {};
+        return `<tr>
+          <td><a href="#run-${run.run_id}">${run.label || run.run_id}</a></td>
+          <td>${run.comparison_role || '—'}</td>
+          <td class="varied">${config.tts_backend || '—'}</td>
+          <td class="varied">${workloadName(run)}</td>
+          <td class="varied">${config.llm_max_tokens ?? '—'}</td>
+          <td class="varied">${(config.tts_text || '').length} chars</td>
+          <td class="controlled">${config.llm_model || '—'}</td>
+          <td class="controlled">${run.host?.nvidia_smi_list?.split('\n')[0] || '—'}</td>
+          <td class="controlled">${shortRelease(run.host?.jetson_release)}</td>
+          <td class="controlled">${migMode(run)}</td>
+          <td class="controlled">${overlapModeLabel(
+            config.overlap_start_mode,
+            config.overlap_trigger_units
+          )}</td>
+          <td class="controlled">${config.playout_prebuffer_ms ?? '—'} ms</td>
+          <td class="controlled">${config.repeats ?? '—'}</td>
+        </tr>`;
+      }).join('');
+      return `<section class="overview">
+        <h2>Experiment matrix</h2>
+        <div class="run-nav">${links}</div>
+        <div class="experiment-table-wrap">
+          <table class="experiment-table">
+            <thead><tr>
+              <th>Run</th>
+              <th>Comparison role</th>
+              <th class="varied">TTS backend</th>
+              <th class="varied">Load</th>
+              <th class="varied">LLM max tokens</th>
+              <th class="varied">TTS input</th>
+              <th class="controlled">LLM model</th>
+              <th class="controlled">Hardware</th>
+              <th class="controlled">BSP</th>
+              <th class="controlled">MIG</th>
+              <th class="controlled">Overlap trigger</th>
+              <th class="controlled">Playout buffer</th>
+              <th class="controlled">Repeats</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <div class="condition-key">
+          <span class="changed">Changed between these runs</span>
+          <span class="fixed">Controlled / held constant</span>
+        </div>
+      </section>`;
+    }
+
+    function metric(label, value) {
+      return `<div class="metric"><label>${label}</label><strong>${value}</strong></div>`;
+    }
+
+    function artifactUrl(run, relative) {
+      return `/artifacts/${encodeURIComponent(run._artifact_base)}/${relative.split('/').map(encodeURIComponent).join('/')}`;
+    }
+
+    function summaryTable(run) {
+      const rows = Object.entries(run.summary || {}).map(([scenario, s]) => `
+        <tr>
+          <td>${scenario}</td>
+          <td>${s.errors}/${s.trials}</td>
+          <td>${fmt(s.llm_ttft_mean_s)}</td>
+          <td>${fmt(s.llm_tokens_per_s_mean, 1)}</td>
+          <td>${fmt(s.tts_ttfa_mean_s)}</td>
+          <td>${fmt(s.tts_rtf_mean)}</td>
+          <td>${fmt(s.playout_underruns_mean, 1)}</td>
+          <td>${fmt(s.playout_underrun_mean_s)}</td>
+        </tr>`).join('');
+      return `<table class="summary">
+        <thead><tr>
+          <th>Scenario</th><th>Errors</th><th>LLM TTFT s</th><th>tok/s</th>
+          <th>TTS TTFA s</th><th>TTS RTF</th><th>Underruns</th><th>Gap s</th>
+        </tr></thead><tbody>${rows}</tbody>
+      </table>`;
+    }
+
+    function contentionDelta(run) {
+      const ttsOnly = run.summary?.['tts-only'] || {};
+      const llmOnly = run.summary?.['llm-only'] || {};
+      const overlap = run.summary?.overlap || {};
+      const delta = (overlapValue, isolatedValue) =>
+        overlapValue === null || overlapValue === undefined ||
+        isolatedValue === null || isolatedValue === undefined
+          ? null : overlapValue - isolatedValue;
+      return `<div class="metrics">
+        ${metric('Overlap Δ TTS TTFA',
+          fmt(delta(overlap.tts_ttfa_mean_s, ttsOnly.tts_ttfa_mean_s)) + ' s')}
+        ${metric('Overlap Δ TTS RTF',
+          fmt(delta(overlap.tts_rtf_mean, ttsOnly.tts_rtf_mean)))}
+        ${metric('Overlap Δ LLM TTFT',
+          fmt(delta(overlap.llm_ttft_mean_s, llmOnly.llm_ttft_mean_s)) + ' s')}
+        ${metric('Overlap Δ underruns',
+          fmt(delta(overlap.playout_underruns_mean, ttsOnly.playout_underruns_mean), 1))}
+      </div>`;
+    }
+
+    const selectedRepeats = new Map();
+
+    function trialKey(run, scenario) {
+      return `${run.run_id}:${scenario}`;
+    }
+
+    function scenarioTrials(run, scenario) {
+      return (run.trials || []).filter(trial => trial.scenario === scenario);
+    }
+
+    function selectedTrial(run, scenario) {
+      const trials = scenarioTrials(run, scenario);
+      const selected = selectedRepeats.get(trialKey(run, scenario));
+      return trials.find(trial => trial.repeat === selected) || trials[0] || null;
+    }
+
+    function runPicker(run, trials, selectedRepeat) {
+      if (!trials.length) return '';
+      return `<div class="run-picker" role="tablist" aria-label="${trials[0].scenario} benchmark runs">
+        <span class="run-picker-label">run</span>
+        ${trials.map(trial => `<button type="button" class="run-pill"
+          role="tab"
+          data-run-id="${run.run_id}"
+          data-scenario="${trial.scenario}"
+          data-repeat="${trial.repeat}"
+          aria-label="run ${trial.repeat}"
+          aria-selected="${trial.repeat === selectedRepeat}">${trial.repeat}</button>`).join('')}
+      </div>`;
+    }
+
+    function overlapTriggerLabel(overlap) {
+      if (!overlap) return '';
+      const trigger = overlap.overlap_trigger || {};
+      return trigger.mode === 'after-llm'
+        ? `After LLM completion at ${fmt(trigger.llm_elapsed_s)}s`
+        : trigger.mode === 'simultaneous'
+          ? 'Synthetic simultaneous start'
+          : `${trigger.mode === 'strict-units' ? 'Strict' : 'MMAS'} trigger: ` +
+            `${trigger.actual_units ?? '?'} units at ${fmt(trigger.llm_elapsed_s)}s`;
+    }
+
+    function overlapPanel(run, overlap) {
+      if (!overlap || overlap.error) return '';
+      const trials = scenarioTrials(run, 'overlap');
+      const triggerLabel = overlapTriggerLabel(overlap);
+      return `<div class="overlap-panel" id="overlap-panel-${run.run_id}">
+        <div class="overlap-heading">
+          <div>
+            <h3>Overlap timeline · ${triggerLabel}</h3>
+            ${runPicker(run, trials, overlap.repeat)}
+          </div>
+          <div class="timeline-legend">
+            <span class="llm-prefill">LLM Prefill</span>
+            <span class="llm-generate">LLM Generate</span>
+            <span class="tts-generate">TTS</span>
+            <span class="ai-audio"><span class="legend-waveform" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>AI Audio</span>
+            <span class="underrun"><span class="legend-underrun-icon" aria-hidden="true"></span>Underrun</span>
+          </div>
+        </div>
+        <canvas class="overlap-timeline" id="overlap-${run.run_id}"></canvas>
+      </div>`;
+    }
+
+    function trialCard(run, trials, trial) {
+      const picker = runPicker(run, trials, trial.repeat);
+      if (trial.error) {
+        return `<article class="trial" id="trial-${run.run_id}-${trial.scenario}">
+          <div class="trial-title"><h3>${trial.scenario}</h3>${picker}</div>
+          <div class="error">${trial.error}</div></article>`;
+      }
+      const llm = trial.llm || {};
+      const tts = trial.tts || {};
+      const playout = trial.playout || {};
+      const clean = trial.artifacts?.clean_audio;
+      const simulated = trial.artifacts?.simulated_playout_audio;
+      return `<article class="trial" id="trial-${run.run_id}-${trial.scenario}">
+        <div class="trial-title"><h3>${trial.scenario}</h3>${picker}</div>
+        <div class="metrics">
+          ${metric('LLM TTFT', fmt(llm.ttft_s) + ' s')}
+          ${metric('LLM speed', fmt(llm.tokens_per_s, 1) + ' tok/s')}
+          ${metric('TTS TTFA', fmt(tts.ttfa_s) + ' s')}
+          ${metric('TTS RTF', fmt(tts.rtf))}
+          ${metric('Audio', fmt(tts.audio_s) + ' s')}
+          ${metric('Chunks', tts.chunk_count ?? '—')}
+          ${metric('Underruns', playout.underrun_count ?? '—')}
+          ${metric('Gap total', fmt(playout.underrun_s) + ' s')}
+        </div>
+        ${clean ? `<div class="plot-label">Clean generated waveform</div>
+          <div class="waveform-player">
+            <canvas id="wave-${run.run_id}-${trial.scenario}"></canvas>
+            <button type="button" class="waveform-play-button" aria-label="Play clean generated audio">▶</button>
+            <span class="waveform-playhead" aria-hidden="true"></span>
+            <span class="waveform-time">0:00 / —</span>
+            <audio preload="metadata" src="${artifactUrl(run, clean)}"></audio>
+          </div>
+          <div class="plot-label">Simulated live-playout waveform</div>
+          <div class="waveform-player">
+            <canvas id="playout-${run.run_id}-${trial.scenario}"></canvas>
+            <button type="button" class="waveform-play-button" aria-label="Play simulated live playout">▶</button>
+            <span class="waveform-playhead" aria-hidden="true"></span>
+            <span class="waveform-time">0:00 / —</span>
+            <audio preload="metadata" src="${artifactUrl(run, simulated)}"></audio>
+          </div>` : ''}
+        ${tts.chunk_events ? `<div class="plot-label">TTS chunk delivery (red = simulated underrun)</div>
+          <canvas id="chunks-${run.run_id}-${trial.scenario}"></canvas>` : ''}
+        ${trial.gpu_samples?.length ? `<div class="plot-label">GPU utilization</div>
+          <canvas id="gpu-${run.run_id}-${trial.scenario}"></canvas>` : ''}
+      </article>`;
+    }
+
+    function trialCards(run) {
+      return ['tts-only', 'llm-only', 'overlap'].map(scenario => {
+        const trials = scenarioTrials(run, scenario);
+        const trial = selectedTrial(run, scenario);
+        return trial ? trialCard(run, trials, trial) : '';
+      }).join('');
+    }
+
+    function drawGrid(ctx, width, height) {
+      ctx.strokeStyle = colors.grid;
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 4; i++) {
+        const y = height * i / 4;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+      }
+    }
+
+    function niceTick(maxTime) {
+      const rough = maxTime / 8;
+      const magnitude = 10 ** Math.floor(Math.log10(Math.max(rough, .001)));
+      const normalized = rough / magnitude;
+      const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+      return step * magnitude;
+    }
+
+    function trialEndTime(trial) {
+      const llm = trial.llm || {};
+      const tts = trial.tts || {};
+      const playout = trial.playout || {};
+      const llmStart = llm.start_offset_s || 0;
+      const ttsStart = tts.start_offset_s || 0;
+      const playoutStart = playout.playout_start_s ?? tts.ttfa_s ?? 0;
+      const simulatedAudio = (tts.audio_s || 0) + (playout.underrun_s || 0);
+      const gpuEnd = Math.max(
+        0,
+        ...(trial.gpu_samples || []).map(sample => sample.time_s || 0)
+      );
+      const chunkEnd = Math.max(
+        0,
+        ...(tts.chunk_events || []).map(event => event.arrival_s || 0)
+      );
+      return Math.max(
+        llmStart + (llm.total_s || 0),
+        ttsStart + (tts.total_s || 0),
+        ttsStart + playoutStart + simulatedAudio,
+        gpuEnd,
+        chunkEnd,
+        1
+      );
+    }
+
+    function sharedTimeScale(runs) {
+      const rawMax = Math.max(
+        1,
+        ...runs.flatMap(run => (run.trials || []).map(trialEndTime))
+      );
+      const tick = niceTick(rawMax);
+      return Math.ceil(rawMax / tick) * tick;
+    }
+
+    function drawTimeAxis(ctx, width, plotHeight, height, maxTime, ratio) {
+      const tick = niceTick(maxTime);
+      ctx.strokeStyle = colors.grid;
+      ctx.fillStyle = '#7f8d8d';
+      ctx.lineWidth = ratio;
+      ctx.font = `${9 * ratio}px Inter, system-ui, sans-serif`;
+      ctx.textBaseline = 'top';
+      for (let seconds = 0; seconds <= maxTime + tick / 2; seconds += tick) {
+        const x = seconds / maxTime * width;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, plotHeight);
+        ctx.stroke();
+        ctx.textAlign = seconds === 0 ? 'left' :
+          seconds + tick / 2 > maxTime ? 'right' : 'center';
+        ctx.fillText(`${fmt(seconds, seconds < 10 ? 1 : 0)}s`, x, plotHeight + 2 * ratio);
+      }
+    }
+
+    async function drawOverlapTimeline(canvas, run, trial, sharedMaxTime) {
+      const llm = trial.llm || {};
+      const tts = trial.tts || {};
+      const playout = trial.playout || {};
+      const simulated = trial.artifacts?.simulated_playout_audio;
+      let audioBuffer = null;
+      if (simulated) {
+        const response = await fetch(artifactUrl(run, simulated));
+        const data = await response.arrayBuffer();
+        const audioContext = new AudioContext();
+        audioBuffer = await audioContext.decodeAudioData(data.slice(0));
+        await audioContext.close();
+      }
+
+      const llmStart = llm.start_offset_s || 0;
+      const ttsStart = tts.start_offset_s || 0;
+      const audioStart = ttsStart + (playout.playout_start_s ?? tts.ttfa_s ?? 0);
+      const audioEnd = audioStart + (audioBuffer?.duration || tts.audio_s || 0);
+      const llmEnd = llmStart + (llm.total_s || 0);
+      const ttsEnd = ttsStart + (tts.total_s || 0);
+      const maxTime = sharedMaxTime;
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth * ratio;
+      const height = canvas.clientHeight * ratio;
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const labelWidth = 78 * ratio;
+      const rightPad = 14 * ratio;
+      const plotWidth = width - labelWidth - rightPad;
+      const top = 16 * ratio;
+      const laneHeight = 48 * ratio;
+      const laneGap = 14 * ratio;
+      const audioY = top;
+      const llmY = audioY + laneHeight + laneGap;
+      const ttsY = llmY + laneHeight + laneGap;
+      const axisY = ttsY + laneHeight + 22 * ratio;
+      const xAt = seconds => labelWidth + seconds / maxTime * plotWidth;
+
+      ctx.font = `${12 * ratio}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#dce5e5';
+      [['AI AUDIO', audioY], ['LLM', llmY], ['TTS', ttsY]].forEach(([label, y]) => {
+        ctx.fillText(label, labelWidth - 10 * ratio, y + laneHeight / 2);
+      });
+
+      ctx.fillStyle = '#171c1c';
+      [audioY, llmY, ttsY].forEach(y =>
+        ctx.fillRect(labelWidth, y, plotWidth, laneHeight));
+
+      const tick = niceTick(maxTime);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.strokeStyle = '#394444';
+      ctx.fillStyle = '#a9b5b5';
+      ctx.lineWidth = ratio;
+      for (let seconds = 0; seconds <= maxTime + tick / 2; seconds += tick) {
+        const x = xAt(seconds);
+        ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, axisY); ctx.stroke();
+        ctx.fillText(`${fmt(seconds, seconds < 10 ? 1 : 0)}s`, x, axisY + 3 * ratio);
+      }
+
+      const llmTtft = llmStart + (llm.ttft_s || 0);
+      ctx.fillStyle = '#ff9800';
+      ctx.fillRect(xAt(llmStart), llmY + 8 * ratio, Math.max(1, xAt(llmTtft) - xAt(llmStart)), laneHeight - 16 * ratio);
+      ctx.fillStyle = '#ffb74d';
+      ctx.fillRect(xAt(llmTtft), llmY + 8 * ratio, Math.max(1, xAt(llmEnd) - xAt(llmTtft)), laneHeight - 16 * ratio);
+
+      ctx.fillStyle = '#ec407a';
+      ctx.fillRect(xAt(ttsStart), ttsY + 8 * ratio, Math.max(1, xAt(ttsEnd) - xAt(ttsStart)), laneHeight - 16 * ratio);
+      if (tts.ttfa_s !== null && tts.ttfa_s !== undefined) {
+        const absoluteTtfa = ttsStart + tts.ttfa_s;
+        ctx.strokeStyle = '#d7a6ff';
+        ctx.lineWidth = 3 * ratio;
+        ctx.beginPath();
+        ctx.moveTo(xAt(absoluteTtfa), ttsY + 4 * ratio);
+        ctx.lineTo(xAt(absoluteTtfa), ttsY + laneHeight - 4 * ratio);
+        ctx.stroke();
+      }
+
+      for (const gap of playout.underruns || []) {
+        const gapStart = ttsStart + gap.start_s;
+        const x = xAt(gapStart);
+        const w = Math.max(2 * ratio, xAt(gapStart + gap.duration_s) - x);
+        ctx.fillStyle = 'rgba(255,93,93,.42)';
+        ctx.fillRect(x, audioY, w, laneHeight);
+      }
+
+      if (audioBuffer) {
+        const samples = audioBuffer.getChannelData(0);
+        const startX = xAt(audioStart);
+        const endX = xAt(audioEnd);
+        const columns = Math.max(1, Math.floor(endX - startX));
+        const stride = Math.max(1, Math.floor(samples.length / columns));
+        const center = audioY + laneHeight / 2;
+        const scale = laneHeight * .43;
+        ctx.strokeStyle = '#9c27b0';
+        ctx.lineWidth = ratio;
+        ctx.beginPath();
+        for (let column = 0; column < columns; column++) {
+          let min = 1, max = -1;
+          const sampleStart = column * stride;
+          for (let index = sampleStart; index < Math.min(samples.length, sampleStart + stride); index++) {
+            min = Math.min(min, samples[index]); max = Math.max(max, samples[index]);
+          }
+          const x = startX + column;
+          ctx.moveTo(x, center - max * scale);
+          ctx.lineTo(x, center - min * scale);
+        }
+        ctx.stroke();
+      }
+    }
+
+    async function drawWaveform(canvas, url, options = {}) {
+      const response = await fetch(url);
+      const data = await response.arrayBuffer();
+      const audioContext = new AudioContext();
+      const buffer = await audioContext.decodeAudioData(data.slice(0));
+      const samples = buffer.getChannelData(0);
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth * ratio;
+      const height = canvas.clientHeight * ratio;
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const maxDuration = Math.max(options.maxDuration || buffer.duration, buffer.duration);
+      const axisHeight = 15 * ratio;
+      const plotHeight = height - axisHeight;
+      const plotWidth = width * buffer.duration / maxDuration;
+      const center = plotHeight / 2;
+      drawTimeAxis(ctx, width, plotHeight, height, maxDuration, ratio);
+      ctx.strokeStyle = '#394444';
+      ctx.lineWidth = ratio;
+      ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(width, center); ctx.stroke();
+      for (const gap of options.gaps || []) {
+        const relativeStart = Math.max(0, gap.start_s - (options.gapOriginS || 0));
+        const x = relativeStart / maxDuration * width;
+        // Preserve time-proportional width for normal gaps, but keep very
+        // short underruns visible at dashboard scale (for example, 12 ms over
+        // a multi-second waveform would otherwise be only one or two pixels).
+        const w = Math.max(6 * ratio, gap.duration_s / maxDuration * width);
+        ctx.fillStyle = 'rgba(255,93,93,.38)';
+        ctx.fillRect(x, 0, w, plotHeight);
+      }
+      ctx.strokeStyle = colors.waveform;
+      ctx.lineWidth = ratio;
+      const columns = Math.max(1, Math.floor(plotWidth));
+      const stride = Math.max(1, Math.floor(samples.length / columns));
+      ctx.beginPath();
+      for (let x = 0; x < columns; x++) {
+        let min = 1, max = -1;
+        const start = x * stride;
+        for (let j = start; j < Math.min(samples.length, start + stride); j++) {
+          min = Math.min(min, samples[j]); max = Math.max(max, samples[j]);
+        }
+        ctx.moveTo(x, (1 - max) * plotHeight / 2);
+        ctx.lineTo(x, (1 - min) * plotHeight / 2);
+      }
+      ctx.stroke();
+      for (const gap of options.gaps || []) {
+        const relativeStart = Math.max(0, gap.start_s - (options.gapOriginS || 0));
+        const x = relativeStart / maxDuration * width;
+        const w = Math.max(6 * ratio, gap.duration_s / maxDuration * width);
+        ctx.fillStyle = 'rgba(255,93,93,.32)';
+        ctx.fillRect(x, 0, w, plotHeight);
+        ctx.fillStyle = colors.underrun;
+        ctx.fillRect(x, 0, Math.max(1 * ratio, 1), plotHeight);
+      }
+      await audioContext.close();
+    }
+
+    function drawChunkPlot(canvas, trial, maxTime) {
+      const events = trial.tts?.chunk_events || [];
+      if (!events.length) return;
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth * ratio;
+      const height = canvas.clientHeight * ratio;
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const axisHeight = 15 * ratio;
+      const plotHeight = height - axisHeight;
+      drawGrid(ctx, width, plotHeight);
+      drawTimeAxis(ctx, width, plotHeight, height, maxTime, ratio);
+      ctx.fillStyle = colors.chunks;
+      for (const event of events) {
+        const x = event.arrival_s / maxTime * width;
+        const barHeight = Math.max(3, Math.min(plotHeight, event.audio_s * plotHeight));
+        ctx.fillRect(x, plotHeight - barHeight, Math.max(2, ratio * 2), barHeight);
+      }
+      ctx.fillStyle = colors.underrun;
+      for (const gap of trial.playout?.underruns || []) {
+        const x = gap.start_s / maxTime * width;
+        const w = Math.max(2, gap.duration_s / maxTime * width);
+        ctx.fillRect(x, 0, w, plotHeight);
+      }
+    }
+
+    function drawGpu(canvas, trial, maxTime) {
+      const samples = trial.gpu_samples || [];
+      if (!samples.length) return;
+      const points = samples.map(sample => ({
+        x: sample.time_s,
+        y: sample.devices?.[0]?.gpu_util_percent
+      })).filter(point => point.y !== null && point.y !== undefined);
+      if (!points.length) return;
+      const ratio = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth * ratio;
+      const height = canvas.clientHeight * ratio;
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const axisHeight = 15 * ratio;
+      const plotHeight = height - axisHeight;
+      drawGrid(ctx, width, plotHeight);
+      drawTimeAxis(ctx, width, plotHeight, height, maxTime, ratio);
+      const coordinates = points.map(point => ({
+        x: point.x / maxTime * width,
+        y: plotHeight - point.y / 100 * plotHeight
+      }));
+      const fill = ctx.createLinearGradient(0, 0, 0, plotHeight);
+      fill.addColorStop(0, 'rgba(118, 185, 0, 0.58)');
+      fill.addColorStop(1, 'rgba(118, 185, 0, 0.10)');
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(coordinates[0].x, plotHeight);
+      coordinates.forEach(point => ctx.lineTo(point.x, point.y));
+      ctx.lineTo(coordinates[coordinates.length - 1].x, plotHeight);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = colors.gpu;
+      ctx.lineWidth = 1.5 * ratio;
+      ctx.beginPath();
+      coordinates.forEach((point, index) => {
+        index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
+      });
+      ctx.stroke();
+    }
+
+    function clockTime(seconds) {
+      if (!Number.isFinite(seconds)) return '—';
+      const minutes = Math.floor(seconds / 60);
+      const remainder = (seconds % 60).toFixed(1).padStart(4, '0');
+      return `${minutes}:${remainder}`;
+    }
+
+    function setupWaveformPlayer(canvas, timeScale) {
+      const player = canvas?.closest('.waveform-player');
+      if (!player || player.dataset.initialized) return;
+      player.dataset.initialized = 'true';
+      const audio = player.querySelector('audio');
+      const button = player.querySelector('.waveform-play-button');
+      const playhead = player.querySelector('.waveform-playhead');
+      const time = player.querySelector('.waveform-time');
+      let animationFrame = null;
+
+      const update = () => {
+        const current = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+        playhead.style.left = `${Math.max(0, Math.min(100, current / timeScale * 100))}%`;
+        time.textContent = `${clockTime(current)} / ${clockTime(audio.duration)}`;
+      };
+      const animate = () => {
+        update();
+        if (!audio.paused && !audio.ended) {
+          animationFrame = requestAnimationFrame(animate);
+        }
+      };
+      const stopAnimation = () => {
+        if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+        update();
+      };
+
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (audio.paused || audio.ended) {
+          document.querySelectorAll('.waveform-player audio').forEach(other => {
+            if (other !== audio) other.pause();
+          });
+          if (audio.ended) audio.currentTime = 0;
+          audio.play().catch(error => {
+            button.title = error.message;
+          });
+        } else {
+          audio.pause();
+        }
+      });
+      player.addEventListener('click', event => {
+        if (event.target.closest('.waveform-play-button')) return;
+        const bounds = player.getBoundingClientRect();
+        const seconds = (event.clientX - bounds.left) / bounds.width * timeScale;
+        if (Number.isFinite(audio.duration)) {
+          audio.currentTime = Math.max(0, Math.min(audio.duration, seconds));
+          update();
+        }
+      });
+      audio.addEventListener('loadedmetadata', update);
+      audio.addEventListener('durationchange', update);
+      audio.addEventListener('timeupdate', update);
+      audio.addEventListener('play', () => {
+        button.textContent = '❚❚';
+        button.dataset.playing = 'true';
+        button.setAttribute('aria-label', button.getAttribute('aria-label').replace(/^Play/, 'Pause'));
+        animate();
+      });
+      audio.addEventListener('pause', () => {
+        button.textContent = '▶';
+        button.dataset.playing = 'false';
+        button.setAttribute('aria-label', button.getAttribute('aria-label').replace(/^Pause/, 'Play'));
+        stopAnimation();
+      });
+      audio.addEventListener('ended', stopAnimation);
+      if (audio.readyState >= 1) update();
+    }
+
+    function drawTrialPlots(run, trial, timeScale) {
+      const suffix = `${run.run_id}-${trial.scenario}`;
+      const clean = trial.artifacts?.clean_audio;
+      const wave = document.getElementById(`wave-${suffix}`);
+      const playoutData = trial.playout || {};
+      if (wave && clean) {
+        drawWaveform(wave, artifactUrl(run, clean), {
+          maxDuration: timeScale
+        });
+        setupWaveformPlayer(wave, timeScale);
+      }
+      const playout = document.getElementById(`playout-${suffix}`);
+      const simulated = trial.artifacts?.simulated_playout_audio;
+      if (playout && simulated) {
+        drawWaveform(playout, artifactUrl(run, simulated), {
+          maxDuration: timeScale,
+          gaps: playoutData.underruns || [],
+          gapOriginS: playoutData.playout_start_s || 0
+        });
+        setupWaveformPlayer(playout, timeScale);
+      }
+      const chunks = document.getElementById(`chunks-${suffix}`);
+      if (chunks) drawChunkPlot(chunks, trial, timeScale);
+      const gpu = document.getElementById(`gpu-${suffix}`);
+      if (gpu) drawGpu(gpu, trial, timeScale);
+    }
+
+    function drawSelectedOverlap(run, timeScale) {
+      const overlap = selectedTrial(run, 'overlap');
+      const canvas = document.getElementById(`overlap-${run.run_id}`);
+      if (canvas && overlap && !overlap.error) {
+        drawOverlapTimeline(canvas, run, overlap, timeScale);
+      }
+    }
+
+    async function render() {
+      const content = document.getElementById('content');
+      content.className = 'empty';
+      content.textContent = 'Loading results…';
+      const response = await fetch('/api/runs', {cache: 'no-store'});
+      const runs = await response.json();
+      if (!runs.length) {
+        content.textContent = 'No benchmark manifests found.';
+        return;
+      }
+      const timeScale = sharedTimeScale(runs);
+      content.className = '';
+      content.innerHTML = overview(runs) +
+        `<div class="shared-time-scale">Shared horizontal time scale: 0–${fmt(timeScale, timeScale < 10 ? 1 : 0)} s</div>` +
+        runs.map(run => `
+        <section class="run" id="run-${run.run_id}">
+          <div class="run-header">
+            <div><h2>${run.label || run.run_id}</h2>
+              <div class="meta">${run.comparison_role || ''}<br>${run.run_id} · ${run.created_utc}</div></div>
+            <div class="meta">${run.host?.hostname || ''}<br>${run.host?.nvidia_smi || ''}</div>
+          </div>
+          ${contentionDelta(run)}
+          ${overlapPanel(run, selectedTrial(run, 'overlap'))}
+          ${summaryTable(run)}
+          <div class="trials">${trialCards(run)}</div>
+        </section>`).join('');
+
+      for (const run of runs) {
+        drawSelectedOverlap(run, timeScale);
+        ['tts-only', 'llm-only', 'overlap'].forEach(scenario => {
+          const trial = selectedTrial(run, scenario);
+          if (trial && !trial.error) drawTrialPlots(run, trial, timeScale);
+        });
+      }
+
+      content.onclick = event => {
+        const button = event.target.closest('.run-pill');
+        if (!button) return;
+        const run = runs.find(candidate => candidate.run_id === button.dataset.runId);
+        if (!run) return;
+        const scenario = button.dataset.scenario;
+        const repeat = Number(button.dataset.repeat);
+        const trials = scenarioTrials(run, scenario);
+        const trial = trials.find(candidate => candidate.repeat === repeat);
+        if (!trial) return;
+        selectedRepeats.set(trialKey(run, scenario), repeat);
+
+        const card = document.getElementById(`trial-${run.run_id}-${scenario}`);
+        if (card) {
+          card.querySelectorAll('audio').forEach(audio => audio.pause());
+          card.outerHTML = trialCard(run, trials, trial);
+        }
+        if (!trial.error) drawTrialPlots(run, trial, timeScale);
+
+        if (scenario === 'overlap') {
+          const panel = document.getElementById(`overlap-panel-${run.run_id}`);
+          if (panel) panel.outerHTML = overlapPanel(run, trial);
+          drawSelectedOverlap(run, timeScale);
+        }
+      };
+    }
+
+    document.getElementById('refresh').addEventListener('click', render);
+    render().catch(error => {
+      const content = document.getElementById('content');
+      content.className = 'error';
+      content.textContent = error.stack || error;
+    });
+  </script>
+</body>
+</html>
