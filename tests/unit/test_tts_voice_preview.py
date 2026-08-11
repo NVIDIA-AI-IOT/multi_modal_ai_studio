@@ -13,8 +13,12 @@ from multi_modal_ai_studio.webui import server
 
 
 def test_tts_preview_text_uses_selected_language():
-    assert "こんにちは" in server._tts_preview_text("ja-JP")
+    assert "日本語音声" in server._tts_preview_text("ja-JP")
+    assert "中文语音" in server._tts_preview_text("zh-CN")
     assert "Hola" in server._tts_preview_text("es-ES")
+    assert "नमस्ते" in server._tts_preview_text("hi-IN")
+    assert "Ciao" in server._tts_preview_text("it-IT")
+    assert "Olá" in server._tts_preview_text("pt-BR")
     assert "Hello" in server._tts_preview_text("en-US")
     assert "Hello" in server._tts_preview_text("unknown")
 

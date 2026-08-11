@@ -8,7 +8,14 @@ const test = require('node:test');
 
 const {
     getTtsModelName,
+    matchesOpenAiAsrDiscovery,
+    matchesOpenAiTtsDiscovery,
     matchesRivaDiscovery,
+    mergeRecordedSpeechConfig,
+    normalizeLanguageTag,
+    normalizeSpeechBackendConfig,
+    resolveTtsVoiceSelection,
+    ttsVoicesForLanguage,
 } = require('../../src/multi_modal_ai_studio/webui/static/config_helpers.js');
 
 test('stale Riva ASR discovery cannot overwrite an OpenAI REST preset', () => {
@@ -45,6 +52,104 @@ test('conflicting backend and scheme fail closed', () => {
     };
 
     assert.equal(matchesRivaDiscovery(config, 'localhost:50051'), false);
+});
+
+test('OpenAI REST TTS discovery is scoped to endpoint and model', () => {
+    const config = {
+        backend: 'openai-rest',
+        scheme: 'openai-rest',
+        api_base: 'http://localhost:18080/v1',
+        model: 'kokoro-fp16',
+    };
+    assert.equal(matchesOpenAiTtsDiscovery(config, 'http://localhost:18080/v1', 'kokoro-fp16'), true);
+    assert.equal(matchesOpenAiTtsDiscovery(config, 'http://other:18080/v1', 'kokoro-fp16'), false);
+    assert.equal(matchesOpenAiTtsDiscovery(config, 'http://localhost:18080/v1', 'other-model'), false);
+    assert.equal(matchesOpenAiTtsDiscovery({...config, backend: 'riva', scheme: 'riva'}, 'http://localhost:18080/v1', 'kokoro-fp16'), false);
+});
+
+test('OpenAI REST ASR discovery is scoped to the current endpoint', () => {
+    const config = {
+        backend: 'openai-rest',
+        scheme: 'openai-rest',
+        api_base: 'http://localhost:18080/v1',
+    };
+    assert.equal(matchesOpenAiAsrDiscovery(config, 'http://localhost:18080/v1'), true);
+    assert.equal(matchesOpenAiAsrDiscovery(config, 'http://other:18080/v1'), false);
+    assert.equal(matchesOpenAiAsrDiscovery({...config, backend: 'riva', scheme: 'riva'}, 'http://localhost:18080/v1'), false);
+});
+
+test('saved speech config scheme selects the correct review backend', () => {
+    const recorded = {
+        scheme: 'openai-rest',
+        api_base: 'http://127.0.0.1:18080/v1',
+    };
+    const normalized = normalizeSpeechBackendConfig(recorded);
+
+    assert.equal(normalized.backend, 'openai-rest');
+    assert.equal(normalized.scheme, 'openai-rest');
+    assert.equal(recorded.backend, undefined);
+});
+
+test('recorded REST scheme overrides the Riva UI default during review merge', () => {
+    const merged = mergeRecordedSpeechConfig(
+        {backend: 'riva', scheme: 'riva', server: 'localhost:50051'},
+        {
+            scheme: 'openai-rest',
+            api_base: 'http://127.0.0.1:18080/v1',
+            model: 'Systran/faster-whisper-tiny.en',
+        },
+    );
+
+    assert.equal(merged.backend, 'openai-rest');
+    assert.equal(merged.scheme, 'openai-rest');
+    assert.equal(merged.api_base, 'http://127.0.0.1:18080/v1');
+});
+
+test('speech backend normalization retains explicit editable backend', () => {
+    const normalized = normalizeSpeechBackendConfig({
+        backend: 'openai-realtime',
+        scheme: 'openai-rest',
+    });
+    assert.equal(normalized.backend, 'openai-realtime');
+});
+
+test('REST TTS voices are filtered with normalized language tags', () => {
+    const voices = [
+        {id: 'af_heart', language: 'en-us'},
+        {id: 'bf_emma', language: 'en-GB'},
+        {id: 'jf_alpha', language: 'ja'},
+        {id: 'untagged'},
+    ];
+    assert.equal(normalizeLanguageTag('en_us'), 'en-US');
+    assert.deepEqual(
+        ttsVoicesForLanguage(voices, 'en-US').map(v => v.id),
+        ['af_heart', 'untagged'],
+    );
+    assert.deepEqual(
+        ttsVoicesForLanguage(voices, 'en').map(v => v.id),
+        ['af_heart', 'bf_emma', 'untagged'],
+    );
+    assert.deepEqual(
+        ttsVoicesForLanguage(voices, 'ja').map(v => v.id),
+        ['jf_alpha', 'untagged'],
+    );
+});
+
+test('REST TTS language change replaces a voice from the previous language', () => {
+    const voices = [
+        {id: 'af_heart', language: 'en-US'},
+        {id: 'jf_alpha', language: 'ja'},
+        {id: 'jf_nezumi', language: 'ja'},
+    ];
+    const result = resolveTtsVoiceSelection(voices, 'ja', 'af_heart', true);
+    assert.deepEqual(result.voices.map(v => v.id), ['jf_alpha', 'jf_nezumi']);
+    assert.equal(result.selectedVoice, 'jf_alpha');
+});
+
+test('REST TTS keeps a configured value only when provider metadata is unavailable', () => {
+    const result = resolveTtsVoiceSelection([], 'ja', 'custom-voice', false);
+    assert.deepEqual(result.voices.map(v => v.id), ['custom-voice']);
+    assert.equal(result.selectedVoice, 'custom-voice');
 });
 
 test('REST TTS pipeline metadata uses model instead of voice', () => {
