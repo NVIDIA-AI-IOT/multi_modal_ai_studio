@@ -2916,9 +2916,12 @@ async def _run_voice_pipeline(
     system_stats_task: Optional[asyncio.Task] = None
 
     async def _system_stats_loop() -> None:
-        """Send peak-friendly CPU/GPU samples at 20 Hz."""
+        """Send CPU/GPU samples from the cheapest supported 10 Hz source."""
         loop = asyncio.get_event_loop()
-        interval = system_stats_module.GPU_SAMPLE_INTERVAL_MS / 1000.0
+        interval = system_stats_module.SYSTEM_STATS_INTERVAL_MS / 1000.0
+        fallback_interval = (
+            system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS / 1000.0
+        )
 
         async def emit_sample(cpu: Optional[float], gpu: Optional[float]) -> None:
             t = time.time() - session.timeline.start_time
@@ -2935,94 +2938,129 @@ async def _run_voice_pipeline(
             except Exception as e:
                 logger.debug("Send system_stats failed: %s", e)
 
-        process: Optional[asyncio.subprocess.Process] = None
-        stream_failed = False
-        last_stream_emit = 0.0
-        pending_gpu_peak: Optional[float] = None
-        try:
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    *system_stats_module.nvidia_smi_loop_command(),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                while not stopped.is_set():
-                    line = await asyncio.wait_for(
-                        process.stdout.readline(),
-                        timeout=max(0.5, interval * 4),
-                    )
-                    if not line:
-                        stream_failed = True
-                        break
-                    gpu = system_stats_module.parse_nvidia_smi_gpu_percent(line)
-                    if gpu is None:
-                        stream_failed = True
-                        break
-                    pending_gpu_peak = (
-                        gpu
-                        if pending_gpu_peak is None
-                        else max(pending_gpu_peak, gpu)
-                    )
-                    now = loop.time()
-                    # nvidia-smi can buffer several lines while the GPU is
-                    # busy, then deliver them within microseconds. Sampling
-                    # psutil for every buffered line produces false 33/50/100%
-                    # CPU spikes. Coalesce bursts back to the requested 20 Hz
-                    # cadence while retaining the interval's GPU peak.
-                    if not system_stats_module.stream_sample_is_due(
-                        now,
-                        last_stream_emit,
-                        interval,
-                    ):
-                        continue
-                    await emit_sample(
-                        system_stats_module.read_cpu_percent_nonblocking(),
-                        pending_gpu_peak,
-                    )
-                    pending_gpu_peak = None
-                    last_stream_emit = now
-            except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
-                logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
-                stream_failed = True
-        finally:
-            if process is not None and process.returncode is None:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    process.kill()
-                    await process.wait()
+        async def sleep_until(deadline: float) -> None:
+            await asyncio.sleep(max(0.0, deadline - loop.time()))
 
-        # Older Jetsons may report N/A through nvidia-smi while exposing the
-        # nvgpu devfreq load counter. Thor has no such load path, so retry a
-        # one-shot nvidia-smi query at a lower cadence if the persistent stream
-        # exits. CPU samples retain the 20 Hz cadence.
-        if stream_failed and not stopped.is_set():
-            next_sample = loop.time()
-            next_gpu_fallback_sample = loop.time()
+        async def run_sysfs_sampler(path: Path) -> bool:
+            """Read Orin's cheap nvgpu load counter on a fixed 10 Hz grid."""
+            deadline = loop.time()
             while not stopped.is_set():
-                gpu = None
-                now = loop.time()
-                if now >= next_gpu_fallback_sample:
-                    gpu = await loop.run_in_executor(
-                        None,
-                        system_stats_module.read_gpu_percent_after_stream_failure,
-                    )
-                    next_gpu_fallback_sample = (
-                        now
-                        + system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS
-                        / 1000.0
-                    )
+                gpu = system_stats_module.read_jetson_sysfs_gpu_percent(path)
+                if gpu is None:
+                    logger.warning("Jetson GPU load counter became unreadable: %s", path)
+                    return False
                 await emit_sample(
                     system_stats_module.read_cpu_percent_nonblocking(),
                     gpu,
                 )
-                # A one-shot nvidia-smi fallback can take longer than 50 ms.
-                # Do not emit a burst of near-zero-interval CPU samples to
-                # "catch up"; psutil would quantize those into false 50/67%
-                # spikes. Resume the cadence from the current time instead.
-                next_sample = max(next_sample + interval, loop.time() + interval)
-                await asyncio.sleep(max(0.0, next_sample - loop.time()))
+                deadline = system_stats_module.next_periodic_deadline(
+                    deadline,
+                    loop.time(),
+                    interval,
+                )
+                await sleep_until(deadline)
+            return True
+
+        async def run_nvidia_smi_stream() -> bool:
+            """Consume one persistent nvidia-smi process; return False on failure."""
+            process: Optional[asyncio.subprocess.Process] = None
+            stream_failed = False
+            last_stream_emit = 0.0
+            pending_gpu_peak: Optional[float] = None
+            try:
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *system_stats_module.nvidia_smi_loop_command(),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    while not stopped.is_set():
+                        line = await asyncio.wait_for(
+                            process.stdout.readline(),
+                            timeout=max(0.5, interval * 4),
+                        )
+                        if not line:
+                            stream_failed = True
+                            break
+                        gpu = system_stats_module.parse_nvidia_smi_gpu_percent(line)
+                        if gpu is None:
+                            stream_failed = True
+                            break
+                        pending_gpu_peak = (
+                            gpu
+                            if pending_gpu_peak is None
+                            else max(pending_gpu_peak, gpu)
+                        )
+                        now = loop.time()
+                        # Some drivers flush several buffered lines together.
+                        # Coalesce such bursts while retaining their GPU peak.
+                        if not system_stats_module.stream_sample_is_due(
+                            now,
+                            last_stream_emit,
+                            interval,
+                        ):
+                            continue
+                        await emit_sample(
+                            system_stats_module.read_cpu_percent_nonblocking(),
+                            pending_gpu_peak,
+                        )
+                        pending_gpu_peak = None
+                        last_stream_emit = now
+                except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
+                    logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
+                    stream_failed = True
+            finally:
+                if process is not None and process.returncode is None:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+            return not stream_failed
+
+        async def run_subprocess_fallback() -> None:
+            """Keep CPU at 10 Hz and query GPU at 4 Hz without timer drift."""
+            emit_deadline = loop.time()
+            gpu_deadline = loop.time()
+            while not stopped.is_set():
+                now = loop.time()
+                gpu_sample = None
+                if now >= gpu_deadline:
+                    gpu_sample = await loop.run_in_executor(
+                        None,
+                        system_stats_module.read_nvidia_smi_gpu_percent_after_stream_failure,
+                    )
+                    gpu_deadline = system_stats_module.next_periodic_deadline(
+                        gpu_deadline,
+                        loop.time(),
+                        fallback_interval,
+                    )
+                await emit_sample(
+                    system_stats_module.read_cpu_percent_nonblocking(),
+                    gpu_sample,
+                )
+                emit_deadline = system_stats_module.next_periodic_deadline(
+                    emit_deadline,
+                    loop.time(),
+                    interval,
+                )
+                await sleep_until(emit_deadline)
+
+        sysfs_path = system_stats_module.find_jetson_sysfs_gpu_load_path()
+        if sysfs_path is not None:
+            logger.info("GPU telemetry source: sysfs %s at 10 Hz", sysfs_path)
+            completed = await run_sysfs_sampler(sysfs_path)
+            if completed or stopped.is_set():
+                return
+
+        logger.info("GPU telemetry source: persistent nvidia-smi at 10 Hz")
+        completed = await run_nvidia_smi_stream()
+        if completed or stopped.is_set():
+            return
+
+        logger.warning("GPU telemetry source: one-shot nvidia-smi fallback at 4 Hz")
+        await run_subprocess_fallback()
 
     # Wait for client to send start_session (both mics); then start ASR stream and turn executor
     await asyncio.wait(
