@@ -1,6 +1,7 @@
 # Installation & Setup Guide
 
-This guide covers installing the app, setting up LLM/VLM backends, NVIDIA Riva for voice (ASR/TTS), and running the WebUI.
+This guide covers installing the app, setting up LLM/VLM and speech backends,
+and running the WebUI.
 
 ## Quick Start
 
@@ -36,7 +37,18 @@ multi-modal-ai-studio --port 8092
 
 Open **https://localhost:8092** (accept the self-signed cert). Sessions in `sessions/` (or `--session-dir mock_sessions`) appear in the sidebar.
 
-**Voice with Riva + LLM:** Set up Riva and an LLM (e.g. Ollama) as in [NVIDIA Riva Setup](#nvidia-riva-setup-for-voice-asrtts) below, then:
+**Voice with public local models on qualified Jetson Thor and Orin systems:**
+No Riva or NGC access is required. Follow
+[Open speech models on Jetson](docs/setup_open_models_jetson.md),
+then run:
+
+```bash
+source .venv/bin/activate
+multi-modal-ai-studio --preset nvidia-open-models-speech-jetson --port 8092
+```
+
+**Voice with Riva + LLM:** Set up Riva and an LLM (e.g. Ollama) as in
+[NVIDIA Riva Setup](#nvidia-riva-setup-for-voice-asrtts) below, then:
 
 ```bash
 source .venv/bin/activate

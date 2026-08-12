@@ -113,8 +113,8 @@ const state = {
     /** Live session: have we set initial 15s zoom once */
     liveTimelineInitialZoomSet: false,
 
-    /** Server health: { llm: null | { ok, error? }, riva: null | { ok, error? } } from /api/health/llm and /api/health/riva */
-    serverHealth: { llm: null, riva: null },
+    /** Server health for the configured ASR, LLM, and TTS backends. */
+    serverHealth: { asr: null, llm: null, tts: null },
 
     /** Cached OpenAI API key from env (GET /api/config/prefills); re-applied when starting a new chat */
     envOpenaiApiKey: '',
@@ -814,6 +814,11 @@ async function fetchAndApplyInitialConfig() {
 
         if (state.isLiveSession) {
             renderConfig();
+            refreshPipelineDisplay();
+            updateDeviceIndicators();
+            if (state.sessionState === 'setup') {
+                startPreviewStream();
+            }
         }
     } catch (e) {
         console.warn('[Preset] Failed to fetch initial config:', e);
@@ -1055,7 +1060,9 @@ function updatePipelineLLMStatus(info) {
         statusIcon = '<i data-lucide="check-circle" class="lucide-inline pipeline-status pipeline-status--ok"></i>';
     }
 
-    llmSeg.innerHTML = `${statusIcon} ${model}`;
+    llmSeg.innerHTML = `${statusIcon} ${escapeHtml(pipelineModelLabel(model))}`;
+    llmSeg.title = `LLM: ${model}`;
+    llmSeg.dataset.fullLabel = pipelineModelLabel(model);
 
     // Refresh icons
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
@@ -1193,9 +1200,9 @@ function renderASRConfig(config, readonly = false) {
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'riva' ? 'active' : ''}"
                         ${disabled}
                         onclick="updateConfig('asr', 'backend', 'riva')"><span class="riva-tab-inner"><i data-lucide="bird" class="lucide-inline riva-tab-icon"></i><span class="riva-tab-text">NVIDIA<br>RIVA</span></span></button>
-                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai' ? 'active' : ''}"
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-rest' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('asr', 'backend', 'openai')">OpenAI<br>REST API</button>
+                        onclick="updateConfig('asr', 'backend', 'openai-rest')">OpenAI<br>REST API</button>
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-realtime' ? 'active' : ''}"
                         ${disabled}
                         onclick="updateConfig('asr', 'backend', 'openai-realtime')">OpenAI<br>Realtime API</button>
@@ -1315,18 +1322,18 @@ function renderASRConfig(config, readonly = false) {
             </div>
 
             <!-- OpenAI REST Settings -->
-            <div class="backend-content" style="display: ${config.backend === 'openai' ? 'block' : 'none'}">
+            <div class="backend-content" style="display: ${config.backend === 'openai-rest' ? 'block' : 'none'}">
                 <div class="form-group">
                     <label>API Endpoint</label>
-                    <input type="text" ${disabled} value="${config.openai_url || 'https://api.openai.com/v1'}"
-                           onchange="updateConfig('asr', 'openai_url', this.value)">
+                    <input type="text" ${disabled} value="${config.api_base || config.openai_url || 'http://localhost:8081/v1'}"
+                           onchange="updateConfig('asr', 'api_base', this.value)">
                 </div>
 
                 <div class="form-group">
                     <label>Model</label>
-                    <input type="text" ${disabled} value="${config.model || 'whisper-1'}"
+                    <input type="text" ${disabled} value="${config.model || 'nvidia/nemotron-3.5-asr-streaming-0.6b'}"
                            onchange="updateConfig('asr', 'model', this.value)">
-                    ${!readonly ? '<span class="input-hint">e.g., whisper-1</span>' : ''}
+                    ${!readonly ? '<span class="input-hint">e.g., nvidia/nemotron-3.5-asr-streaming-0.6b or whisper-1</span>' : ''}
                 </div>
             </div>
 
@@ -1692,9 +1699,9 @@ function renderTTSConfig(config, readonly = false) {
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'riva' ? 'active' : ''}"
                         ${disabled}
                         onclick="updateConfig('tts', 'backend', 'riva')"><span class="riva-tab-inner"><i data-lucide="bird" class="lucide-inline riva-tab-icon"></i><span class="riva-tab-text">NVIDIA<br>RIVA</span></span></button>
-                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai' ? 'active' : ''}"
+                <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-rest' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('tts', 'backend', 'openai')">OpenAI<br>REST API</button>
+                        onclick="updateConfig('tts', 'backend', 'openai-rest')">OpenAI<br>REST API</button>
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-realtime' ? 'active' : ''}"
                         ${disabled}
                         onclick="updateConfig('tts', 'backend', 'openai-realtime')">OpenAI<br>Realtime API</button>
@@ -1755,11 +1762,11 @@ function renderTTSConfig(config, readonly = false) {
             </div>
 
             <!-- OpenAI REST TTS Settings -->
-            <div class="backend-content" style="display: ${config.backend === 'openai' ? 'block' : 'none'}">
+            <div class="backend-content" style="display: ${config.backend === 'openai-rest' ? 'block' : 'none'}">
                 <div class="form-group">
                     <label>API Endpoint</label>
-                    <input type="text" ${disabled} value="${config.openai_url || 'https://api.openai.com/v1'}"
-                           onchange="updateConfig('tts', 'openai_url', this.value)">
+                    <input type="text" ${disabled} value="${config.api_base || config.openai_url || 'http://localhost:8082/v1'}"
+                           onchange="updateConfig('tts', 'api_base', this.value)">
                 </div>
 
                 <div class="form-group">
@@ -1771,15 +1778,19 @@ function renderTTSConfig(config, readonly = false) {
                         <option value="onyx" ${config.voice === 'onyx' ? 'selected' : ''}>Onyx</option>
                         <option value="nova" ${config.voice === 'nova' ? 'selected' : ''}>Nova</option>
                         <option value="shimmer" ${config.voice === 'shimmer' ? 'selected' : ''}>Shimmer</option>
+                        <option value="Aria" ${config.voice === 'Aria' ? 'selected' : ''}>Magpie Aria</option>
+                        <option value="Jason" ${config.voice === 'Jason' ? 'selected' : ''}>Magpie Jason</option>
+                        <option value="John" ${config.voice === 'John' ? 'selected' : ''}>Magpie John</option>
+                        <option value="Leo" ${config.voice === 'Leo' ? 'selected' : ''}>Magpie Leo</option>
+                        <option value="Sofia" ${config.voice === 'Sofia' ? 'selected' : ''}>Magpie Sofia</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label>Model</label>
-                    <select ${disabled} value="${config.model || 'tts-1'}" onchange="updateConfig('tts', 'model', this.value)">
-                        <option value="tts-1" ${config.model === 'tts-1' ? 'selected' : ''}>TTS-1 (Faster)</option>
-                        <option value="tts-1-hd" ${config.model === 'tts-1-hd' ? 'selected' : ''}>TTS-1-HD (Higher Quality)</option>
-                    </select>
+                    <input type="text" ${disabled} value="${config.model || 'nvidia/magpie_tts_multilingual_357m'}"
+                           onchange="updateConfig('tts', 'model', this.value)">
+                    ${!readonly ? '<span class="input-hint">e.g., nvidia/magpie_tts_multilingual_357m or tts-1</span>' : ''}
                 </div>
             </div>
 
@@ -1847,13 +1858,13 @@ function renderTTSConfig(config, readonly = false) {
                            onchange="updateConfig('tts', 'stream_tts', this.checked); document.getElementById('tts-chunk-words-group').style.display = this.checked ? 'block' : 'none';">
                     <span>Start speaking before LLM finishes</span>
                 </label>
-                <span class="input-hint">Streams TTS sentence-by-sentence as the LLM generates, reducing time to first audio</span>
+                <span class="input-hint">Sends short text chunks to TTS while the LLM generates. Playback starts when the selected TTS service returns its first audio bytes; model-native audio streaming depends on that service.</span>
                 <div id="tts-chunk-words-group" style="display: ${config.stream_tts !== false ? 'block' : 'none'}; margin-top: 8px;">
-                    <label>Words before first speech</label>
+                    <label>Units before first speech</label>
                     <input type="range" ${disabled} id="tts-chunk-words" min="5" max="20" step="1" value="${config.tts_chunk_words || 10}"
                            oninput="updateConfig('tts', 'tts_chunk_words', parseInt(this.value)); document.getElementById('tts-chunk-words-value').textContent = this.value;">
                     <span id="tts-chunk-words-value" class="range-value">${config.tts_chunk_words || 10}</span>
-                    ${!readonly ? '<span class="input-hint">Lower = faster response, higher = smoother speech</span>' : ''}
+                    ${!readonly ? '<span class="input-hint">Words for spaced languages; characters for Japanese/Chinese/Korean. Lower = faster response, higher = smoother speech.</span>' : ''}
                 </div>
             </div>
         </div>
@@ -2894,26 +2905,50 @@ async function fetchTTSVoices(server, language) {
     }
 }
 
-/** Check Ollama (LLM) and Riva (ASR/TTS) server health; updates state.serverHealth and UI. */
+/** Check the configured ASR, LLM, and TTS services from the MMAS server. */
 async function checkServersHealth() {
     var apiBase = (currentConfig.llm && (currentConfig.llm.api_base || (currentConfig.llm.ollama_url && (currentConfig.llm.ollama_url.replace(/\/v1\/?$/, '') + '/v1')))) || 'http://localhost:11434/v1';
-    var rivaServer = (currentConfig.asr && (currentConfig.asr.server || currentConfig.asr.riva_server)) || (currentConfig.tts && (currentConfig.tts.server || currentConfig.tts.riva_server)) || 'localhost:50051';
-    state.serverHealth = { llm: null, riva: null };
+    var asr = currentConfig.asr || {};
+    var tts = currentConfig.tts || {};
+    state.serverHealth = { asr: null, llm: null, tts: null };
     updateServerHealthUI();
-    try {
-        var llmRes = await fetch(getApiBase() + '/api/health/llm?api_base=' + encodeURIComponent(apiBase));
-        var llmData = await llmRes.json().catch(function () { return { ok: false, error: 'Invalid response' }; });
-        state.serverHealth.llm = llmData.ok ? { ok: true } : { ok: false, error: llmData.error || 'Unknown error' };
-    } catch (e) {
-        state.serverHealth.llm = { ok: false, error: e.message || String(e) };
+    async function checkOpenAI(apiBaseValue) {
+        var response = await fetch(
+            getApiBase() + '/api/health/llm?api_base=' + encodeURIComponent(apiBaseValue)
+        );
+        var data = await response.json().catch(function () {
+            return { ok: false, error: 'Invalid response' };
+        });
+        return data.ok ? { ok: true } : { ok: false, error: data.error || 'Unknown error' };
     }
-    try {
-        var rivaRes = await fetch(getApiBase() + '/api/health/riva?server=' + encodeURIComponent(rivaServer));
-        var rivaData = await rivaRes.json().catch(function () { return { ok: false, error: 'Invalid response' }; });
-        state.serverHealth.riva = rivaData.ok ? { ok: true } : { ok: false, error: rivaData.error || 'Unknown error' };
-    } catch (e) {
-        state.serverHealth.riva = { ok: false, error: e.message || String(e) };
+    async function checkSpeech(config) {
+        var scheme = config.backend || config.scheme || 'riva';
+        if (scheme === 'openai-rest') {
+            return checkOpenAI(config.api_base || '');
+        }
+        if (scheme === 'riva') {
+            var server = config.server || config.riva_server || 'localhost:50051';
+            var response = await fetch(
+                getApiBase() + '/api/health/riva?server=' + encodeURIComponent(server)
+            );
+            var data = await response.json().catch(function () {
+                return { ok: false, error: 'Invalid response' };
+            });
+            return data.ok ? { ok: true } : { ok: false, error: data.error || 'Unknown error' };
+        }
+        return { ok: true };
     }
+    var results = await Promise.allSettled([
+        checkSpeech(asr),
+        checkOpenAI(apiBase),
+        checkSpeech(tts),
+    ]);
+    ['asr', 'llm', 'tts'].forEach(function (key, index) {
+        var result = results[index];
+        state.serverHealth[key] = result.status === 'fulfilled'
+            ? result.value
+            : { ok: false, error: result.reason && result.reason.message || String(result.reason) };
+    });
     updateServerHealthUI();
 }
 
@@ -2921,15 +2956,18 @@ function updateServerHealthUI() {
     var row = document.getElementById('server-health-row');
     var statusEl = document.getElementById('server-health-status');
     if (!row || !statusEl) return;
+    var asr = state.serverHealth.asr;
     var llm = state.serverHealth.llm;
-    var riva = state.serverHealth.riva;
+    var tts = state.serverHealth.tts;
     var parts = [];
-    if (llm === null) parts.push('LLM: …');
-    else if (llm.ok) parts.push('LLM: ✓');
-    else parts.push('LLM: ✗ ' + (llm.error || '').slice(0, 40));
-    if (riva === null) parts.push('Riva: …');
-    else if (riva.ok) parts.push('Riva: ✓');
-    else parts.push('Riva: ✗ ' + (riva.error || '').slice(0, 40));
+    function add(label, result) {
+        if (result === null) parts.push(label + ': …');
+        else if (result.ok) parts.push(label + ': ✓');
+        else parts.push(label + ': ✗ ' + (result.error || '').slice(0, 40));
+    }
+    add('ASR', asr);
+    add('LLM', llm);
+    add('TTS', tts);
     statusEl.textContent = parts.join('  ');
 }
 
@@ -3887,6 +3925,40 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 inferred: true
             });
         }
+        // File-style REST ASR returns only a final transcript. Use the local
+        // energy-VAD timing instead of inventing partial transcripts:
+        // striped dark blue = inferred ASR activity from VAD;
+        // solid light blue = silence confirmation and REST finalization.
+        // Solid dark blue remains reserved for observed partial transcripts.
+        if (!firstPartial && speechStart && asrFinal) {
+            const vadEndTime = (
+                turnSpeechEnd && turnSpeechEnd.timestamp != null
+                    ? turnSpeechEnd.timestamp
+                    : asrFinal.timestamp
+            );
+            if (vadEndTime > speechStart.timestamp) {
+                inferredRectangles.push({
+                    event_type: 'asr_pre',
+                    lane: 'speech',
+                    start_time: speechStart.timestamp,
+                    end_time: vadEndTime,
+                    timestamp: speechStart.timestamp,
+                    phase: 'pre-asr',
+                    inferred: true
+                });
+            }
+            if (asrFinal.timestamp > vadEndTime) {
+                inferredRectangles.push({
+                    event_type: 'asr_finalizing',
+                    lane: 'speech',
+                    start_time: vadEndTime,
+                    end_time: asrFinal.timestamp,
+                    timestamp: vadEndTime,
+                    phase: 'post-asr',
+                    inferred: true
+                });
+            }
+        }
         // AUDIO lane: no VAD rectangles or green dots (waveform only)
     });
 
@@ -4002,10 +4074,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
 
         // Special styling for ASR phases
         if (event.phase === 'pre-asr') {
-            // Phase 1: Pre-ASR (transparent/shaded blue)
-            fillColor = '#2196F3';  // Light blue
-            fillAlpha = 0.3;
-            // Create diagonal stripe pattern
+            // Phase 1: inferred ASR activity from VAD (striped dark blue).
+            // The stripe differentiates inference from solid partial results.
+            fillColor = '#1976D2';
+            fillAlpha = 0.5;
             fillPattern = 'diagonal-stripes';
         } else if (event.phase === 'active-asr') {
             // Phase 2: Active ASR (solid blue)
@@ -5462,7 +5534,11 @@ function updateLiveSessionUI() {
             serverHealthRow.style.display = (state.sessionState === 'setup') ? 'flex' : 'none';
             if (state.sessionState === 'setup') {
                 updateServerHealthUI();
-                if (state.serverHealth.llm === null && state.serverHealth.riva === null) {
+                if (
+                    state.serverHealth.asr === null &&
+                    state.serverHealth.llm === null &&
+                    state.serverHealth.tts === null
+                ) {
                     setTimeout(function () { checkServersHealth(); }, 400);
                 }
             }
@@ -7493,6 +7569,14 @@ function truncateWithTitle(text, maxLen) {
     return { short: s.slice(0, maxLen - 3) + '...', title: s };
 }
 
+/** Compact Hugging Face-style IDs for pipeline labels while retaining full IDs in tooltips. */
+function pipelineModelLabel(model) {
+    if (model == null || model === '') return '—';
+    var text = String(model).trim();
+    var parts = text.split('/');
+    return parts[parts.length - 1] || text;
+}
+
 /**
  * Build pipeline config HTML: grid with device slots (icon + name) + connected pipeline bar ( > ASR > LLM > TTS > ).
  * @param {Object} config - Session config: { devices, asr, llm, tts }
@@ -7521,21 +7605,26 @@ function getPipelineTableHtml(config, options) {
     var camT = truncateWithTitle(rawCam, 16);
     var spkT = truncateWithTitle(rawSpk, 16);
 
-    const asrModel = config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet');
-    const llmModel = config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—');
-    // When RIVA is selected, show RIVA TTS model name in pipeline-seg; fallback to "RIVA" if not loaded yet
+    const asrModelFull = config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet');
+    const llmModelFull = config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—');
+    const asrModel = pipelineModelLabel(asrModelFull);
+    const llmModel = pipelineModelLabel(llmModelFull);
+    // Prefer the configured model for REST TTS; Riva uses its discovered model name.
     const isRivaTts = config.tts && (config.tts.backend === 'riva' || config.tts.scheme === 'riva');
-    const ttsLabel = config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
-        : (config.tts && (config.tts.riva_model_name || config.tts.voice || config.tts.model))
-            ? (isRivaTts && config.tts.riva_model_name ? config.tts.riva_model_name : (config.tts.riva_model_name || config.tts.voice || config.tts.model))
+    const ttsLabelFull = config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
+        : (config.tts && (config.tts.riva_model_name || config.tts.model || config.tts.voice))
+            ? (isRivaTts
+                ? (config.tts.riva_model_name || config.tts.model || config.tts.voice)
+                : (config.tts.model || config.tts.voice))
             : (config.tts ? (isRivaTts ? 'RIVA' : 'Default') : '—');
+    const ttsLabel = pipelineModelLabel(ttsLabelFull);
     /* Segment label: model name only; tooltip shows "ASR: ..." / "VLM: ..." / "TTS: ..." on hover */
     const asrLabel = isTextOnly ? 'n/a' : asrModel;
     const midLabel = llmModel;
     const ttsLabelVal = hasSpeaker ? ttsLabel : 'n/a';
-    const asrTooltip = isTextOnly ? 'n/a' : ('ASR: ' + asrModel);
-    const midTooltip = hasCamera ? ('VLM: ' + llmModel) : ('LLM: ' + llmModel);
-    const ttsTooltip = hasSpeaker ? ('TTS: ' + ttsLabel) : 'n/a';
+    const asrTooltip = isTextOnly ? 'n/a' : ('ASR: ' + asrModelFull);
+    const midTooltip = hasCamera ? ('VLM: ' + llmModelFull) : ('LLM: ' + llmModelFull);
+    const ttsTooltip = hasSpeaker ? ('TTS: ' + ttsLabelFull) : 'n/a';
 
     var deviceTypesOpt = options && options.deviceTypes;
     var fullLabel = function (short, full) { return full || short; };
@@ -7588,13 +7677,15 @@ function getPipelineSummaryHtml(config) {
     const isTextOnly = mic === 'none' || !mic;
     const hasCamera = cam && cam !== 'none';
     const hasSpeaker = spk && spk !== 'none';
-    const asrModel = config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet');
-    const llmModel = config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—');
+    const asrModel = pipelineModelLabel(config.asr_model_name != null && config.asr_model_name !== '' ? config.asr_model_name : ((config.asr && config.asr.model) ? String(config.asr.model).replace(/\(.*\)/, '').trim() : 'Parakeet'));
+    const llmModel = pipelineModelLabel(config.llm_model_name != null && config.llm_model_name !== '' ? config.llm_model_name : ((config.llm && config.llm.model) ? String(config.llm.model) : '—'));
     const isRivaTtsSummary = config.tts && (config.tts.backend === 'riva' || config.tts.scheme === 'riva');
-    const ttsLabel = config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
-        : (config.tts && (config.tts.riva_model_name || config.tts.voice || config.tts.model))
-            ? (isRivaTtsSummary && config.tts.riva_model_name ? config.tts.riva_model_name : (config.tts.riva_model_name || config.tts.voice || config.tts.model))
-            : (config.tts ? (isRivaTtsSummary ? 'RIVA' : 'Default') : '—');
+    const ttsLabel = pipelineModelLabel(config.tts_model_name != null && config.tts_model_name !== '' ? config.tts_model_name
+        : (config.tts && (config.tts.riva_model_name || config.tts.model || config.tts.voice))
+            ? (isRivaTtsSummary
+                ? (config.tts.riva_model_name || config.tts.model || config.tts.voice)
+                : (config.tts.model || config.tts.voice))
+            : (config.tts ? (isRivaTtsSummary ? 'RIVA' : 'Default') : '—'));
     const asr = isTextOnly ? 'n/a' : ('ASR: ' + asrModel);
     const mid = hasCamera ? ('VLM: ' + llmModel) : ('LLM: ' + llmModel);
     const tts = hasSpeaker ? ('TTS: ' + ttsLabel) : 'n/a';
