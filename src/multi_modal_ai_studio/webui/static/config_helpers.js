@@ -40,6 +40,46 @@
     }
 
     /**
+     * Build the configuration selected by "Reset default". A server preset
+     * supplied with --preset is part of that default and must remain layered
+     * over the built-in fallback values.
+     */
+    function buildResetConfig(defaults, serverPreset) {
+        function clone(value) {
+            if (Array.isArray(value)) return value.map(clone);
+            if (value && typeof value === 'object') {
+                const result = {};
+                Object.keys(value).forEach(function (key) {
+                    result[key] = clone(value[key]);
+                });
+                return result;
+            }
+            return value;
+        }
+
+        function merge(target, source) {
+            if (!source || typeof source !== 'object') return target;
+            Object.keys(source).forEach(function (key) {
+                const value = source[key];
+                if (value && typeof value === 'object' && !Array.isArray(value)) {
+                    const existing = target[key];
+                    target[key] = merge(
+                        existing && typeof existing === 'object' && !Array.isArray(existing)
+                            ? existing
+                            : {},
+                        value
+                    );
+                } else {
+                    target[key] = clone(value);
+                }
+            });
+            return target;
+        }
+
+        return merge(clone(defaults || {}), serverPreset || {});
+    }
+
+    /**
      * Saved session schemas use `scheme`, while the editable UI historically
      * used `backend`. Backfill either alias without mutating recorded data so
      * read-only session review selects the backend that actually ran.
@@ -146,6 +186,7 @@
     }
 
     return {
+        buildResetConfig,
         getTtsModelName,
         matchesRivaDiscovery,
         matchesOpenAiAsrDiscovery,

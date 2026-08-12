@@ -778,14 +778,22 @@ function getDefaultConfig() {
     }
 }
 
-/** Clear saved default and set current config to built-in defaultConfig (localStorage cleared; + New Voice Chat will use defaultConfig). */
+/** Clear the saved default and restore built-in defaults plus the active server preset. */
 function resetDefaultConfig() {
     if (!state.isLiveSession || state.sessionState !== 'setup') return;
     try {
         localStorage.removeItem(DEFAULT_VOICE_CHAT_CONFIG_KEY);
-        currentConfig = JSON.parse(JSON.stringify(defaultConfig));
+        currentConfig = window.MMASConfigHelpers.buildResetConfig(
+            defaultConfig,
+            _serverPresetConfig
+        );
         applyEnvPrefillsToCurrentConfig();
         renderConfig();
+        refreshPipelineDisplay();
+        updateDeviceIndicators();
+        _syncPresetDropdownToCurrentConfig();
+        setTimeout(function () { startPreviewStream(); }, 100);
+        scheduleWarmup();
         const btn = document.getElementById('reset-default-config-btn');
         if (btn) {
             var origHTML = btn.innerHTML;

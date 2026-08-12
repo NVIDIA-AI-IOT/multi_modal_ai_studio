@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+    buildResetConfig,
     getTtsModelName,
     matchesOpenAiAsrDiscovery,
     matchesOpenAiTtsDiscovery,
@@ -17,6 +18,37 @@ const {
     resolveTtsVoiceSelection,
     ttsVoicesForLanguage,
 } = require('../../src/multi_modal_ai_studio/webui/static/config_helpers.js');
+
+test('reset defaults retain the server preset without mutating either input', () => {
+    const defaults = {
+        asr: {backend: 'riva', server: 'localhost:50051', language: 'en-US'},
+        tts: {backend: 'riva', voice: ''},
+        devices: {microphone: 'browser'},
+    };
+    const preset = {
+        name: 'NVIDIA Open Models Speech',
+        asr: {
+            backend: 'openai-rest',
+            api_base: 'http://localhost:8081/v1',
+            model: 'nvidia/nemotron-3.5-asr-streaming-0.6b',
+        },
+        tts: {
+            backend: 'openai-rest',
+            api_base: 'http://localhost:8082/v1',
+            model: 'nvidia/magpie_tts_multilingual_357m',
+        },
+    };
+
+    const result = buildResetConfig(defaults, preset);
+
+    assert.equal(result.asr.backend, 'openai-rest');
+    assert.equal(result.asr.server, 'localhost:50051');
+    assert.equal(result.asr.model, 'nvidia/nemotron-3.5-asr-streaming-0.6b');
+    assert.equal(result.tts.backend, 'openai-rest');
+    assert.equal(result.devices.microphone, 'browser');
+    assert.equal(defaults.asr.backend, 'riva');
+    assert.equal(preset.asr.server, undefined);
+});
 
 test('stale Riva ASR discovery cannot overwrite an OpenAI REST preset', () => {
     const config = {
