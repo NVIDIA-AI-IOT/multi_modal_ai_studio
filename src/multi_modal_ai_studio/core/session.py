@@ -12,6 +12,8 @@ A Session represents a complete conversational interaction with:
 Sessions can be saved to JSON and loaded for later analysis.
 """
 
+import base64
+import binascii
 import json
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -22,6 +24,34 @@ from typing import Optional, Dict, Any, List
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.config.schema import SessionConfig
 from multi_modal_ai_studio.core.timeline import Timeline, TimelineEvent, Lane, EventType
+
+SESSION_THUMBNAIL_PREFIX = "data:image/jpeg;base64,"
+MAX_SESSION_THUMBNAIL_BYTES = 128 * 1024
+
+
+def decode_session_thumbnail(value: Any) -> Optional[bytes]:
+    """Decode a bounded JPEG data URL, returning None for invalid input."""
+    if not isinstance(value, str) or not value.startswith(SESSION_THUMBNAIL_PREFIX):
+        return None
+    encoded = value[len(SESSION_THUMBNAIL_PREFIX):]
+    # Reject an oversized payload before allocating decoded bytes.
+    if not encoded or len(encoded) > ((MAX_SESSION_THUMBNAIL_BYTES + 2) // 3) * 4:
+        return None
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if not decoded or len(decoded) > MAX_SESSION_THUMBNAIL_BYTES:
+        return None
+    # JPEG SOI/EOI prevents another data type being persisted under image/jpeg.
+    if not decoded.startswith(b"\xff\xd8") or not decoded.endswith(b"\xff\xd9"):
+        return None
+    return decoded
+
+
+def validate_session_thumbnail(value: Any) -> Optional[str]:
+    """Return a valid bounded JPEG data URL, otherwise None."""
+    return value if decode_session_thumbnail(value) is not None else None
 
 
 @dataclass
@@ -121,6 +151,10 @@ class Session:
         self.timeline = Timeline()
         self.turns: List[Turn] = []
         self.system_stats: List[Dict[str, Any]] = []  # [{t, cpu, gpu}, ...] session-relative, from client
+        self.tts_playback_segments: List[Dict[str, Any]] = []
+        self.audio_amplitude_history: List[Dict[str, Any]] = []
+        self.ttl_bands: List[Dict[str, Any]] = []
+        self.thumbnail: Optional[str] = None
         self._current_turn: Optional[Dict[str, Any]] = None
         self._metrics: Optional[SessionMetrics] = None
 
@@ -225,7 +259,12 @@ class Session:
             return metrics
 
         # Calculate TTL statistics
-        ttls = [turn.latencies.get("ttl", 0) for turn in self.turns if "ttl" in turn.latencies]
+        ttls = [
+            turn.latencies["ttl"]
+            for turn in self.turns
+            if isinstance(turn.latencies.get("ttl"), (int, float))
+            and turn.latencies["ttl"] >= 0
+        ]
         if ttls:
             metrics.avg_ttl = sum(ttls) / len(ttls)
             metrics.min_ttl = min(ttls)
@@ -265,19 +304,79 @@ class Session:
         return metrics
 
     def apply_ttl_bands(self) -> None:
-        """Overwrite each turn's TTL from ttl_bands (band-based = first audio_amplitude tts). Single source of truth for TTL."""
+        """Associate valid browser-playback TTL bands with their user turns.
+
+        A cancelled response may have no first audio, and audio from the next
+        response must not be borrowed for it. Browser clocks can also leave a
+        stale band whose end precedes its start. Rebuild the baseline from the
+        bounded server timeline, then override only with a band fully contained
+        in the matching turn window.
+        """
         bands = getattr(self, "ttl_bands", None) or []
-        if not bands or not self.turns:
+        if not self.turns:
             return
-        for i, turn in enumerate(self.turns):
-            if i >= len(bands):
-                break
-            band = bands[i]
+
+        # Restore a trustworthy per-turn baseline first. This also removes
+        # negative TTL values persisted by older clients.
+        for index, turn in enumerate(self.turns):
+            turn.latencies.pop("ttl", None)
+            timeline_ttl = self.timeline.calculate_component_latencies(index).get("ttl")
+            if timeline_ttl is not None and timeline_ttl >= 0:
+                turn.latencies["ttl"] = timeline_ttl
+
+        timed_bands = []
+        legacy_ttls = []
+        for band in bands:
             if not isinstance(band, dict):
                 continue
+            start = band.get("start")
+            end = band.get("end")
             ttl_ms = band.get("ttlMs")
-            if ttl_ms is not None:
-                turn.latencies["ttl"] = float(ttl_ms) / 1000.0
+            try:
+                ttl_value = float(ttl_ms)
+            except (TypeError, ValueError):
+                continue
+            if ttl_value < 0:
+                continue
+            if start is None or end is None:
+                legacy_ttls.append(ttl_value / 1000.0)
+                continue
+            try:
+                start_value = float(start)
+                end_value = float(end)
+            except (TypeError, ValueError):
+                continue
+            if end_value < start_value:
+                continue
+            timed_bands.append((start_value, end_value))
+
+        if timed_bands and all(turn.start_time > 0 for turn in self.turns):
+            for index, turn in enumerate(self.turns):
+                previous_start = (
+                    self.turns[index - 1].start_time if index > 0 else float("-inf")
+                )
+                next_start = (
+                    self.turns[index + 1].start_time
+                    if index + 1 < len(self.turns)
+                    else float("inf")
+                )
+                candidates = [
+                    (start, end)
+                    for start, end in timed_bands
+                    if (
+                        previous_start < start <= turn.start_time
+                        and end >= turn.start_time
+                        and end < next_start
+                    )
+                ]
+                if candidates:
+                    start, end = min(candidates, key=lambda item: item[1])
+                    turn.latencies["ttl"] = end - start
+        elif legacy_ttls:
+            # Preserve compatibility with old recordings that stored ttlMs
+            # without browser-relative band timestamps.
+            for turn, ttl in zip(self.turns, legacy_ttls):
+                turn.latencies["ttl"] = ttl
         self._metrics = None  # force recalc so avg_ttl etc. use band-based TTLs
 
     def to_dict(self) -> Dict[str, Any]:
@@ -308,6 +407,7 @@ class Session:
             "ttl_bands": getattr(self, "ttl_bands", None) or [],
             "app_version": getattr(self, "app_version", None) or __version__,
             "capture_health": getattr(self, "capture_health", None),
+            "thumbnail": validate_session_thumbnail(getattr(self, "thumbnail", None)),
         }
 
     def save(self, path: Path) -> None:
@@ -359,6 +459,7 @@ class Session:
         session.audio_amplitude_history = data.get("audio_amplitude_history") or []
         session.ttl_bands = data.get("ttl_bands") or []
         session.app_version = data.get("app_version")
+        session.thumbnail = validate_session_thumbnail(data.get("thumbnail"))
         session.apply_ttl_bands()  # so loaded session metrics match band-based TTL
 
         # Parse created_at (support Z for UTC from saved JSON); store naive UTC

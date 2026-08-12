@@ -4,13 +4,23 @@
 
 import asyncio
 import struct
+import time
+from types import SimpleNamespace
 
 import pytest
 
 from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
-from multi_modal_ai_studio.backends.tts.openai_rest import _PCM16FrameAligner
-from multi_modal_ai_studio.config.schema import ASRConfig, SessionConfig
-from multi_modal_ai_studio.webui.voice_pipeline import TTSChunkBuffer
+from multi_modal_ai_studio.backends.base import split_tts_text
+from multi_modal_ai_studio.backends.tts.openai_rest import (
+    MAX_REST_TTS_CHARS,
+    OpenAIRestTTSBackend,
+    _PCM16FrameAligner,
+)
+from multi_modal_ai_studio.config.schema import ASRConfig, SessionConfig, TTSConfig
+from multi_modal_ai_studio.webui.voice_pipeline import (
+    TTSChunkBuffer,
+    _normalize_frontend_config,
+)
 
 
 def _asr_config() -> ASRConfig:
@@ -29,6 +39,35 @@ def test_openai_rest_vad_and_wav_encoding():
     assert not backend._is_speech(silence)
     assert backend._is_speech(speech)
     assert backend._wav_bytes(speech)[:4] == b"RIFF"
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_vad_uses_timeline_clock_across_audio_gaps(monkeypatch):
+    timeline = SimpleNamespace(start_time=100.0)
+    backend = OpenAIRestASRBackend(_asr_config(), timeline=timeline)
+    backend.config.speech_timeout_ms = 200
+    backend._session = object()
+    backend._results = asyncio.Queue()
+    backend._requests = asyncio.Queue()
+
+    now = iter([105.0, 105.1, 110.0, 110.1])
+    monkeypatch.setattr(
+        "multi_modal_ai_studio.backends.asr.openai_rest.time.time",
+        lambda: next(now),
+    )
+    speech = struct.pack("<1600h", *([4000] * 1600))
+    silence = struct.pack("<1600h", *([0] * 1600))
+
+    await backend.send_audio(speech)
+    await backend.send_audio(speech)
+    await backend.send_audio(silence)
+    await backend.send_audio(silence)
+
+    pcm, start_time, end_time = backend._requests.get_nowait()
+    assert pcm
+    assert start_time == pytest.approx(4.9)
+    assert end_time == pytest.approx(9.9)
+    assert end_time > backend._audio_position_ms / 1000.0
 
 
 @pytest.mark.asyncio
@@ -52,6 +91,48 @@ async def test_openai_rest_asr_preserves_utterance_order():
     assert observed == [b"first", b"second"]
 
 
+class _FakeASRResponse:
+    status = 200
+
+    async def text(self):
+        return '{"text":"hello"}'
+
+    async def json(self):
+        return {"text": "hello"}
+
+
+class _FakeASRSession:
+    def post(self, *_args, **_kwargs):
+        return _FakeRequestContext(_FakeASRResponse())
+
+
+def test_openai_rest_asr_records_request_timing():
+    async def scenario():
+        timeline = SimpleNamespace(start_time=time.time() - 1.0)
+        backend = OpenAIRestASRBackend(_asr_config(), timeline=timeline)
+        backend._session = _FakeASRSession()
+        backend._results = asyncio.Queue()
+
+        await backend._transcribe(
+            struct.pack("<16000h", *([4000] * 16000)),
+            start_time=0.1,
+            end_time=1.1,
+        )
+
+        result = backend._results.get_nowait()
+        metadata = result.metadata
+        assert metadata["backend"] == "openai-rest"
+        assert metadata["audio_duration_ms"] == pytest.approx(1000.0)
+        assert metadata["inference_start_time"] >= 0
+        assert (
+            metadata["inference_end_time"]
+            >= metadata["inference_start_time"]
+        )
+        assert metadata["inference_duration_ms"] >= 0
+
+    asyncio.run(scenario())
+
+
 def test_frontend_openai_aliases_normalize_to_rest():
     config = SessionConfig.from_dict(
         {
@@ -72,6 +153,51 @@ def test_frontend_openai_aliases_normalize_to_rest():
     assert config.tts.scheme == "openai-rest"
     assert config.tts.api_base == "http://localhost:8082/v1"
     assert config.tts.language == "ja-JP"
+
+
+def test_rest_tts_metadata_keeps_model_and_voice_separate():
+    normalized = _normalize_frontend_config(
+        {
+            "tts_model_name": "Sofia",
+            "tts": {
+                "backend": "openai-rest",
+                "model": "nvidia/magpie_tts_multilingual_357m",
+                "voice": "Sofia",
+                "riva_model_name": "Sofia",
+            },
+        }
+    )
+
+    assert normalized["tts"]["scheme"] == "openai-rest"
+    assert normalized["tts"]["model"] == "nvidia/magpie_tts_multilingual_357m"
+    assert normalized["tts"]["voice"] == "Sofia"
+    assert "riva_model_name" not in normalized["tts"]
+    assert (
+        normalized["tts_model_name"]
+        == "nvidia/magpie_tts_multilingual_357m"
+    )
+
+
+def test_riva_tts_metadata_keeps_discovered_model_name():
+    normalized = _normalize_frontend_config(
+        {
+            "tts_model_name": "magpie_tts_ensemble-Magpie-Multilingual",
+            "tts": {
+                "backend": "riva",
+                "voice": "Magpie-Multilingual.EN-US.Sofia",
+            },
+        }
+    )
+
+    assert normalized["tts"]["scheme"] == "riva"
+    assert (
+        normalized["tts"]["riva_model_name"]
+        == "magpie_tts_ensemble-Magpie-Multilingual"
+    )
+    assert (
+        normalized["tts_model_name"]
+        == "magpie_tts_ensemble-Magpie-Multilingual"
+    )
 
 
 def test_tts_chunk_buffer_counts_cjk_characters():
@@ -109,3 +235,158 @@ def test_pcm16_aligner_preserves_samples_across_odd_http_chunks():
     assert all(len(chunk) % 2 == 0 for chunk in output)
     assert b"".join(output) == pcm
     assert aligner.finish() == b""
+
+
+def test_multilingual_tts_splitter_prefers_japanese_punctuation():
+    text = (
+        "ロボットの歴史は古代の自動機械から始まります。"
+        "現代では人工知能や高度なセンサーを利用し、"
+        "人と安全に協働します。"
+    )
+
+    chunks = split_tts_text(text, 24)
+
+    assert all(len(chunk) <= 24 for chunk in chunks)
+    assert "".join(chunks).replace(" ", "") == text
+    assert any(chunk.endswith("。") for chunk in chunks)
+    assert any(chunk.endswith("、") for chunk in chunks)
+
+
+def test_multilingual_tts_splitter_supports_arabic_punctuation():
+    text = "بدأ تاريخ الروبوتات بآلات قديمة؟ ثم تطورت، وأصبحت أكثر ذكاءً."
+
+    chunks = split_tts_text(text, 24)
+
+    assert all(len(chunk) <= 24 for chunk in chunks)
+    assert " ".join(chunks).split() == text.split()
+    assert any(chunk.endswith("؟") for chunk in chunks)
+
+
+def test_multilingual_tts_splitter_keeps_combining_character_cluster():
+    text = "か\u3099" * 12
+
+    chunks = split_tts_text(text, 7)
+
+    assert all(len(chunk) <= 7 for chunk in chunks)
+    assert all(not chunk.startswith("\u3099") for chunk in chunks)
+    assert "".join(chunks) == text
+
+
+class _FakeResponse:
+    status = 200
+
+    def __init__(self, audio=b"\x01\x02\x03\x04"):
+        self.content = self
+        self.audio = audio
+
+    async def iter_chunked(self, _size):
+        yield self.audio
+
+
+class _FakeRequestContext:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+class _FakeTTSSession:
+    def __init__(self):
+        self.inputs = []
+
+    def post(self, _url, *, json, headers):
+        self.inputs.append(json["input"])
+        return _FakeRequestContext(_FakeResponse())
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_preserves_normal_completed_llm_response():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="nvidia/magpie_tts_multilingual_357m",
+            voice="Sofia",
+            sample_rate=22050,
+        )
+    )
+    fake_session = _FakeTTSSession()
+    backend._session = fake_session
+    text = (
+        "The development of artificial intelligence and machine learning has "
+        "significantly advanced robotics, enabling robots to learn from "
+        "environments, adapt to new tasks, and perform complex operations "
+        "autonomously. This evolution has transformed industries such as "
+        "manufacturing, healthcare, logistics, and exploration."
+    )
+
+    chunks = [chunk async for chunk in backend.synthesize_stream(text)]
+
+    assert fake_session.inputs == [text]
+    assert chunks
+    assert not any(chunk.is_final for chunk in chunks[:-1])
+    assert chunks[-1].is_final
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_only_splits_above_service_input_limit():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="nvidia/magpie_tts_multilingual_357m",
+            voice="Sofia",
+            sample_rate=22050,
+        )
+    )
+    fake_session = _FakeTTSSession()
+    backend._session = fake_session
+    text = ("A complete sentence about robotics and artificial intelligence. " * 100)
+
+    chunks = [chunk async for chunk in backend.synthesize_stream(text)]
+
+    assert len(fake_session.inputs) > 1
+    assert all(len(item) <= MAX_REST_TTS_CHARS for item in fake_session.inputs)
+    assert " ".join(fake_session.inputs).split() == text.split()
+    assert chunks[-1].is_final
+
+
+class _BlockingRequestContext:
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def __aenter__(self):
+        self.started.set()
+        await asyncio.Future()
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_cancel_synthesis_preserves_caller_task():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="nvidia/magpie_tts_multilingual_357m",
+            voice="Sofia",
+            sample_rate=22050,
+        )
+    )
+    request = _BlockingRequestContext()
+    backend._session = SimpleNamespace(post=lambda *_args, **_kwargs: request)
+
+    async def consume():
+        async for _ in backend.synthesize_stream("Long response"):
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(request.started.wait(), timeout=0.5)
+    assert backend.cancel_synthesis() == 1
+    await asyncio.wait_for(task, timeout=0.5)
+    assert not task.cancelled()

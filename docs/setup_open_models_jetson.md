@@ -275,6 +275,23 @@ The next engineering step for Nemotron 3.5 ASR is a native streaming adapter
 using its cache-aware chunks. The current REST baseline deliberately uses the
 portable file-transcription contract and local VAD.
 
+Follow-up TODOs for conversational endpointing and barge-in:
+
+- Add the upstream open-source Silero VAD model as an optional local VAD
+  backend for Nemotron REST ASR. Do not depend on the Riva-packaged
+  `silero_vad.riva` artifact or an NGC credential.
+- Keep the existing audio pre-roll when using Silero so speech detection does
+  not clip the first phoneme or word.
+- Emit speech-start immediately for browser playback interruption, then submit
+  the completed utterance to the standard REST transcription endpoint after
+  speech-end.
+- Compare energy VAD and Silero VAD with identical audio for first-word
+  retention, missed utterances, false accepts per minute, endpoint latency,
+  and barge-in stop latency.
+- Validate browser echo cancellation separately from physical USB
+  microphone/speaker operation. Silero detects speech but does not by itself
+  distinguish user speech from assistant-speaker echo.
+
 ## Stop
 
 ```bash

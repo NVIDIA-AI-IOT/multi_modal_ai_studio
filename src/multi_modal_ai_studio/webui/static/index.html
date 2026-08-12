@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20260731-tts-preview-1">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -231,6 +231,41 @@
                 <div class="timeline-resize-handle" id="timeline-resize-handle"></div>
                 <div class="timeline-header">
                     <h3>Timeline</h3>
+                    <div class="timeline-legend" aria-label="Timeline color legend">
+                        <span class="legend-item" data-timeline-legend="speech-vad" title="Energy VAD detected user speech">
+                            <span class="legend-color legend-color-speech-vad" aria-hidden="true"></span><span class="legend-label">Speech / VAD</span>
+                        </span>
+                        <span class="legend-item" data-timeline-legend="asr-active" title="Observed recognition activity; exact meaning depends on the ASR backend">
+                            <span class="legend-color legend-color-asr-active" aria-hidden="true"></span><span class="legend-label">ASR Active</span>
+                        </span>
+                        <span class="legend-item" data-timeline-legend="endpoint-phase" title="Speech endpointing and final transcript completion">
+                            <span class="legend-color legend-color-endpoint-phase" aria-hidden="true"></span><span class="legend-label">Endpoint / Finalize</span>
+                        </span>
+                        <span class="legend-item" data-timeline-legend="llm-prefill" title="LLM prefill: request start to first token">
+                            <span class="legend-color legend-color-llm-prefill" aria-hidden="true"></span>LLM Prefill
+                        </span>
+                        <span class="legend-item" data-timeline-legend="llm-generate" title="LLM decode/generation: first token to completion">
+                            <span class="legend-color legend-color-llm-generate" aria-hidden="true"></span>LLM Generate
+                        </span>
+                        <span class="legend-item" data-timeline-legend="tts" title="TTS synthesis">
+                            <span class="legend-color legend-color-tts" aria-hidden="true"></span>TTS
+                        </span>
+                        <span class="legend-item" data-timeline-legend="user-audio" title="User microphone waveform">
+                            <span class="legend-waveform legend-waveform-user" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>User
+                        </span>
+                        <span class="legend-item" data-timeline-legend="ai-audio" title="AI speech waveform">
+                            <span class="legend-waveform legend-waveform-ai" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>AI
+                        </span>
+                        <span class="legend-item" data-timeline-legend="barge-in" title="Barge-in: browser or server speaker playback stopped">
+                            <span class="legend-barge-in" aria-hidden="true"><i></i></span>Barge-in
+                        </span>
+                        <span class="legend-item" data-timeline-legend="discarded-audio" title="AI audio that was already scheduled but not played after Barge-in" hidden>
+                            <span class="legend-color legend-color-discarded-audio" aria-hidden="true"></span>Discarded audio
+                        </span>
+                        <span class="legend-item" data-timeline-legend="tts-cancelling" title="Time from playback stop until TTS backend cancellation completed" hidden>
+                            <span class="legend-color legend-color-tts-cancelling" aria-hidden="true"></span>TTS cancelling
+                        </span>
+                    </div>
                     <div class="timeline-controls">
                         <span class="timeline-gain-label" title="UI-only amplification for waveform">User:</span>
                         <select id="timeline-user-audio-gain" class="timeline-gain-select" title="User (mic) waveform gain">
@@ -254,6 +289,7 @@
                 </div>
                 <div class="timeline-content" id="timeline-content">
                     <canvas id="timeline-canvas"></canvas>
+                    <div class="timeline-event-tooltip" id="timeline-event-tooltip" role="tooltip" hidden></div>
                 </div>
                 <div class="timeline-scroll-bar" id="timeline-scroll-bar" style="display: none;">
                     <div class="timeline-scroll-track" id="timeline-scroll-track">
@@ -446,6 +482,8 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="timeline_helpers.js?v=20260730-timing-gaps-1"></script>
+    <script src="config_helpers.js?v=20260812-server-preset-reset-1"></script>
+    <script src="app.js?v=20260801-openai-tts-discovery-1"></script>
 </body>
 </html>

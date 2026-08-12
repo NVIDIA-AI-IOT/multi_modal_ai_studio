@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from aiohttp import web
@@ -39,13 +39,17 @@ try:
     from multi_modal_ai_studio.devices.playback import (
         start_server_speaker_playback,
         stop_server_speaker_playback,
+        write_server_speaker_audio,
     )
 except ImportError:
     # playback.py may be missing on some branches (e.g. upstream main); stub so app still starts.
     def start_server_speaker_playback(device: str, sample_rate: int, proc_holder: Optional[list] = None):
         return None
 
-    def stop_server_speaker_playback(proc) -> None:
+    def stop_server_speaker_playback(proc, immediate: bool = False) -> None:
+        pass
+
+    def write_server_speaker_audio(proc, audio: bytes) -> None:
         pass
 
 from multi_modal_ai_studio.config.schema import (
@@ -55,10 +59,11 @@ from multi_modal_ai_studio.config.schema import (
     TTSConfig,
 )
 from multi_modal_ai_studio import __version__
-from multi_modal_ai_studio.core.session import Session
+from multi_modal_ai_studio.core.session import Session, validate_session_thumbnail
 from multi_modal_ai_studio.core.timeline import Lane
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
+from multi_modal_ai_studio.backends.asr.energy_vad import EnergyVADObserver
 from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
@@ -108,7 +113,7 @@ class BargeInController:
 
     def observe_asr(self, *, is_final: bool, text: str) -> bool:
         """Observe ASR activity and return True when it requests interruption."""
-        if not self.enabled or not self.tts_active or not (text or "").strip():
+        if not self.enabled or not (text or "").strip():
             return False
         if self.trigger == "partial":
             if is_final:
@@ -119,8 +124,15 @@ class BargeInController:
                 return False
         elif not is_final:
             return False
+        # Latch the interruption even if ``tts_active`` briefly appears false.
+        # ASR and turn execution are independent tasks: a final can arrive
+        # while TTS is starting, or while a background lookahead synthesis is
+        # still running.  ``begin_turn()`` clears this event before processing
+        # the utterance that caused it, so latching an idle final is harmless
+        # and closes the race that otherwise lets old TTS finish before the
+        # queued turn can start.
         self.requested.set()
-        return True
+        return self.tts_active
 
 
 async def _wait_for_task_or_barge_in(
@@ -142,11 +154,14 @@ async def _wait_for_task_or_barge_in(
 
     waiter = asyncio.create_task(requested.wait())
     try:
-        done, _ = await asyncio.wait(
+        await asyncio.wait(
             {task, waiter},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if waiter in done and requested.is_set():
+        # The task and event can complete in the same event-loop iteration
+        # after the gRPC call is cancelled. The event remains authoritative
+        # even when asyncio reports the task first.
+        if requested.is_set():
             if not task.done():
                 task.cancel()
             try:
@@ -165,6 +180,62 @@ async def _wait_for_task_or_barge_in(
                 pass
 
 
+async def _record_cancelled_tts_events(
+    session: Session,
+    send_event: Callable[[Dict[str, Any]], Awaitable[None]],
+    *,
+    timestamp: float,
+    cancel_requested_at: Optional[float],
+) -> None:
+    """Close a started TTS lifecycle after barge-in.
+
+    Streamed TTS can be cancelled while the LLM is still generating, before
+    execution reaches the normal TTS completion block.  Both paths must emit
+    the same terminal events so saved sessions do not contain an open-ended
+    TTS interval.
+    """
+    turn_id = (
+        session._current_turn.get("turn_id")
+        if session._current_turn
+        else len(session.turns) + 1
+    )
+    cancel_data: Dict[str, Any] = {
+        "reason": "barge_in",
+        "turn_id": turn_id,
+    }
+    if cancel_requested_at is not None:
+        cancel_data["cancel_latency_ms"] = max(
+            0,
+            round((timestamp - cancel_requested_at) * 1000),
+        )
+    session.timeline.add_event(
+        "tts_cancelled",
+        Lane.TTS,
+        data=cancel_data,
+        timestamp=timestamp,
+    )
+    await send_event({
+        "event_type": "tts_cancelled",
+        "lane": "tts",
+        "data": cancel_data,
+        "timestamp": timestamp,
+    })
+
+    complete_data = {"cancelled": True, "reason": "barge_in"}
+    session.timeline.add_event(
+        "tts_complete",
+        Lane.TTS,
+        data=complete_data,
+        timestamp=timestamp,
+    )
+    await send_event({
+        "event_type": "tts_complete",
+        "lane": "tts",
+        "data": complete_data,
+        "timestamp": timestamp,
+    })
+
+
 def _format_llm_error_for_user(exc: Exception) -> str:
     """Build a short, user-facing message for LLM errors (e.g. for a toast)."""
     msg = str(exc).strip()
@@ -181,6 +252,17 @@ def _format_llm_error_for_user(exc: Exception) -> str:
     if "Timeout" in type(exc).__name__ or "timeout" in msg.lower():
         return "LLM request failed: request timed out. Try again."
     return f"LLM request failed: {msg}"
+
+
+def _asr_result_error_message(result: ASRResult) -> Optional[str]:
+    """Return a user-facing error carried by an asynchronous ASR result."""
+    metadata = getattr(result, "metadata", {}) or {}
+    message = str(metadata.get("error", "")).strip()
+    if not message:
+        return None
+    if message.lower().startswith("asr request failed"):
+        return message
+    return f"ASR request failed: {message}"
 
 
 def _is_punctuation_or_empty(text: str) -> bool:
@@ -313,8 +395,26 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
             tts["api_base"] = tts.pop("openai_url")
         if "riva_server" in tts and "server" not in tts:
             tts["server"] = tts.pop("riva_server")
-        if data.get("tts_model_name") and "riva_model_name" not in tts:
-            tts["riva_model_name"] = data["tts_model_name"]
+        if tts.get("scheme") == "riva":
+            if data.get("tts_model_name") and "riva_model_name" not in tts:
+                tts["riva_model_name"] = data["tts_model_name"]
+            data["tts_model_name"] = (
+                tts.get("riva_model_name")
+                or data.get("tts_model_name")
+                or tts.get("model")
+                or tts.get("voice")
+            )
+        else:
+            # REST/Realtime model and voice are separate. Old clients sent the
+            # voice as tts_model_name and the normalizer then copied it into
+            # riva_model_name. Remove that stale Riva-only metadata and record
+            # the actual model whenever it is available.
+            tts.pop("riva_model_name", None)
+            data["tts_model_name"] = (
+                tts.get("model")
+                or data.get("tts_model_name")
+                or tts.get("voice")
+            )
         data["tts"] = tts
     if "llm" in data:
         llm = dict(data["llm"])
@@ -376,6 +476,37 @@ def _pcm_rms_slices(
         amp = min(100.0, (rms / 32768.0) * 100.0)
         result.append(amp)
     return result
+
+
+def _pcm_amplitude_segments(
+    pcm_bytes: bytes,
+    sample_rate: int,
+    start_time: float,
+    window_s: float = 0.025,
+) -> Tuple[List[Dict[str, float]], float]:
+    """Build contiguous timeline segments for a PCM16 chunk.
+
+    The returned cursor is the start time for the next chunk. Keeping this
+    calculation independent from wall-clock send time prevents gaps and
+    overlaps when an HTTP TTS response is split into uneven chunks.
+    """
+    cursor = start_time
+    segments: List[Dict[str, float]] = []
+    for amplitude in _pcm_rms_slices(
+        pcm_bytes,
+        sample_rate=sample_rate,
+        window_s=window_s,
+    ):
+        end_time = cursor + window_s
+        segments.append(
+            {
+                "startTime": cursor,
+                "endTime": end_time,
+                "amplitude": amplitude,
+            }
+        )
+        cursor = end_time
+    return segments, cursor
 
 
 def _resample_pcm_to_24k(pcm_bytes: bytes, from_rate: int) -> bytes:
@@ -585,7 +716,11 @@ async def _run_realtime_loop(
                         if realtime_barge_in.observe_asr(is_final=False, text=ev.text):
                             realtime_tts_cancelled = True
                             if server_speaker_proc is not None:
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                             logger.info("[barge_in] Realtime Server speaker stopped by partial ASR")
                 if ev.kind == "transcript_completed":
@@ -597,7 +732,11 @@ async def _run_realtime_loop(
                         if realtime_barge_in.observe_asr(is_final=True, text=ev.text):
                             realtime_tts_cancelled = True
                             if server_speaker_proc is not None:
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                             logger.info("[barge_in] Realtime Server speaker stopped by final ASR")
                 if ev.kind == "output_transcript_delta":
@@ -666,10 +805,17 @@ async def _run_realtime_loop(
                             )
                         if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                             try:
-                                server_speaker_proc.stdin.write(ev.audio)
-                                server_speaker_proc.stdin.flush()
+                                await asyncio.to_thread(
+                                    write_server_speaker_audio,
+                                    server_speaker_proc,
+                                    ev.audio,
+                                )
                             except (BrokenPipeError, OSError):
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
                     b64 = base64.b64encode(ev.audio).decode("ascii")
                     payload = {
@@ -699,7 +845,10 @@ async def _run_realtime_loop(
             pass
         finally:
             if server_speaker_proc is not None:
-                stop_server_speaker_playback(server_speaker_proc)
+                await asyncio.to_thread(
+                    stop_server_speaker_playback,
+                    server_speaker_proc,
+                )
 
     async def receive_loop() -> None:
         nonlocal _user_amplitude_sent, mic_muted
@@ -737,6 +886,7 @@ async def _run_realtime_loop(
                                     setattr(session, attr, val)
                             if getattr(session, "ttl_bands", None):
                                 session.apply_ttl_bands()
+                            session.thumbnail = validate_session_thumbnail(obj.get("thumbnail"))
                             session.app_version = __version__
                             stopped.set()
                             return
@@ -1097,7 +1247,7 @@ async def _run_voice_pipeline(
         if asr_config.scheme == "riva":
             asr = RivaASRBackend(config=asr_config, timeline=session.timeline)
         else:
-            asr = OpenAIRestASRBackend(config=asr_config)
+            asr = OpenAIRestASRBackend(config=asr_config, timeline=session.timeline)
         llm = OpenAILLMBackend(config=llm_config)
         if tts_config.scheme == "riva":
             tts = RivaTTSBackend(config=tts_config, timeline=session.timeline)
@@ -1108,6 +1258,18 @@ async def _run_voice_pipeline(
         await ws.send_str(json.dumps({"type": "error", "error": str(e)}))
         _release_server_capture()
         return None
+
+    # Riva performs its own server-side endpointing, but the streaming API does
+    # not expose explicit physical speech boundaries. Observe the same 16 kHz
+    # PCM locally for timeline visualization only. This never gates or modifies
+    # the audio sent to Riva and therefore applies identically to Browser and
+    # Server USB microphones.
+    riva_energy_vad = (
+        EnergyVADObserver(asr_config)
+        if asr_config.scheme == "riva"
+        else None
+    )
+    riva_energy_speech_ends: List[float] = []
 
     # ASR starts only after client sends start_session (both mics). Avoids Riva timeout during preview and keeps logic identical.
     asr_stream_started = False
@@ -1122,6 +1284,7 @@ async def _run_voice_pipeline(
         trigger=getattr(config.app, "barge_in_trigger", "final"),
         partial_count=getattr(config.app, "barge_in_partial_count", 3),
     )
+    barge_in_cancel_requested_at: Optional[float] = None
 
     logger.info(
         "Voice pipeline devices: audio_input_source=%s audio_input_device=%s use_server_mic=%s",
@@ -1341,6 +1504,52 @@ async def _run_voice_pipeline(
                     logger.warning("Send user_amplitude (preview) failed: %s", e)
         return (last_amplitude_time, did_send, amp, now)
 
+    async def _send_asr_audio(pcm_bytes: bytes) -> bool:
+        """Observe Riva speech boundaries, then forward the original PCM."""
+        if (
+            riva_energy_vad is not None
+            and session.timeline.start_time is not None
+        ):
+            observed_at = max(
+                0.0,
+                time.time() - session.timeline.start_time,
+            )
+            for vad_event in riva_energy_vad.observe(
+                pcm_bytes,
+                chunk_end_time=observed_at,
+            ):
+                data = {
+                    "source": "local-energy",
+                    "detector": "pcm-rms",
+                    "observed_at": vad_event.observed_at,
+                    "decision_delay_ms": max(
+                        0.0,
+                        (vad_event.observed_at - vad_event.timestamp) * 1000.0,
+                    ),
+                    "normalized_rms": vad_event.normalized_rms,
+                }
+                session.timeline.add_event(
+                    vad_event.event_type,
+                    Lane.SPEECH,
+                    data=data,
+                    timestamp=vad_event.timestamp,
+                )
+                await send_event({
+                    "event_type": vad_event.event_type,
+                    "lane": "speech",
+                    "data": data,
+                    "timestamp": vad_event.timestamp,
+                })
+                if vad_event.event_type == "vad_end":
+                    riva_energy_speech_ends.append(vad_event.timestamp)
+                logger.info(
+                    "[Riva Energy VAD] %s boundary=%.3fs observed=%.3fs",
+                    vad_event.event_type,
+                    vad_event.timestamp,
+                    vad_event.observed_at,
+                )
+        return await asr.send_audio(pcm_bytes)
+
     async def _feed_pcm_to_pipeline(
         pcm_bytes: bytes,
         last_amplitude_time: float,
@@ -1351,7 +1560,7 @@ async def _run_voice_pipeline(
             return (last_amplitude_time, False, 0.0, 0.0)
         now = time.time() - session.timeline.start_time
         if not mic_muted:
-            accepted = await asr.send_audio(pcm_bytes)
+            accepted = await _send_asr_audio(pcm_bytes)
             if not accepted and not getattr(_feed_pcm_to_pipeline, "_warned_dead_stream", False):
                 _feed_pcm_to_pipeline._warned_dead_stream = True
                 logger.warning("[asr] send_audio dropped — ASR stream not active (waiting for auto-restart)")
@@ -1391,10 +1600,17 @@ async def _run_voice_pipeline(
                             nonlocal mic_muted
                             muted = obj.get("muted", True)
                             if muted and session.timeline.start_time is not None:
-                                # Inject ~0.5s silence so Riva VAD endpoints any partial
-                                _silence_05s = 16000 * 2 * 0.5  # 16 kHz, 16-bit, 0.5 s
+                                # Feed enough silence to close both Riva's
+                                # endpoint detector and the local observer.
+                                silence_s = max(
+                                    0.5,
+                                    asr_config.speech_timeout_ms / 1000.0,
+                                )
+                                silence_bytes = int(16000 * 2 * silence_s)
                                 try:
-                                    await asr.send_audio(b"\x00" * int(_silence_05s))
+                                    await _send_asr_audio(
+                                        b"\x00" * silence_bytes
+                                    )
                                 except Exception as e:
                                     logger.debug("PTT: inject silence failed %s", e)
                             mic_muted = muted
@@ -1443,9 +1659,43 @@ async def _run_voice_pipeline(
                             if isinstance(ttl_bands, list):
                                 session.ttl_bands = ttl_bands
                                 session.apply_ttl_bands()  # single source of truth: metrics from bands (first audio_amplitude tts)
+                            session.thumbnail = validate_session_thumbnail(obj.get("thumbnail"))
                             session.app_version = __version__
                             stopped.set()
                             return
+                        if obj.get("type") == "client_timeline_event":
+                            event = obj.get("event")
+                            if isinstance(event, dict) and event.get("event_type") == "tts_playback_stopped":
+                                try:
+                                    event_ts = float(event.get("timestamp"))
+                                except (TypeError, ValueError):
+                                    event_ts = -1.0
+                                if event_ts >= 0.0:
+                                    raw_data = event.get("data")
+                                    event_data = dict(raw_data) if isinstance(raw_data, dict) else {}
+                                    # Keep this diagnostic event compact and
+                                    # bounded; the waveform itself is already
+                                    # represented by timeline amplitude data.
+                                    event_data = {
+                                        key: event_data[key]
+                                        for key in (
+                                            "reason",
+                                            "trigger",
+                                            "trigger_timestamp",
+                                            "turn_id",
+                                            "discarded_audio_end",
+                                            "discarded_audio_ms",
+                                            "sources_stopped",
+                                            "playback",
+                                        )
+                                        if key in event_data
+                                    }
+                                    session.timeline.add_event(
+                                        "tts_playback_stopped",
+                                        Lane.AUDIO,
+                                        data=event_data,
+                                        timestamp=event_ts,
+                                    )
                         # VLM: handle multi-frame response from browser
                         if obj.get("type") == "vlm_frames":
                             frames = obj.get("frames", [])
@@ -1508,11 +1758,13 @@ async def _run_voice_pipeline(
 
         Auto-restart: if Riva's gRPC stream dies (idle timeout, server-side limit, or bus contention)
         and the pipeline has not been stopped, the stream is restarted with exponential backoff."""
+        nonlocal barge_in_cancel_requested_at
         last_asr_final_text: Optional[str] = None
         last_asr_final_ts: Optional[float] = None
         last_partial_text: Optional[str] = None
         last_partial_ts: Optional[float] = None
         asr_received_count = 0
+        emitted_inference_windows: set[tuple[float, float]] = set()
         _MAX_ASR_RESTARTS = 10
         _asr_restart_count = 0
         try:
@@ -1523,9 +1775,85 @@ async def _run_voice_pipeline(
                 if result is None:
                     break
 
+                result_metadata = getattr(result, "metadata", {}) or {}
+                inference_start = result_metadata.get(
+                    "inference_start_time"
+                )
+                inference_end = result_metadata.get("inference_end_time")
+                try:
+                    inference_start = float(inference_start)
+                    inference_end = float(inference_end)
+                except (TypeError, ValueError):
+                    inference_start = None
+                    inference_end = None
+                if (
+                    inference_start is not None
+                    and inference_end is not None
+                    and inference_end >= inference_start
+                ):
+                    inference_key = (
+                        round(inference_start, 6),
+                        round(inference_end, 6),
+                    )
+                    if inference_key not in emitted_inference_windows:
+                        emitted_inference_windows.add(inference_key)
+                        inference_data = {
+                            "backend": result_metadata.get("backend"),
+                            "model": result_metadata.get("model"),
+                            "duration_ms": result_metadata.get(
+                                "inference_duration_ms"
+                            ),
+                            "audio_duration_ms": result_metadata.get(
+                                "audio_duration_ms"
+                            ),
+                        }
+                        for event_type, event_ts in (
+                            ("asr_inference_start", inference_start),
+                            ("asr_inference_end", inference_end),
+                        ):
+                            session.timeline.add_event(
+                                event_type,
+                                Lane.SPEECH,
+                                data=inference_data,
+                                timestamp=event_ts,
+                            )
+                            await send_event({
+                                "event_type": event_type,
+                                "lane": "speech",
+                                "data": inference_data,
+                                "timestamp": event_ts,
+                            })
+
+                asr_error = _asr_result_error_message(result)
+                if asr_error:
+                    logger.error("[asr] %s", asr_error)
+                    error_ts = (
+                        time.time() - session.timeline.start_time
+                        if session.timeline.start_time
+                        else 0
+                    )
+                    error_data = {
+                        "message": asr_error,
+                        "stage": "asr",
+                        "backend": result_metadata.get("backend"),
+                    }
+                    session.timeline.add_event(
+                        "error",
+                        Lane.SYSTEM,
+                        data=error_data,
+                        timestamp=error_ts,
+                    )
+                    await send_event({
+                        "event_type": "error",
+                        "lane": "system",
+                        "data": error_data,
+                        "timestamp": error_ts,
+                    })
+                    continue
+
                 asr_received_count += 1
                 if asr_received_count == 1:
-                    logger.info("[asr] First result received from Riva: is_final=%s text=%r", getattr(result, "is_final", True), (result.text or "").strip()[:80])
+                    logger.info("[asr] First result received: is_final=%s text=%r", getattr(result, "is_final", True), (result.text or "").strip()[:80])
 
                 is_final = getattr(result, "is_final", True)
                 text = (result.text or "").strip()
@@ -1533,10 +1861,27 @@ async def _run_voice_pipeline(
                     continue
 
                 now_ts = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
-                ts = (getattr(result, "metadata", {}) or {}).get("event_timestamp")
+                ts = result_metadata.get("event_timestamp")
                 if ts is None:
                     ts = now_ts
                 ev_type = "asr_partial" if not is_final else "asr_final"
+
+                if is_final and riva_energy_speech_ends:
+                    # Associate the latest unconsumed physical speech boundary
+                    # with this Riva final. turn_executor then uses it for TTL
+                    # instead of treating transcript arrival as speech end.
+                    eligible_ends = [
+                        boundary
+                        for boundary in riva_energy_speech_ends
+                        if boundary <= ts
+                    ]
+                    if eligible_ends:
+                        result.end_time = eligible_ends[-1]
+                        riva_energy_speech_ends[:] = [
+                            boundary
+                            for boundary in riva_energy_speech_ends
+                            if boundary > result.end_time
+                        ]
 
                 # File-style OpenAI REST ASR has no partial transcripts. Preserve
                 # its local VAD timing so the UI can still draw a truthful ASR
@@ -1593,11 +1938,77 @@ async def _run_voice_pipeline(
                         logger.debug("[asr] Skipping phantom asr_partial (same utterance as last final): %r", text[:50])
                         continue
 
-                if barge_in.observe_asr(is_final=is_final, text=text):
+                interruption_was_requested = barge_in.requested.is_set()
+                interruption_active = barge_in.observe_asr(
+                    is_final=is_final,
+                    text=text,
+                )
+                if interruption_active:
                     logger.info(
                         "[barge_in] Backend interruption requested by %s ASR",
                         "final" if is_final else "partial",
                     )
+                if (
+                    not interruption_was_requested
+                    and barge_in.requested.is_set()
+                ):
+                    if interruption_active:
+                        trigger_name = (
+                            "final_transcript" if is_final else "partial_transcript"
+                        )
+                        turn_id = (
+                            session._current_turn.get("turn_id")
+                            if session._current_turn
+                            else len(session.turns) + 1
+                        )
+                        trigger_data = {
+                            "trigger": trigger_name,
+                            "text": text,
+                            "turn_id": turn_id,
+                        }
+                        session.timeline.add_event(
+                            "barge_in_triggered",
+                            Lane.SYSTEM,
+                            data=trigger_data,
+                            timestamp=ts,
+                        )
+                        await send_event({
+                            "event_type": "barge_in_triggered",
+                            "lane": "system",
+                            "data": trigger_data,
+                            "timestamp": ts,
+                        })
+                        cancel_ts = (
+                            time.time() - session.timeline.start_time
+                            if session.timeline.start_time
+                            else ts
+                        )
+                        barge_in_cancel_requested_at = cancel_ts
+                        cancel_data = {
+                            "reason": "barge_in",
+                            "trigger": trigger_name,
+                            "turn_id": turn_id,
+                        }
+                        session.timeline.add_event(
+                            "tts_cancel_requested",
+                            Lane.TTS,
+                            data=cancel_data,
+                            timestamp=cancel_ts,
+                        )
+                        await send_event({
+                            "event_type": "tts_cancel_requested",
+                            "lane": "tts",
+                            "data": cancel_data,
+                            "timestamp": cancel_ts,
+                        })
+                    cancel_synthesis = getattr(tts, "cancel_synthesis", None)
+                    if callable(cancel_synthesis):
+                        cancelled_rpcs = cancel_synthesis()
+                        if cancelled_rpcs:
+                            logger.info(
+                                "[barge_in] Cancelled %d active TTS RPC(s)",
+                                cancelled_rpcs,
+                            )
 
                 if not is_final:
                     # VLM: Track speech start time for frame synchronization.
@@ -1729,7 +2140,7 @@ async def _run_voice_pipeline(
     async def turn_executor() -> None:
         """Process ASR finals one at a time: LLM -> TTS. Waits on finals_queue (fed by asr_consumer).
         Future: can be cancelled when new final arrives for barge-in."""
-        nonlocal speech_start_time
+        nonlocal speech_start_time, barge_in_cancel_requested_at
         turn_index = 0
         max_history = getattr(llm_config, "history_turns", 3)
         conversation_history: list = []
@@ -1747,7 +2158,25 @@ async def _run_voice_pipeline(
                 logger.info("[timing] turn #%d start (asr_final received): %r", turn_index, text[:80])
                 session.start_turn(user_transcript=text)
                 session.update_turn_transcript(text, confidence=getattr(result, "confidence", 1.0))
-                session.timeline.add_event("user_speech_end", Lane.SYSTEM)
+                asr_event_ts = (result.metadata or {}).get("event_timestamp")
+                if asr_event_ts is None:
+                    asr_event_ts = (
+                        time.time() - session.timeline.start_time
+                        if session.timeline.start_time
+                        else 0
+                    )
+                result_end = getattr(result, "end_time", None)
+                speech_end_ts = (
+                    float(result_end)
+                    if result_end is not None
+                    and 0.0 <= float(result_end) <= float(asr_event_ts)
+                    else float(asr_event_ts)
+                )
+                session.timeline.add_event(
+                    "user_speech_end",
+                    Lane.SYSTEM,
+                    timestamp=speech_end_ts,
+                )
 
                 ts_llm_start = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                 logger.info("[timing] llm_start @ %.2fs", ts_llm_start)
@@ -1767,7 +2196,6 @@ async def _run_voice_pipeline(
                     # NOT ts_llm_start (which is when the turn is dequeued).
                     # When TTS from a previous turn is still playing, the turn
                     # sits in the queue for seconds, inflating the window.
-                    asr_event_ts = (result.metadata or {}).get("event_timestamp")
                     t_end = asr_event_ts if asr_event_ts is not None else ts_llm_start
                     t_start = speech_start_time if speech_start_time is not None else max(0, t_end - 3.0)
                     # Pull t_start back before speech start to capture frames
@@ -1844,18 +2272,18 @@ async def _run_voice_pipeline(
                 # ── Shared TTS state ──
                 tts_first_sent = False
                 ts_tts_first = 0.0
-                last_tts_amplitude_time = 0.0
-                tts_amplitude_interval = 0.05
+                tts_amplitude_next_t = 0.0
                 server_speaker_proc = None
                 _speaker_fail_until = 0.0  # backoff: skip aplay retries until this epoch
                 tts_consumer_error: Optional[Exception] = None
 
                 async def _send_tts_audio(chunk):
-                    nonlocal tts_first_sent, ts_tts_first, last_tts_amplitude_time, server_speaker_proc, _speaker_fail_until
+                    nonlocal tts_first_sent, ts_tts_first, tts_amplitude_next_t, server_speaker_proc, _speaker_fail_until
                     if barge_in.requested.is_set():
                         raise asyncio.CancelledError
                     if not tts_first_sent:
                         ts_tts_first = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
+                        tts_amplitude_next_t = ts_tts_first
                         ref_label = "llm_first_token" if use_stream_tts else "llm_complete"
                         ref_ts = ts_first if use_stream_tts else ts_llm_complete
                         logger.info("[timing] tts_first_audio @ %.2fs (%.2fs after %s)", ts_tts_first, ts_tts_first - ref_ts, ref_label)
@@ -1877,25 +2305,55 @@ async def _run_voice_pipeline(
                                 )
                         if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                             try:
-                                server_speaker_proc.stdin.write(chunk.audio)
-                                server_speaker_proc.stdin.flush()
+                                await asyncio.to_thread(
+                                    write_server_speaker_audio,
+                                    server_speaker_proc,
+                                    chunk.audio,
+                                )
                             except (BrokenPipeError, OSError) as e:
                                 logger.debug("Server speaker write failed: %s", e)
-                                stop_server_speaker_playback(server_speaker_proc)
+                                await asyncio.to_thread(
+                                    stop_server_speaker_playback,
+                                    server_speaker_proc,
+                                    True,
+                                )
                                 server_speaker_proc = None
+                    amplitude_segments: List[Dict[str, Any]] = []
                     if session.timeline.start_time is not None and chunk.audio:
-                        now = time.time() - session.timeline.start_time
-                        if now - last_tts_amplitude_time >= tts_amplitude_interval:
-                            amp = _pcm_rms_to_amplitude(chunk.audio)
-                            session.timeline.add_audio_amplitude(amplitude=amp, source="tts")
-                            last_tts_amplitude_time = now
+                        # Persist the actual PCM envelope at the same 25 ms
+                        # resolution used by the live canvas.  A single RMS per
+                        # HTTP chunk collapses multi-second Magpie responses to
+                        # one point and leaves no AI waveform during replay.
+                        raw_segments, tts_amplitude_next_t = _pcm_amplitude_segments(
+                            chunk.audio,
+                            sample_rate=chunk.sample_rate,
+                            start_time=tts_amplitude_next_t,
+                            window_s=_amplitude_window_s,
+                        )
+                        for segment in raw_segments:
+                            session.timeline.add_audio_amplitude(
+                                amplitude=segment["amplitude"],
+                                source="tts",
+                                timestamp=segment["startTime"],
+                            )
+                        amplitude_segments = [
+                            {
+                                "startTime": round(segment["startTime"], 3),
+                                "endTime": round(segment["endTime"], 3),
+                                "amplitude": round(segment["amplitude"], 2),
+                            }
+                            for segment in raw_segments
+                        ]
                     b64 = base64.b64encode(chunk.audio).decode("ascii")
-                    await ws.send_str(json.dumps({
+                    payload = {
                         "type": "tts_audio",
                         "data": b64,
                         "sample_rate": chunk.sample_rate,
                         "is_final": chunk.is_final,
-                    }))
+                    }
+                    if amplitude_segments:
+                        payload["amplitude_segments"] = amplitude_segments
+                    await ws.send_str(json.dumps(payload))
 
                 async def _tts_consumer(tts_q: asyncio.Queue) -> None:
                     """Background task: pull text chunks from queue, synthesize, send audio.
@@ -1918,9 +2376,9 @@ async def _run_voice_pipeline(
                             result.append(c)
                         return result
 
+                    lookahead: Optional[asyncio.Task] = None
                     try:
                         chunk_idx = 0
-                        lookahead: Optional[asyncio.Task] = None
                         stream_ended = False
 
                         # ── Phase 1: stream first chunk immediately ──
@@ -1996,9 +2454,23 @@ async def _run_voice_pipeline(
                                     except asyncio.QueueEmpty:
                                         pass
 
+                    except asyncio.CancelledError:
+                        logger.info("[stream_tts] TTS consumer cancelled")
+                        raise
                     except Exception as e:
                         logger.exception("[stream_tts] TTS consumer error: %s", e)
                         tts_consumer_error = e
+                    finally:
+                        # A lookahead synthesis is a separate task. Cancelling
+                        # only the consumer otherwise leaves it generating
+                        # discarded audio (and occupying the GPU) after
+                        # browser playback has stopped for barge-in.
+                        if lookahead is not None and not lookahead.done():
+                            lookahead.cancel()
+                            try:
+                                await lookahead
+                            except (asyncio.CancelledError, Exception):
+                                pass
 
                 # ── LLM generation + TTS ──
                 ts_first = ts_llm_start
@@ -2120,6 +2592,14 @@ async def _run_voice_pipeline(
                                 pass
                     if server_speaker_proc is not None:
                         stop_server_speaker_playback(server_speaker_proc)
+                    if tts_started:
+                        await _record_cancelled_tts_events(
+                            session,
+                            send_event,
+                            timestamp=ts_abort,
+                            cancel_requested_at=barge_in_cancel_requested_at,
+                        )
+                        barge_in_cancel_requested_at = None
                     barge_in.finish_tts()
                     session.end_turn()
                     continue
@@ -2209,32 +2689,38 @@ async def _run_voice_pipeline(
                                         )
                                 if server_speaker_proc is not None and server_speaker_proc.stdin and not server_speaker_proc.stdin.closed:
                                     try:
-                                        server_speaker_proc.stdin.write(chunk.audio)
-                                        server_speaker_proc.stdin.flush()
+                                        await asyncio.to_thread(
+                                            write_server_speaker_audio,
+                                            server_speaker_proc,
+                                            chunk.audio,
+                                        )
                                     except (BrokenPipeError, OSError) as e:
                                         logger.debug("Server speaker write failed (aplay may have exited): %s", e)
-                                        stop_server_speaker_playback(server_speaker_proc)
+                                        await asyncio.to_thread(
+                                            stop_server_speaker_playback,
+                                            server_speaker_proc,
+                                            True,
+                                        )
                                         server_speaker_proc = None
                             amplitude_segments: List[Dict[str, Any]] = []
                             if session.timeline.start_time is not None and chunk.audio:
-                                amps = _pcm_rms_slices(
+                                raw_segments, tts_amplitude_next_t = _pcm_amplitude_segments(
                                     chunk.audio,
                                     sample_rate=chunk.sample_rate,
+                                    start_time=tts_amplitude_next_t,
                                     window_s=_amplitude_window_s,
                                 )
-                                ts_send = time.time() - session.timeline.start_time
-                                for i, a in enumerate(amps):
-                                    t_start = ts_send - (len(amps) - i) * _amplitude_window_s
-                                    t_end = t_start + _amplitude_window_s
+                                for segment in raw_segments:
                                     session.timeline.add_audio_amplitude(
-                                        amplitude=a, source="tts", timestamp=t_start
+                                        amplitude=segment["amplitude"],
+                                        source="tts",
+                                        timestamp=segment["startTime"],
                                     )
                                     amplitude_segments.append({
-                                        "startTime": round(t_start, 3),
-                                        "endTime": round(t_end, 3),
-                                        "amplitude": round(a, 2),
+                                        "startTime": round(segment["startTime"], 3),
+                                        "endTime": round(segment["endTime"], 3),
+                                        "amplitude": round(segment["amplitude"], 2),
                                     })
-                                tts_amplitude_next_t = ts_send
                             b64 = base64.b64encode(chunk.audio).decode("ascii")
                             payload = {
                                 "type": "tts_audio",
@@ -2245,11 +2731,28 @@ async def _run_voice_pipeline(
                             if amplitude_segments:
                                 payload["amplitude_segments"] = amplitude_segments
                             await ws.send_str(json.dumps(payload))
+                        # Direct gRPC cancellation can make the iterator finish
+                        # normally. Preserve the authoritative ASR interruption
+                        # as a cancelled turn rather than a successful TTS.
+                        if barge_in.requested.is_set():
+                            tts_interrupted = True
                     ts_tts_complete = (time.time() - session.timeline.start_time) if session.timeline.start_time else 0
                     logger.info("[timing] tts_complete @ %.2fs (tts took %.2fs, cancelled=%s)", ts_tts_complete, ts_tts_complete - ts_tts_first if tts_first_sent else 0, tts_interrupted)
-                    complete_data = {"cancelled": True, "reason": "barge_in"} if tts_interrupted else {}
-                    session.timeline.add_event("tts_complete", Lane.TTS, data=complete_data)
-                    await send_event({"event_type": "tts_complete", "lane": "tts", "data": complete_data, "timestamp": ts_tts_complete})
+                    if tts_interrupted:
+                        await _record_cancelled_tts_events(
+                            session,
+                            send_event,
+                            timestamp=ts_tts_complete,
+                            cancel_requested_at=barge_in_cancel_requested_at,
+                        )
+                    else:
+                        session.timeline.add_event("tts_complete", Lane.TTS)
+                        await send_event({
+                            "event_type": "tts_complete",
+                            "lane": "tts",
+                            "data": {},
+                            "timestamp": ts_tts_complete,
+                        })
                 except Exception as e:
                     logger.exception("TTS error: %s", e)
                 finally:
@@ -2260,8 +2763,40 @@ async def _run_voice_pipeline(
                         except (asyncio.CancelledError, Exception):
                             pass
                     if server_speaker_proc is not None:
-                        stop_server_speaker_playback(server_speaker_proc)
+                        playback_stop_ts = (
+                            time.time() - session.timeline.start_time
+                            if session.timeline.start_time
+                            else 0
+                        )
+                        await asyncio.to_thread(
+                            stop_server_speaker_playback,
+                            server_speaker_proc,
+                            tts_interrupted,
+                        )
+                        if tts_interrupted:
+                            playback_data = {
+                                "reason": "barge_in",
+                                "playback": "server",
+                                "turn_id": (
+                                    session._current_turn.get("turn_id")
+                                    if session._current_turn
+                                    else len(session.turns) + 1
+                                ),
+                            }
+                            session.timeline.add_event(
+                                "tts_playback_stopped",
+                                Lane.AUDIO,
+                                data=playback_data,
+                                timestamp=playback_stop_ts,
+                            )
+                            await send_event({
+                                "event_type": "tts_playback_stopped",
+                                "lane": "audio",
+                                "data": playback_data,
+                                "timestamp": playback_stop_ts,
+                            })
                     barge_in.finish_tts()
+                    barge_in_cancel_requested_at = None
 
                 if tts_interrupted:
                     logger.info("[barge_in] TTS stopped; processing queued utterance")
@@ -2381,33 +2916,151 @@ async def _run_voice_pipeline(
     system_stats_task: Optional[asyncio.Task] = None
 
     async def _system_stats_loop() -> None:
-        """Send CPU/GPU at 10 Hz over WebSocket and append to session.system_stats for save."""
+        """Send CPU/GPU samples from the cheapest supported 10 Hz source."""
         loop = asyncio.get_event_loop()
-        interval = 0.1
-        while not stopped.is_set():
-            try:
-                await asyncio.sleep(interval)
-            except asyncio.CancelledError:
-                break
-            if stopped.is_set():
-                break
-            if session.timeline.start_time is None:
-                continue
-            try:
-                stats = await loop.run_in_executor(None, system_stats_module.gather_system_stats)
-            except Exception as e:
-                logger.debug("System stats gather failed: %s", e)
-                continue
+        interval = system_stats_module.SYSTEM_STATS_INTERVAL_MS / 1000.0
+        fallback_interval = (
+            system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS / 1000.0
+        )
+
+        async def emit_sample(cpu: Optional[float], gpu: Optional[float]) -> None:
             t = time.time() - session.timeline.start_time
-            cpu = stats.get("cpu_percent")
-            gpu = stats.get("gpu_percent")
+            stats = {"cpu_percent": cpu, "gpu_percent": gpu}
+            system_stats_module.set_system_stats_cache(stats)
             session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
             try:
-                await ws.send_str(
-                    json.dumps({"type": "system_stats", "timestamp": t, "cpu_percent": cpu, "gpu_percent": gpu})
-                )
+                await ws.send_str(json.dumps({
+                    "type": "system_stats",
+                    "timestamp": t,
+                    "cpu_percent": cpu,
+                    "gpu_percent": gpu,
+                }))
             except Exception as e:
                 logger.debug("Send system_stats failed: %s", e)
+
+        async def sleep_until(deadline: float) -> None:
+            await asyncio.sleep(max(0.0, deadline - loop.time()))
+
+        async def run_sysfs_sampler(path: Path) -> bool:
+            """Read Orin's cheap nvgpu load counter on a fixed 10 Hz grid."""
+            deadline = loop.time()
+            while not stopped.is_set():
+                gpu = system_stats_module.read_jetson_sysfs_gpu_percent(path)
+                if gpu is None:
+                    logger.warning("Jetson GPU load counter became unreadable: %s", path)
+                    return False
+                await emit_sample(
+                    system_stats_module.read_cpu_percent_nonblocking(),
+                    gpu,
+                )
+                deadline = system_stats_module.next_periodic_deadline(
+                    deadline,
+                    loop.time(),
+                    interval,
+                )
+                await sleep_until(deadline)
+            return True
+
+        async def run_nvidia_smi_stream() -> bool:
+            """Consume one persistent nvidia-smi process; return False on failure."""
+            process: Optional[asyncio.subprocess.Process] = None
+            stream_failed = False
+            last_stream_emit = 0.0
+            pending_gpu_peak: Optional[float] = None
+            try:
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *system_stats_module.nvidia_smi_loop_command(),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    while not stopped.is_set():
+                        line = await asyncio.wait_for(
+                            process.stdout.readline(),
+                            timeout=max(0.5, interval * 4),
+                        )
+                        if not line:
+                            stream_failed = True
+                            break
+                        gpu = system_stats_module.parse_nvidia_smi_gpu_percent(line)
+                        if gpu is None:
+                            stream_failed = True
+                            break
+                        pending_gpu_peak = (
+                            gpu
+                            if pending_gpu_peak is None
+                            else max(pending_gpu_peak, gpu)
+                        )
+                        now = loop.time()
+                        # Some drivers flush several buffered lines together.
+                        # Coalesce such bursts while retaining their GPU peak.
+                        if not system_stats_module.stream_sample_is_due(
+                            now,
+                            last_stream_emit,
+                            interval,
+                        ):
+                            continue
+                        await emit_sample(
+                            system_stats_module.read_cpu_percent_nonblocking(),
+                            pending_gpu_peak,
+                        )
+                        pending_gpu_peak = None
+                        last_stream_emit = now
+                except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
+                    logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
+                    stream_failed = True
+            finally:
+                if process is not None and process.returncode is None:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                        await process.wait()
+            return not stream_failed
+
+        async def run_subprocess_fallback() -> None:
+            """Keep CPU at 10 Hz and query GPU at 4 Hz without timer drift."""
+            emit_deadline = loop.time()
+            gpu_deadline = loop.time()
+            while not stopped.is_set():
+                now = loop.time()
+                gpu_sample = None
+                if now >= gpu_deadline:
+                    gpu_sample = await loop.run_in_executor(
+                        None,
+                        system_stats_module.read_nvidia_smi_gpu_percent_after_stream_failure,
+                    )
+                    gpu_deadline = system_stats_module.next_periodic_deadline(
+                        gpu_deadline,
+                        loop.time(),
+                        fallback_interval,
+                    )
+                await emit_sample(
+                    system_stats_module.read_cpu_percent_nonblocking(),
+                    gpu_sample,
+                )
+                emit_deadline = system_stats_module.next_periodic_deadline(
+                    emit_deadline,
+                    loop.time(),
+                    interval,
+                )
+                await sleep_until(emit_deadline)
+
+        sysfs_path = system_stats_module.find_jetson_sysfs_gpu_load_path()
+        if sysfs_path is not None:
+            logger.info("GPU telemetry source: sysfs %s at 10 Hz", sysfs_path)
+            completed = await run_sysfs_sampler(sysfs_path)
+            if completed or stopped.is_set():
+                return
+
+        logger.info("GPU telemetry source: persistent nvidia-smi at 10 Hz")
+        completed = await run_nvidia_smi_stream()
+        if completed or stopped.is_set():
+            return
+
+        logger.warning("GPU telemetry source: one-shot nvidia-smi fallback at 4 Hz")
+        await run_subprocess_fallback()
 
     # Wait for client to send start_session (both mics); then start ASR stream and turn executor
     await asyncio.wait(
