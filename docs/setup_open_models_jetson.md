@@ -44,7 +44,7 @@ The qualified model versions are:
 | Stage | Model |
 |---|---|
 | ASR | `nvidia/nemotron-3.5-asr-streaming-0.6b` |
-| LLM | `Qwen/Qwen3-4B`, vLLM 0.25.0 |
+| LLM | `Qwen/Qwen3-4B-Instruct-2507`, revision `cdbee75f17c01a7cc42f958dc650907174af0554`, vLLM 0.25.0 |
 | TTS | `nvidia/magpie_tts_multilingual_357m`, revision `v2607` |
 
 ## 1. Build
@@ -125,7 +125,7 @@ LLM:
 curl http://localhost:8000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "Qwen/Qwen3-4B",
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
     "messages": [{"role": "user", "content": "Introduce yourself in one sentence."}],
     "max_tokens": 64
   }'
