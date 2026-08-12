@@ -364,6 +364,8 @@ class AppConfig:
     Rendering limits are handled by the UI layer, not data collection.
     """
     barge_in_enabled: bool = True
+    barge_in_trigger: Literal["final", "partial"] = "final"
+    barge_in_partial_count: int = 3
     timeline_position: Literal["right", "bottom", "hidden"] = "right"
     session_auto_save: bool = True
     session_output_dir: str = "./sessions"
@@ -377,7 +379,8 @@ class AppConfig:
             List of warning messages
         """
         warnings = []
-        # No validation needed for current fields
+        if not 1 <= self.barge_in_partial_count <= 20:
+            warnings.append("Barge-in partial count must be between 1 and 20")
         return warnings
 
 
