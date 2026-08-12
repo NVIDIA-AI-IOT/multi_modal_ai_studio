@@ -672,6 +672,7 @@ const defaultConfig = {
         interim_results: true,
         realtime_transport: 'websocket',
         realtime_session_type: 'transcription',
+        realtime_api_style: 'openai-ga',
         realtime_url: 'wss://api.openai.com/v1/realtime',
         api_key: ''
     },
@@ -1312,7 +1313,7 @@ function renderASRConfig(config, readonly = false) {
                         onclick="updateConfig('asr', 'backend', 'openai-rest')">OpenAI<br>REST API</button>
                 <button type="button" class="backend-tab speech-api-tab ${config.backend === 'openai-realtime' ? 'active' : ''}"
                         ${disabled}
-                        onclick="updateConfig('asr', 'backend', 'openai-realtime')">OpenAI<br>Realtime API</button>
+                        onclick="updateConfig('asr', 'backend', 'openai-realtime')">Realtime<br>API</button>
             </div>
 
             <!-- Riva Settings (Live RIVA WebUI format) -->
@@ -1498,6 +1499,15 @@ function renderASRConfig(config, readonly = false) {
                     <input type="text" ${disabled} id="asr-realtime-model" value="${config.model || 'gpt-realtime'}"
                            onchange="updateConfig('asr', 'model', this.value)">
                     ${!readonly ? '<span class="input-hint">e.g. gpt-realtime, gpt-4o-realtime-preview</span>' : ''}
+                </div>
+
+                <div class="form-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' ? 'block' : 'none'};">
+                    <label>API wire format</label>
+                    <select ${disabled} onchange="updateConfig('asr', 'realtime_api_style', this.value)">
+                        <option value="openai-ga" ${(config.realtime_api_style || 'openai-ga') === 'openai-ga' ? 'selected' : ''}>OpenAI Realtime GA</option>
+                        <option value="openai-beta" ${config.realtime_api_style === 'openai-beta' ? 'selected' : ''}>OpenAI Realtime beta compatible</option>
+                    </select>
+                    <div class="input-hint">Use GA for current OpenAI-compatible services. Beta compatibility supports Speaches 0.8.x and other preview-schema servers.</div>
                 </div>
 
                 <div class="form-group" id="asr-realtime-api-key-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' && (config.realtime_url || '').indexOf('openai.com') !== -1 ? 'block' : 'none'};">
@@ -7426,16 +7436,22 @@ function handleVoiceWsClose(ev) {
 function startSessionRecording() {
     if (state.sessionState !== 'setup') return;
 
-    // Realtime ASR with non-Realtime TTS is not supported; fail fast with a clear message
+    // Full voice uses response audio from the same Realtime session. Transcript
+    // mode instead participates in the classic cascade and uses REST/Riva TTS.
     var asrRealtime = (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime');
     var ttsRealtime = (currentConfig.tts.backend === 'openai-realtime' || currentConfig.tts.scheme === 'openai-realtime');
-    if (asrRealtime && !ttsRealtime) {
+    var realtimeFullVoice = asrRealtime && (currentConfig.asr.realtime_session_type || 'transcription') === 'full';
+    var invalidRealtimePair = (realtimeFullVoice && !ttsRealtime) || (asrRealtime && !realtimeFullVoice && ttsRealtime);
+    if (invalidRealtimePair) {
+        var realtimePairMessage = realtimeFullVoice
+            ? 'Full voice Realtime requires Realtime response audio.'
+            : 'Realtime transcription uses the classic cascade. Select Riva or OpenAI REST TTS.';
         var chatEl = document.getElementById('chat-history');
         if (chatEl) {
-            chatEl.innerHTML = '<div class="empty-state"><p class="error">OpenAI Realtime ASR with Riva TTS is not supported. Use <strong>Full voice</strong> (ASR + TTS Realtime) or set ASR to NVIDIA RIVA.</p></div>';
+            chatEl.innerHTML = '<div class="empty-state"><p class="error">' + escapeHtml(realtimePairMessage) + '</p></div>';
             if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
         } else {
-            alert('OpenAI Realtime ASR with Riva TTS is not supported. Use Full voice (ASR + TTS Realtime) or set ASR to NVIDIA RIVA.');
+            alert(realtimePairMessage);
         }
         return;
     }

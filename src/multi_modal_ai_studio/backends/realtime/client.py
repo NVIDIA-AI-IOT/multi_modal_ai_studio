@@ -16,8 +16,8 @@ import base64
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Optional
-from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
+from typing import Any, AsyncIterator, Dict, List, Literal, Optional
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import aiohttp
 
@@ -35,7 +35,9 @@ DISABLE_TURN_DETECTION = object()
 class RealtimeEvent:
     """One event from the Realtime stream for the pipeline to handle."""
 
-    kind: str  # "audio" | "transcript_delta" | "transcript_completed" | "response_done" | "error"
+    # Includes session state, input speech/transcription, response audio,
+    # response transcription, completion, warning, and error events.
+    kind: str
     # For kind=="audio":
     audio: Optional[bytes] = None
     sample_rate: int = REALTIME_SAMPLE_RATE
@@ -44,6 +46,8 @@ class RealtimeEvent:
     is_final: bool = False
     # For kind=="error":
     message: Optional[str] = None
+    # Correlates transcription events belonging to the same conversation item.
+    item_id: Optional[str] = None
     # Optional raw payload for debugging
     raw: Optional[Dict[str, Any]] = None
 
@@ -69,9 +73,12 @@ class OpenAIRealtimeClient:
         input_audio_format: str = "pcm16",
         output_audio_format: str = "pcm16",
         input_audio_transcription: Optional[Dict[str, Any]] = None,
-        turn_detection: Any = None,  # None=omit (server default), DISABLE_TURN_DETECTION=null, dict=config
+        # None=omit (server default), sentinel=null, dict=explicit config.
+        turn_detection: Any = None,
         input_audio_sample_rate: int = REALTIME_SAMPLE_RATE,
         output_audio_sample_rate: int = REALTIME_SAMPLE_RATE,
+        session_type: Literal["realtime", "transcription"] = "realtime",
+        api_style: Literal["openai-ga", "openai-beta"] = "openai-ga",
         log_all_events: bool = False,
     ):
         self.url = url.rstrip("/")
@@ -85,6 +92,8 @@ class OpenAIRealtimeClient:
         self.turn_detection = turn_detection
         self.input_audio_sample_rate = input_audio_sample_rate
         self.output_audio_sample_rate = output_audio_sample_rate
+        self.session_type = session_type
+        self.api_style = api_style
         self._log_all_events = log_all_events
 
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
@@ -123,17 +132,51 @@ class OpenAIRealtimeClient:
         logger.info("Realtime WebSocket connected to %s", connect_url)
 
     async def _send_session_update(self) -> None:
-        """Send session.update. Only include fields the API accepts."""
-        # Many session fields are not accepted in session.update. Model is in URL.
-        # Top-level input_audio_transcription is rejected; use audio.input.transcription (Realtime API docs).
-        session: Dict[str, Any] = {
-            "type": "realtime",
-            "instructions": self.instructions,
-        }
-        if self.input_audio_transcription is not None:
-            session.setdefault("audio", {})["input"] = {
-                "transcription": self.input_audio_transcription,
+        """Send an OpenAI GA or legacy beta-compatible ``session.update``."""
+        if self.api_style == "openai-beta":
+            # Speaches 0.8.x and older Realtime-compatible servers implement
+            # the preview schema. Keep this isolated from the GA wire format.
+            # PCM16 is the preview schema default. Omit its optional format
+            # fields because several compatible providers expose them as
+            # read-only session properties.
+            session: Dict[str, Any] = {}
+            if self.session_type == "realtime":
+                session.update({
+                    "modalities": ["text", "audio"],
+                    "instructions": self.instructions,
+                    "voice": self.voice,
+                })
+            if self.input_audio_transcription is not None:
+                session["input_audio_transcription"] = self.input_audio_transcription
+            if self.turn_detection is DISABLE_TURN_DETECTION:
+                session["turn_detection"] = None
+            elif isinstance(self.turn_detection, dict):
+                session["turn_detection"] = self.turn_detection
+        else:
+            session = {"type": self.session_type}
+            if self.session_type == "realtime":
+                session["instructions"] = self.instructions
+            audio_input: Dict[str, Any] = {
+                "format": {
+                    "type": "audio/pcm",
+                    "rate": self.input_audio_sample_rate,
+                }
             }
+            if self.input_audio_transcription is not None:
+                audio_input["transcription"] = self.input_audio_transcription
+            if self.turn_detection is DISABLE_TURN_DETECTION:
+                audio_input["turn_detection"] = None
+            elif isinstance(self.turn_detection, dict):
+                audio_input["turn_detection"] = self.turn_detection
+            session["audio"] = {"input": audio_input}
+            if self.session_type == "realtime":
+                session["audio"]["output"] = {
+                    "format": {
+                        "type": "audio/pcm",
+                        "rate": self.output_audio_sample_rate,
+                    },
+                    "voice": self.voice,
+                }
         msg = {"type": "session.update", "session": session}
         await self._send_json(msg)
         logger.info("Sent session.update (session keys: %s)", list(session.keys()))
@@ -144,15 +187,53 @@ class OpenAIRealtimeClient:
         await self._ws.send_str(json.dumps(obj))
 
     async def send_audio(self, pcm_bytes: bytes) -> None:
-        """Append PCM bytes to the input audio buffer. Must be in session input format (e.g. pcm16 24kHz)."""
+        """Append PCM bytes in the configured session input format."""
         if self._ws is None or self._ws.closed:
             raise RuntimeError("Realtime WebSocket not connected")
         b64 = base64.b64encode(pcm_bytes).decode("ascii")
         await self._ws.send_str(json.dumps({"type": "input_audio_buffer.append", "audio": b64}))
 
     async def commit_audio(self) -> None:
-        """Commit the input audio buffer so the server processes it (creates user message, triggers response)."""
+        """Commit the input audio buffer for provider-side processing."""
         await self._send_json({"type": "input_audio_buffer.commit"})
+
+    async def send_text(self, text: str, *, role: str = "user") -> None:
+        """Add a text conversation item to a full Realtime session."""
+        await self._send_json({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": role,
+                "content": [{"type": "input_text", "text": text}],
+            },
+        })
+
+    async def create_response(
+        self,
+        *,
+        modalities: Optional[List[str]] = None,
+        instructions: Optional[str] = None,
+    ) -> None:
+        """Request a response, including streaming audio when requested.
+
+        This is a provider-neutral response-audio boundary. It does not imply
+        exact-text TTS semantics; exact synthesis remains ``/v1/audio/speech``.
+        """
+        response: Dict[str, Any] = {}
+        if modalities:
+            response[
+                "modalities" if self.api_style == "openai-beta" else "output_modalities"
+            ] = modalities
+        if instructions:
+            response["instructions"] = instructions
+        await self._send_json({"type": "response.create", "response": response})
+
+    async def cancel_response(self, response_id: Optional[str] = None) -> None:
+        """Cancel the active response when supported by the provider."""
+        message: Dict[str, Any] = {"type": "response.cancel"}
+        if response_id:
+            message["response_id"] = response_id
+        await self._send_json(message)
 
     async def _receive_loop(self) -> None:
         """Read WebSocket messages and push RealtimeEvent into _event_queue."""
@@ -177,15 +258,51 @@ class OpenAIRealtimeClient:
                         elif event_type == "error":
                             err = data.get("error", {})
                             message = err.get("message", str(data))
-                            await self._event_queue.put(
-                                RealtimeEvent(kind="error", message=message, raw=data)
-                            )
+                            # Speaches 0.8.x requires the preview VAD object to
+                            # contain prefix_padding_ms, then reports that same
+                            # property as read-only while applying the rest of
+                            # the update. Treat that self-contradictory notice
+                            # as a session warning, not an ASR failure.
+                            if (
+                                self.api_style == "openai-beta"
+                                and "session.turn_detection.prefix_padding_ms"
+                                in message
+                                and "not supported" in message
+                            ):
+                                logger.warning("Realtime session warning: %s", message)
+                                await self._event_queue.put(
+                                    RealtimeEvent(
+                                        kind="session_warning",
+                                        message=message,
+                                        raw=data,
+                                    )
+                                )
+                            else:
+                                await self._event_queue.put(
+                                    RealtimeEvent(kind="error", message=message, raw=data)
+                                )
                         elif event_type == "response.done":
                             if self._log_all_events:
                                 status = data.get("response", {}).get("status", data.get("status"))
                                 logger.info("Realtime response.done: status=%s", status)
                             await self._event_queue.put(
                                 RealtimeEvent(kind="response_done", raw=data)
+                            )
+                        elif event_type == "input_audio_buffer.speech_started":
+                            await self._event_queue.put(
+                                RealtimeEvent(
+                                    kind="speech_started",
+                                    item_id=data.get("item_id"),
+                                    raw=data,
+                                )
+                            )
+                        elif event_type == "input_audio_buffer.speech_stopped":
+                            await self._event_queue.put(
+                                RealtimeEvent(
+                                    kind="speech_stopped",
+                                    item_id=data.get("item_id"),
+                                    raw=data,
+                                )
                             )
                         elif event_type in ("response.output_audio.delta", "response.audio.delta"):
                             delta_b64 = data.get("delta")
@@ -197,6 +314,7 @@ class OpenAIRealtimeClient:
                                             kind="audio",
                                             audio=audio_bytes,
                                             sample_rate=self.output_audio_sample_rate,
+                                            item_id=data.get("item_id"),
                                             raw=data,
                                         )
                                     )
@@ -208,34 +326,56 @@ class OpenAIRealtimeClient:
                                             raw=data,
                                         )
                                     )
+                        elif event_type in ("response.output_audio.done", "response.audio.done"):
+                            await self._event_queue.put(
+                                RealtimeEvent(
+                                    kind="audio_done",
+                                    item_id=data.get("item_id"),
+                                    raw=data,
+                                )
+                            )
                         elif event_type == "conversation.item.input_audio_transcription.delta":
                             raw_delta = data.get("delta")
-                            delta = (raw_delta if isinstance(raw_delta, str) else str(raw_delta or "")).strip()
-                            if delta:
+                            delta = (
+                                raw_delta
+                                if isinstance(raw_delta, str)
+                                else str(raw_delta or "")
+                            )
+                            if delta.strip():
                                 await self._event_queue.put(
                                     RealtimeEvent(
                                         kind="transcript_delta",
                                         text=delta,
                                         is_final=False,
+                                        item_id=data.get("item_id"),
                                         raw=data,
                                     )
                                 )
                         elif event_type == "conversation.item.input_audio_transcription.completed":
                             raw_transcript = data.get("transcript")
-                            transcript = (raw_transcript if isinstance(raw_transcript, str) else str(raw_transcript or "")).strip()
+                            transcript = (
+                                raw_transcript
+                                if isinstance(raw_transcript, str)
+                                else str(raw_transcript or "")
+                            ).strip()
                             if transcript:
                                 await self._event_queue.put(
                                     RealtimeEvent(
                                         kind="transcript_completed",
                                         text=transcript,
                                         is_final=True,
+                                        item_id=data.get("item_id"),
                                         raw=data,
                                     )
                                 )
                         elif event_type == "response.output_audio_transcript.delta":
                             raw_delta = data.get("delta")
-                            delta = (raw_delta if isinstance(raw_delta, str) else str(raw_delta or "")).strip()
-                            if delta:
+                            delta = (
+                                raw_delta
+                                if isinstance(raw_delta, str)
+                                else str(raw_delta or "")
+                            )
+                            if delta.strip():
                                 await self._event_queue.put(
                                     RealtimeEvent(
                                         kind="output_transcript_delta",
@@ -252,9 +392,16 @@ class OpenAIRealtimeClient:
                             item = data.get("item") or {}
                             if item.get("role") == "assistant":
                                 for part in (item.get("content") or []):
-                                    if isinstance(part, dict) and part.get("type") == "output_audio":
+                                    if (
+                                        isinstance(part, dict)
+                                        and part.get("type") == "output_audio"
+                                    ):
                                         raw_t = part.get("transcript")
-                                        transcript = (raw_t if isinstance(raw_t, str) else str(raw_t or "")).strip()
+                                        transcript = (
+                                            raw_t
+                                            if isinstance(raw_t, str)
+                                            else str(raw_t or "")
+                                        ).strip()
                                         if transcript:
                                             await self._event_queue.put(
                                                 RealtimeEvent(

@@ -64,6 +64,7 @@ from multi_modal_ai_studio.core.timeline import Lane
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.backends.asr.energy_vad import EnergyVADObserver
+from multi_modal_ai_studio.backends.asr.openai_realtime import OpenAIRealtimeASRBackend
 from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
@@ -384,6 +385,8 @@ def _normalize_frontend_config(payload: Dict[str, Any]) -> Dict[str, Any]:
                 asr["realtime_transport"] = "websocket"
             if not asr.get("realtime_session_type"):
                 asr["realtime_session_type"] = "full"
+            if not asr.get("realtime_api_style"):
+                asr["realtime_api_style"] = "openai-ga"
         data["asr"] = asr
     if "tts" in data:
         tts = dict(data["tts"])
@@ -596,6 +599,8 @@ async def _run_realtime_loop(
         voice=voice,
         turn_detection=turn_detection,
         input_audio_transcription=input_transcription,
+        session_type="realtime",
+        api_style=asr_config.realtime_api_style,
     )
     # Keep Browser WebRTC and Server USB capture on the same lifecycle:
     # preview first, then feed the Realtime backend only after start_session.
@@ -1202,7 +1207,7 @@ async def _run_voice_pipeline(
             return None
 
     # Classic cascade: independently selectable ASR -> OpenAI-compatible LLM -> TTS.
-    supported_asr = {"riva", "openai-rest"}
+    supported_asr = {"riva", "openai-rest", "openai-realtime"}
     supported_tts = {"riva", "openai-rest"}
     if asr_config.scheme not in supported_asr or tts_config.scheme not in supported_tts:
         await ws.send_str(
@@ -1211,7 +1216,8 @@ async def _run_voice_pipeline(
                     "type": "error",
                     "error": (
                         "Cascade pipeline supports ASR/TTS schemes "
-                        "'riva' and 'openai-rest'"
+                        "'riva', 'openai-rest', and transcription-mode "
+                        "'openai-realtime'"
                     ),
                 }
             )
@@ -1232,6 +1238,28 @@ async def _run_voice_pipeline(
         )
         _release_server_capture()
         return None
+    if asr_config.scheme == "openai-realtime":
+        if asr_config.realtime_session_type != "transcription":
+            await ws.send_str(json.dumps({
+                "type": "error",
+                "error": "Cascade Realtime ASR requires transcript-only mode",
+            }))
+            _release_server_capture()
+            return None
+        if asr_config.realtime_transport != "websocket":
+            await ws.send_str(json.dumps({
+                "type": "error",
+                "error": "Cascade Realtime ASR currently requires WebSocket",
+            }))
+            _release_server_capture()
+            return None
+        if not (asr_config.realtime_url or asr_config.api_base):
+            await ws.send_str(json.dumps({
+                "type": "error",
+                "error": "OpenAI Realtime ASR realtime_url required",
+            }))
+            _release_server_capture()
+            return None
     if tts_config.scheme == "openai-rest" and not tts_config.api_base:
         await ws.send_str(
             json.dumps({"type": "error", "error": "OpenAI REST TTS api_base required"})
@@ -1246,8 +1274,13 @@ async def _run_voice_pipeline(
     try:
         if asr_config.scheme == "riva":
             asr = RivaASRBackend(config=asr_config, timeline=session.timeline)
-        else:
+        elif asr_config.scheme == "openai-rest":
             asr = OpenAIRestASRBackend(config=asr_config, timeline=session.timeline)
+        else:
+            asr = OpenAIRealtimeASRBackend(
+                config=asr_config,
+                timeline=session.timeline,
+            )
         llm = OpenAILLMBackend(config=llm_config)
         if tts_config.scheme == "riva":
             tts = RivaTTSBackend(config=tts_config, timeline=session.timeline)
@@ -1273,6 +1306,11 @@ async def _run_voice_pipeline(
 
     # ASR starts only after client sends start_session (both mics). Avoids Riva timeout during preview and keeps logic identical.
     asr_stream_started = False
+    # Browser audio can follow start_session in the very next WebSocket frame,
+    # before the backend connection coroutine has completed. Preserve up to one
+    # second so the beginning of the first utterance is never discarded.
+    pending_asr_audio = bytearray()
+    pending_asr_audio_limit = 16000 * 2
     conversation_history = []
     stopped = asyncio.Event()
     finals_queue: asyncio.Queue = asyncio.Queue()
@@ -1560,7 +1598,13 @@ async def _run_voice_pipeline(
             return (last_amplitude_time, False, 0.0, 0.0)
         now = time.time() - session.timeline.start_time
         if not mic_muted:
-            accepted = await _send_asr_audio(pcm_bytes)
+            if not asr_stream_started:
+                pending_asr_audio.extend(pcm_bytes)
+                if len(pending_asr_audio) > pending_asr_audio_limit:
+                    del pending_asr_audio[:-pending_asr_audio_limit]
+                accepted = True
+            else:
+                accepted = await _send_asr_audio(pcm_bytes)
             if not accepted and not getattr(_feed_pcm_to_pipeline, "_warned_dead_stream", False):
                 _feed_pcm_to_pipeline._warned_dead_stream = True
                 logger.warning("[asr] send_audio dropped — ASR stream not active (waiting for auto-restart)")
@@ -1851,6 +1895,35 @@ async def _run_voice_pipeline(
                     })
                     continue
 
+                control_event = result_metadata.get("control_event")
+                if control_event in {"vad_start", "vad_end"}:
+                    control_ts = result_metadata.get("event_timestamp")
+                    if control_ts is None:
+                        control_ts = (
+                            time.time() - session.timeline.start_time
+                            if session.timeline.start_time
+                            else 0
+                        )
+                    control_data = {
+                        "source": "openai-realtime",
+                        "backend": result_metadata.get("backend"),
+                        "model": result_metadata.get("model"),
+                        "item_id": result_metadata.get("item_id"),
+                    }
+                    session.timeline.add_event(
+                        control_event,
+                        Lane.SPEECH,
+                        data=control_data,
+                        timestamp=control_ts,
+                    )
+                    await send_event({
+                        "event_type": control_event,
+                        "lane": "speech",
+                        "data": control_data,
+                        "timestamp": control_ts,
+                    })
+                    continue
+
                 asr_received_count += 1
                 if asr_received_count == 1:
                     logger.info("[asr] First result received: is_final=%s text=%r", getattr(result, "is_final", True), (result.text or "").strip()[:80])
@@ -1890,6 +1963,7 @@ async def _run_voice_pipeline(
                 result_end = getattr(result, "end_time", None)
                 if (
                     is_final
+                    and asr_config.scheme == "openai-rest"
                     and result_start is not None
                     and result_end is not None
                     and result_end >= result_start
@@ -3070,6 +3144,10 @@ async def _run_voice_pipeline(
     if not stopped.is_set():
         session.system_stats = []
         await asr.start_stream()
+        asr_stream_started = True
+        if pending_asr_audio:
+            await _send_asr_audio(bytes(pending_asr_audio))
+            pending_asr_audio.clear()
         asr_task = asyncio.create_task(asr_consumer())
         turn_task = asyncio.create_task(turn_executor())
         system_stats_task = asyncio.create_task(_system_stats_loop())

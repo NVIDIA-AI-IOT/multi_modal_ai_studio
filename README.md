@@ -135,6 +135,7 @@ python -m multi_modal_ai_studio --mode headless \
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
 | [Open Models on Jetson](docs/setup_open_models_jetson.md) | Public Nemotron ASR + LLM + Magpie TTS |
 | [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
+| [Realtime Speech](docs/realtime_speech.md) | Realtime transcription, response audio, and Speaches reference setup |
 | [Riva Setup](docs/setup_riva.md) | NVIDIA Riva ASR/TTS (Jetson/ARM64) |
 | [VLM Guide](docs/vlm_guide.md) | Vision-language models, frame capture, tuning |
 | [Architecture](docs/architecture.md) | System design and components |
