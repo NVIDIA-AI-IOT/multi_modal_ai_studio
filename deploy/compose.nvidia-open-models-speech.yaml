@@ -11,7 +11,7 @@ services:
       dockerfile: Dockerfile.asr
       args:
         BASE_IMAGE: "${SPEECH_BASE_IMAGE:-nvcr.io/nvidia/pytorch:26.06-py3}"
-    image: mmas/nemotron-asr-openai:0.1.0
+    image: "mmas/nemotron-asr-openai:${SPEECH_SERVICE_VERSION:-0.2.0}"
     runtime: nvidia
     network_mode: host
     environment:
@@ -19,6 +19,7 @@ services:
       SPEECH_PORT: "8081"
       SPEECH_EAGER_LOAD: "${SPEECH_EAGER_LOAD:-1}"
       SPEECH_MODEL_REVISION: "${ASR_REVISION:-f3d333391852ba876df169dcc9ba902d25b6ab0b}"
+      SPEECH_REALTIME_LOOKAHEAD_TOKENS: "${SPEECH_REALTIME_LOOKAHEAD_TOKENS:-3}"
       HF_HOME: /models/huggingface
       HF_TOKEN: "${HF_TOKEN:-}"
     volumes:
@@ -65,7 +66,7 @@ services:
       args:
         BASE_IMAGE: "${SPEECH_BASE_IMAGE:-nvcr.io/nvidia/pytorch:26.06-py3}"
         NEMO_REF: "${TTS_NEMO_REF:-2639d4bef8d1450782263a8f616242acfb6fecb9}"
-    image: mmas/magpie-tts-openai:0.1.0
+    image: "mmas/magpie-tts-openai:${SPEECH_SERVICE_VERSION:-0.2.0}"
     runtime: nvidia
     network_mode: host
     environment:

@@ -68,9 +68,26 @@ python scripts/test_realtime_transcription.py sample.wav \
 For an OpenAI GA-compatible service, select `--api-style openai-ga` and put its
 credential in `OPENAI_API_KEY`.
 
-## Planned NVIDIA Open Speech integration
+## NVIDIA Open Speech Realtime ASR
 
-The next layer is a separate speech service that presents this same Realtime
-transcription contract for Nemotron/Parakeet and streaming response-audio or
-TTS contracts for Magpie. MMAS will only need endpoint, model, language, and
-wire-format configuration changes when that service is introduced.
+The bundled NVIDIA Open Speech service now presents this Realtime transcription
+contract for `nvidia/nemotron-3.5-asr-streaming-0.6b`:
+
+```bash
+python scripts/test_realtime_transcription.py sample.wav \
+  --url 'ws://127.0.0.1:8081/v1/realtime' \
+  --api-style openai-ga \
+  --model nvidia/nemotron-3.5-asr-streaming-0.6b \
+  --language en-US
+```
+
+Unlike a cumulative-window adapter, this service uses the model's native
+cache-aware feature generator and RNNT token streamer. It emits
+`speech_started`, transcript `delta`, `speech_stopped`, and transcription
+`completed` events. The service accepts 16 kHz or 24 kHz mono PCM16 input and
+uses its lightweight energy VAD for server-side utterance boundaries.
+
+Load `presets/nvidia-open-models-realtime-speech-jetson.yaml` to use this ASR
+with the existing OpenAI Chat Completions LLM and Magpie REST TTS stages.
+Realtime response audio and exact-text streaming TTS are separate follow-up
+contracts; this ASR milestone does not claim either one.

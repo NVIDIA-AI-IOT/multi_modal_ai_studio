@@ -183,6 +183,24 @@ async def test_realtime_client_exposes_speech_audio_and_transcription_events():
 
 
 @pytest.mark.asyncio
+async def test_realtime_client_preserves_standalone_whitespace_delta():
+    client = OpenAIRealtimeClient("ws://localhost/realtime", "")
+    client._ws = _IncomingWebSocket([
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item-1",
+            "delta": " ",
+        },
+    ])
+
+    await client._receive_loop()
+    event = await client._event_queue.get()
+
+    assert event.kind == "transcript_delta"
+    assert event.text == " "
+
+
+@pytest.mark.asyncio
 async def test_speaches_read_only_prefix_notice_is_nonfatal():
     client = OpenAIRealtimeClient(
         "ws://localhost/realtime",
@@ -224,7 +242,8 @@ async def test_realtime_asr_accumulates_deltas_and_preserves_vad_boundaries():
     ))
     backend._client = _FakeRealtimeClient([
         RealtimeEvent(kind="speech_started", item_id="item-1"),
-        RealtimeEvent(kind="transcript_delta", text="hello ", item_id="item-1"),
+        RealtimeEvent(kind="transcript_delta", text="hello", item_id="item-1"),
+        RealtimeEvent(kind="transcript_delta", text=" ", item_id="item-1"),
         RealtimeEvent(kind="transcript_delta", text="world", item_id="item-1"),
         RealtimeEvent(kind="speech_stopped", item_id="item-1"),
         RealtimeEvent(
@@ -240,7 +259,7 @@ async def test_realtime_asr_accumulates_deltas_and_preserves_vad_boundaries():
         "vad_start",
         "vad_end",
     ]
-    assert results[1].text == "hello "
+    assert results[1].text == "hello"
     assert results[2].text == "hello world"
     assert results[-1].is_final
     assert results[-1].text == "hello world"

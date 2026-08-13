@@ -183,7 +183,10 @@ class OpenAIRealtimeASRBackend(ASRBackend):
                 delta = event.text or ""
                 cumulative = self._partials.get(item_id, "") + delta
                 self._partials[item_id] = cumulative
-                if cumulative and self.config.interim_results:
+                # Keep whitespace-only deltas in the accumulated text but do
+                # not count them as user-visible partial events (or barge-in
+                # evidence) on their own.
+                if cumulative and delta.strip() and self.config.interim_results:
                     yield ASRResult(
                         text=cumulative,
                         is_final=False,

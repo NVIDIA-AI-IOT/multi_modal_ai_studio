@@ -1,0 +1,59 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+
+name: "NVIDIA Open Models Realtime Speech on Jetson"
+description: "Native streaming Nemotron 3.5 ASR + OpenAI LLM + Magpie TTS"
+app_version: "0.1.0"
+
+asr:
+  scheme: openai-realtime
+  realtime_url: ws://localhost:8081/v1/realtime
+  realtime_transport: websocket
+  realtime_session_type: transcription
+  realtime_api_style: openai-ga
+  model: nvidia/nemotron-3.5-asr-streaming-0.6b
+  language: en-US
+  enable_vad: true
+  interim_results: true
+  vad_start_threshold: 0.4
+  speech_pad_ms: 500
+  speech_timeout_ms: 700
+
+llm:
+  scheme: openai
+  api_base: http://localhost:8000/v1
+  model: Qwen/Qwen3-4B-Instruct-2507
+  temperature: 0.3
+  max_tokens: 256
+  history_turns: 3
+  include_conversation_history: true
+  extra_request_body: '{"chat_template_kwargs": {"enable_thinking": false}}'
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Answer briefly in English.
+    Plain text only, no markdown, no bullet points, no emojis.
+
+tts:
+  scheme: openai-rest
+  api_base: http://localhost:8082/v1
+  model: nvidia/magpie_tts_multilingual_357m
+  language: en-US
+  voice: Sofia
+  sample_rate: 22050
+  speed: 1.0
+  response_format: pcm
+  stream_tts: true
+  tts_chunk_words: 10
+
+devices:
+  video_source: none
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  barge_in_trigger: partial
+  barge_in_partial_count: 3
+  timeline_position: right
+  session_auto_save: true
+  session_output_dir: ./sessions

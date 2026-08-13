@@ -91,6 +91,7 @@ def test_wrong_mode_returns_404() -> None:
 
 def test_asr_revision_is_forwarded_to_transformers(monkeypatch) -> None:
     observed = {}
+    lookaheads = []
 
     class FakeLoader:
         def __init__(self, kind: str):
@@ -100,7 +101,9 @@ def test_asr_revision_is_forwarded_to_transformers(monkeypatch) -> None:
             observed[self.kind] = (model_id, kwargs)
             if self.kind == "model":
                 return SimpleNamespace(eval=lambda: None)
-            return object()
+            return SimpleNamespace(
+                set_num_lookahead_tokens=lookaheads.append,
+            )
 
     monkeypatch.setitem(
         sys.modules,
@@ -123,3 +126,4 @@ def test_asr_revision_is_forwarded_to_transformers(monkeypatch) -> None:
 
     assert observed["processor"] == (ASR_MODEL, {"revision": revision})
     assert observed["model"] == (ASR_MODEL, {"device_map": "auto", "revision": revision})
+    assert lookaheads == [3]
