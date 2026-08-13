@@ -33,7 +33,7 @@ def test_pcm16_mono_wav_is_browser_playable():
         assert wav_file.getnframes() == 160
 
 
-@pytest.mark.parametrize("scheme", ["riva", "openai-rest"])
+@pytest.mark.parametrize("scheme", ["riva", "openai-rest", "openai-realtime"])
 def test_synthesize_tts_preview_collects_chunks_and_closes(monkeypatch, scheme):
     instances = []
 
@@ -53,10 +53,12 @@ def test_synthesize_tts_preview_collects_chunks_and_closes(monkeypatch, scheme):
 
     monkeypatch.setattr(server, "RivaTTSBackend", FakeTTSBackend)
     monkeypatch.setattr(server, "OpenAIRestTTSBackend", FakeTTSBackend)
+    monkeypatch.setattr(server, "OpenAIRealtimeTTSBackend", FakeTTSBackend)
     config = TTSConfig(
         scheme=scheme,
         server="localhost:50051",
         api_base="http://localhost:8082/v1",
+        realtime_url="ws://localhost:8082/v1/realtime",
         sample_rate=24000,
     )
 
@@ -67,9 +69,3 @@ def test_synthesize_tts_preview_collects_chunks_and_closes(monkeypatch, scheme):
         assert wav_file.getnframes() == 120
     assert len(instances) == 1
     assert instances[0].closed is True
-
-
-def test_synthesize_tts_preview_rejects_realtime():
-    config = TTSConfig(scheme="openai-realtime")
-    with pytest.raises(ValueError, match="Realtime voices"):
-        asyncio.run(server._synthesize_tts_preview(config, "Preview sentence."))

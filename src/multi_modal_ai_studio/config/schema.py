@@ -244,6 +244,10 @@ class TTSConfig:
     speed: float = 1.0
     response_format: str = "pcm"
     stream_tts: bool = True
+    # OpenAI Realtime API (when scheme == "openai-realtime")
+    realtime_url: Optional[str] = None
+    realtime_transport: Literal["websocket"] = "websocket"
+    realtime_api_style: Literal["openai-ga", "openai-beta"] = "openai-ga"
     # Speech units buffered before the first TTS request: words in spaced
     # languages, characters in Japanese/Chinese/Korean.
     tts_chunk_words: int = 10
@@ -261,14 +265,22 @@ class TTSConfig:
                 warnings.append("Riva scheme requires server address")
 
         elif self.scheme in ["openai-rest", "openai-realtime"]:
+            endpoint = self.realtime_url or self.api_base
             is_local = bool(
-                self.api_base
-                and any(host in self.api_base for host in ("localhost", "127.0.0.1", "::1"))
+                endpoint
+                and any(host in endpoint for host in ("localhost", "127.0.0.1", "::1"))
             )
             if not self.api_key and not is_local:
                 warnings.append("OpenAI scheme requires API key")
             if not (0.25 <= self.speed <= 4.0):
                 warnings.append("OpenAI speed must be between 0.25 and 4.0")
+            if self.scheme == "openai-realtime":
+                if not endpoint:
+                    warnings.append("Realtime TTS requires realtime_url or api_base")
+                if self.realtime_transport != "websocket":
+                    warnings.append("Realtime TTS currently requires WebSocket")
+                if self.realtime_api_style not in ("openai-ga", "openai-beta"):
+                    warnings.append("Unsupported Realtime API wire format")
 
         elif self.scheme == "elevenlabs":
             if not self.api_key:

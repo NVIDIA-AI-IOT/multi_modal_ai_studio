@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import time
+from contextlib import asynccontextmanager
 from typing import Annotated, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
@@ -20,6 +20,7 @@ from openai_speech.engines import (
     TTSEngine,
 )
 from openai_speech.realtime import RealtimeTranscriptionConnection
+from openai_speech.realtime_tts import RealtimeTTSConnection
 
 
 class SpeechRequest(BaseModel):
@@ -57,7 +58,7 @@ def create_app(
 
     service = FastAPI(
         title=f"MMAS OpenAI-compatible {settings.mode.upper()}",
-        version="0.2.0",
+        version="0.3.0",
         lifespan=lifespan,
     )
 
@@ -124,21 +125,24 @@ def create_app(
         return JSONResponse({"text": text})
 
     @service.websocket("/v1/realtime")
-    async def realtime_transcription(websocket: WebSocket, model: Optional[str] = None):
-        if settings.mode != "asr":
-            await websocket.accept()
-            await websocket.close(code=1008, reason="ASR endpoint is disabled")
-            return
+    async def realtime_speech(websocket: WebSocket, model: Optional[str] = None):
         requested_model = model or settings.model_id
         if requested_model != settings.model_id:
             await websocket.accept()
             await websocket.close(code=1008, reason=f"Unknown model '{requested_model}'")
             return
-        connection = RealtimeTranscriptionConnection(
-            websocket,
-            asr_engine,
-            settings.model_id,
-        )
+        if settings.mode == "asr":
+            connection = RealtimeTranscriptionConnection(
+                websocket,
+                asr_engine,
+                settings.model_id,
+            )
+        else:
+            connection = RealtimeTTSConnection(
+                websocket,
+                tts_engine,
+                settings.model_id,
+            )
         await connection.run()
 
     @service.post("/v1/audio/speech")

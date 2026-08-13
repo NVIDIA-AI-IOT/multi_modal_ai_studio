@@ -48,6 +48,8 @@ class RealtimeEvent:
     message: Optional[str] = None
     # Correlates transcription events belonging to the same conversation item.
     item_id: Optional[str] = None
+    # Correlates output events belonging to the same generated response.
+    response_id: Optional[str] = None
     # Optional raw payload for debugging
     raw: Optional[Dict[str, Any]] = None
 
@@ -197,15 +199,24 @@ class OpenAIRealtimeClient:
         """Commit the input audio buffer for provider-side processing."""
         await self._send_json({"type": "input_audio_buffer.commit"})
 
-    async def send_text(self, text: str, *, role: str = "user") -> None:
+    async def send_text(
+        self,
+        text: str,
+        *,
+        role: str = "user",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Add a text conversation item to a full Realtime session."""
+        item: Dict[str, Any] = {
+            "type": "message",
+            "role": role,
+            "content": [{"type": "input_text", "text": text}],
+        }
+        if metadata:
+            item["metadata"] = metadata
         await self._send_json({
             "type": "conversation.item.create",
-            "item": {
-                "type": "message",
-                "role": role,
-                "content": [{"type": "input_text", "text": text}],
-            },
+            "item": item,
         })
 
     async def create_response(
@@ -216,8 +227,9 @@ class OpenAIRealtimeClient:
     ) -> None:
         """Request a response, including streaming audio when requested.
 
-        This is a provider-neutral response-audio boundary. It does not imply
-        exact-text TTS semantics; exact synthesis remains ``/v1/audio/speech``.
+        This is a provider-neutral response-audio boundary. Generic Realtime
+        providers may generate a conversational response; NVIDIA's standalone
+        TTS adapter instead speaks the preceding ``input_text`` verbatim.
         """
         response: Dict[str, Any] = {}
         if modalities:
@@ -286,7 +298,11 @@ class OpenAIRealtimeClient:
                                 status = data.get("response", {}).get("status", data.get("status"))
                                 logger.info("Realtime response.done: status=%s", status)
                             await self._event_queue.put(
-                                RealtimeEvent(kind="response_done", raw=data)
+                                RealtimeEvent(
+                                    kind="response_done",
+                                    response_id=(data.get("response") or {}).get("id"),
+                                    raw=data,
+                                )
                             )
                         elif event_type == "input_audio_buffer.speech_started":
                             await self._event_queue.put(
@@ -315,6 +331,7 @@ class OpenAIRealtimeClient:
                                             audio=audio_bytes,
                                             sample_rate=self.output_audio_sample_rate,
                                             item_id=data.get("item_id"),
+                                            response_id=data.get("response_id"),
                                             raw=data,
                                         )
                                     )
@@ -330,7 +347,9 @@ class OpenAIRealtimeClient:
                             await self._event_queue.put(
                                 RealtimeEvent(
                                     kind="audio_done",
+                                    sample_rate=self.output_audio_sample_rate,
                                     item_id=data.get("item_id"),
+                                    response_id=data.get("response_id"),
                                     raw=data,
                                 )
                             )

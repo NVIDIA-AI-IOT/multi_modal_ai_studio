@@ -25,7 +25,7 @@ Implemented endpoints:
 - `GET /v1/models`
 - `POST /v1/audio/transcriptions` in ASR mode
 - `WS /v1/realtime` in ASR mode (OpenAI Realtime GA transcription sessions)
-- `POST /v1/audio/speech` in TTS mode
+- `POST /v1/audio/speech` and `WS /v1/realtime` in TTS mode
 
 The Realtime ASR endpoint uses Nemotron's native cache-aware streaming path.
 It emits VAD speech boundaries, incremental transcript deltas, and a final
@@ -34,8 +34,16 @@ three-token right context corresponds to a 320 ms model chunk. Set
 `SPEECH_REALTIME_LOOKAHEAD_TOKENS` to `0`, `1`, `3`, `6`, or `13` to choose the
 model's 80, 160, 320, 560, or 1120 ms latency/accuracy point.
 
-Magpie remains an exact-text REST speech service in this milestone. A Realtime
-ASR session therefore still feeds MMAS's independent LLM and REST TTS stages.
+Magpie supports exact-text REST and Realtime speech service boundaries. Realtime
+sessions accept a user `input_text` item followed by `response.create`, emit
+`response.output_audio.delta` PCM frames, and accept `response.cancel`. The
+current public Magpie checkpoint still produces a complete waveform internally;
+therefore the first delta follows model completion rather than model-native
+incremental generation. The Realtime boundary nevertheless provides standard
+event framing, exact response correlation, and prompt cancellation of audio
+delivery. Cancellation does not yet interrupt an already-running Magpie model
+call, so the GPU may remain occupied until that internal call returns. The ASR
+session continues to feed MMAS's independent LLM and TTS stages.
 
 ## Local development
 

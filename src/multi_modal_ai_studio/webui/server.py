@@ -36,6 +36,7 @@ from multi_modal_ai_studio.core.session import decode_session_thumbnail
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
+from multi_modal_ai_studio.backends.tts.openai_realtime import OpenAIRealtimeTTSBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend, list_riva_tts_voices_sync
 from multi_modal_ai_studio.devices.local import (
     list_local_cameras,
@@ -320,11 +321,10 @@ async def _synthesize_tts_preview(config: TTSConfig, text: str) -> bytes:
         backend = RivaTTSBackend(config=config)
     elif config.scheme == "openai-rest":
         backend = OpenAIRestTTSBackend(config=config)
+    elif config.scheme == "openai-realtime":
+        backend = OpenAIRealtimeTTSBackend(config=config)
     else:
-        raise ValueError(
-            "Voice preview supports Riva and OpenAI REST TTS; "
-            "Realtime voices belong to the active Realtime session"
-        )
+        raise ValueError("Voice preview requires a configured TTS backend")
 
     audio = bytearray()
     sample_rate = config.sample_rate

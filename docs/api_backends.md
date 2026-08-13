@@ -13,7 +13,8 @@ ASR -> OpenAI-compatible LLM -> TTS
 ```
 
 ASR can use Riva gRPC, an OpenAI-compatible REST service, or a Realtime
-transcription WebSocket. TTS can use Riva gRPC or OpenAI-compatible REST. The
+transcription WebSocket. TTS can use Riva gRPC, OpenAI-compatible REST, or an
+independent exact-text Realtime WebSocket. The
 LLM uses an OpenAI-compatible Chat Completions endpoint.
 
 | Component | MMAS scheme | Required endpoint | Streaming behavior |
@@ -22,6 +23,7 @@ LLM uses an OpenAI-compatible Chat Completions endpoint.
 | ASR | `openai-realtime` (`transcription`) | Realtime WebSocket | Streaming PCM, speech boundaries, partial/final transcripts when provided |
 | LLM | `openai` | `POST /v1/chat/completions` | Server-sent streaming supported |
 | TTS | `openai-rest` | `POST /v1/audio/speech` | Response body is read incrementally when the provider streams it |
+| TTS | `openai-realtime` | Realtime WebSocket | Exact LLM text is sent as an input item; PCM arrives as output-audio deltas and `response.cancel` stops delivery |
 | Full voice | `openai-realtime` (`full`) | OpenAI Realtime WebSocket | Bidirectional audio and events |
 | ASR/TTS | `riva` | Riva gRPC | Native streaming |
 
@@ -37,8 +39,10 @@ asr:
   language: en-US
 
 tts:
-  scheme: openai-rest
-  api_base: http://localhost:8082/v1
+  scheme: openai-realtime
+  realtime_url: ws://localhost:8082/v1/realtime
+  realtime_transport: websocket
+  realtime_api_style: openai-ga
   model: nvidia/magpie_tts_multilingual_357m
   language: en-US
   voice: Sofia
@@ -66,6 +70,12 @@ chunk and calls `codes_to_audio()` once, so its HTTP time-to-first-byte is
 effectively the completion time for that chunk. Smaller text chunks reduce
 time to first audio, but this is phrase-level interleaving rather than
 incremental waveform generation.
+
+The Realtime adapter emits each completed chunk as standard PCM delta events.
+`response.cancel` immediately stops delivery and prevents cancelled audio from
+being associated with a later turn. It does not yet interrupt an already
+running `do_tts()` call, so that call can continue to occupy the GPU until it
+returns.
 
 ## Interoperability boundary
 
