@@ -20,6 +20,7 @@ class Settings:
     device: str = "auto"
     dtype: str = "auto"
     eager_load: bool = False
+    realtime_lookahead_tokens: int = 3
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -28,6 +29,13 @@ class Settings:
         if mode not in {"asr", "tts"}:
             raise ValueError("SPEECH_SERVICE_MODE must be 'asr' or 'tts'")
         default_model = ASR_MODEL if mode == "asr" else TTS_MODEL
+        realtime_lookahead_tokens = int(
+            os.getenv("SPEECH_REALTIME_LOOKAHEAD_TOKENS", "3")
+        )
+        if realtime_lookahead_tokens not in {0, 1, 3, 6, 13}:
+            raise ValueError(
+                "SPEECH_REALTIME_LOOKAHEAD_TOKENS must be one of 0, 1, 3, 6, or 13"
+            )
         return cls(
             mode=mode,
             model_id=os.getenv("SPEECH_MODEL_ID", default_model).strip(),
@@ -35,4 +43,5 @@ class Settings:
             device=os.getenv("SPEECH_DEVICE", "auto").strip(),
             dtype=os.getenv("SPEECH_DTYPE", "auto").strip(),
             eager_load=os.getenv("SPEECH_EAGER_LOAD", "0").lower() in {"1", "true", "yes"},
+            realtime_lookahead_tokens=realtime_lookahead_tokens,
         )

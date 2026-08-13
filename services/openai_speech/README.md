@@ -24,11 +24,18 @@ Implemented endpoints:
 - `GET /health`
 - `GET /v1/models`
 - `POST /v1/audio/transcriptions` in ASR mode
+- `WS /v1/realtime` in ASR mode (OpenAI Realtime GA transcription sessions)
 - `POST /v1/audio/speech` in TTS mode
 
-The first milestone intentionally implements the standard REST endpoints.
-Realtime microphone transcription and barge-in are layered on top in MMAS and
-will use the same engines.
+The Realtime ASR endpoint uses Nemotron's native cache-aware streaming path.
+It emits VAD speech boundaries, incremental transcript deltas, and a final
+transcript without repeatedly transcribing a growing audio file. The default
+three-token right context corresponds to a 320 ms model chunk. Set
+`SPEECH_REALTIME_LOOKAHEAD_TOKENS` to `0`, `1`, `3`, `6`, or `13` to choose the
+model's 80, 160, 320, 560, or 1120 ms latency/accuracy point.
+
+Magpie remains an exact-text REST speech service in this milestone. A Realtime
+ASR session therefore still feeds MMAS's independent LLM and REST TTS stages.
 
 ## Local development
 
@@ -80,6 +87,13 @@ curl http://localhost:8082/v1/audio/speech \
     "language": "en"
   }' \
   --output speech.wav
+
+# Realtime GA transcription through the MMAS provider-contract client
+python ../../scripts/test_realtime_transcription.py sample.wav \
+  --url 'ws://127.0.0.1:8081/v1/realtime' \
+  --api-style openai-ga \
+  --model nvidia/nemotron-3.5-asr-streaming-0.6b \
+  --language en-US
 ```
 
 These examples match the English-first public Jetson smoke test. For P2

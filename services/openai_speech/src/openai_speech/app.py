@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import time
 from typing import Annotated, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,7 @@ from openai_speech.engines import (
     NemotronASREngine,
     TTSEngine,
 )
+from openai_speech.realtime import RealtimeTranscriptionConnection
 
 
 class SpeechRequest(BaseModel):
@@ -56,7 +57,7 @@ def create_app(
 
     service = FastAPI(
         title=f"MMAS OpenAI-compatible {settings.mode.upper()}",
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
@@ -121,6 +122,24 @@ def create_app(
         if response_format == "text":
             return PlainTextResponse(text)
         return JSONResponse({"text": text})
+
+    @service.websocket("/v1/realtime")
+    async def realtime_transcription(websocket: WebSocket, model: Optional[str] = None):
+        if settings.mode != "asr":
+            await websocket.accept()
+            await websocket.close(code=1008, reason="ASR endpoint is disabled")
+            return
+        requested_model = model or settings.model_id
+        if requested_model != settings.model_id:
+            await websocket.accept()
+            await websocket.close(code=1008, reason=f"Unknown model '{requested_model}'")
+            return
+        connection = RealtimeTranscriptionConnection(
+            websocket,
+            asr_engine,
+            settings.model_id,
+        )
+        await connection.run()
 
     @service.post("/v1/audio/speech")
     async def speech(request: SpeechRequest) -> Response:

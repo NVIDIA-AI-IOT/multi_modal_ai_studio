@@ -16,6 +16,7 @@ LLM_IMAGE="${LLM_IMAGE:-vllm/vllm-openai:v0.25.0}"
 ASR_REVISION="${ASR_REVISION:-f3d333391852ba876df169dcc9ba902d25b6ab0b}"
 LLM_REVISION="${LLM_REVISION:-cdbee75f17c01a7cc42f958dc650907174af0554}"
 MAGPIE_REVISION="${MAGPIE_REVISION:-v2607}"
+SPEECH_SERVICE_VERSION="${SPEECH_SERVICE_VERSION:-0.2.0}"
 
 DEFAULT_SPEECH_BASE_IMAGE="nvcr.io/nvidia/pytorch:26.06-py3"
 if [[ -r /etc/nv_tegra_release ]] &&
@@ -37,13 +38,13 @@ build() {
     docker build \
         -f "${SPEECH_DIR}/Dockerfile.asr" \
         --build-arg "BASE_IMAGE=${SPEECH_BASE_IMAGE}" \
-        -t mmas/nemotron-asr-openai:0.1.0 \
+        -t "mmas/nemotron-asr-openai:${SPEECH_SERVICE_VERSION}" \
         "${SPEECH_DIR}"
     docker build \
         -f "${SPEECH_DIR}/Dockerfile.tts" \
         --build-arg "BASE_IMAGE=${SPEECH_BASE_IMAGE}" \
         --build-arg "NEMO_REF=${TTS_NEMO_REF}" \
-        -t mmas/magpie-tts-openai:0.1.0 \
+        -t "mmas/magpie-tts-openai:${SPEECH_SERVICE_VERSION}" \
         "${SPEECH_DIR}"
 }
 
@@ -99,9 +100,10 @@ start() {
         "${hf_token_args[@]}" \
         -e SPEECH_EAGER_LOAD="${SPEECH_EAGER_LOAD:-1}" \
         -e SPEECH_MODEL_REVISION="${ASR_REVISION}" \
+        -e SPEECH_REALTIME_LOOKAHEAD_TOKENS="${SPEECH_REALTIME_LOOKAHEAD_TOKENS:-3}" \
         -e HF_HOME=/models/huggingface \
         -v "${CACHE_VOLUME}:/models/huggingface" \
-        mmas/nemotron-asr-openai:0.1.0
+        "mmas/nemotron-asr-openai:${SPEECH_SERVICE_VERSION}"
 
     replace_container mmas-vllm \
         "${docker_common[@]}" \
@@ -128,7 +130,7 @@ start() {
         -e SPEECH_MODEL_REVISION="${MAGPIE_REVISION}" \
         -e HF_HOME=/models/huggingface \
         -v "${CACHE_VOLUME}:/models/huggingface" \
-        mmas/magpie-tts-openai:0.1.0
+        "mmas/magpie-tts-openai:${SPEECH_SERVICE_VERSION}"
 
     echo "Services started. First model load can take several minutes."
     status

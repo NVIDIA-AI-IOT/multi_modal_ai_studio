@@ -341,7 +341,11 @@ class OpenAIRealtimeClient:
                                 if isinstance(raw_delta, str)
                                 else str(raw_delta or "")
                             )
-                            if delta.strip():
+                            # Token streamers may emit a standalone whitespace
+                            # delta between subword pieces. Preserve it so the
+                            # ASR adapter can build an exact cumulative partial;
+                            # the adapter decides whether it warrants a UI event.
+                            if delta:
                                 await self._event_queue.put(
                                     RealtimeEvent(
                                         kind="transcript_delta",

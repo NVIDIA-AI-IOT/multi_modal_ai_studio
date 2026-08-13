@@ -10,7 +10,7 @@ entitlement, or a hosted API key:
 
 ```text
 microphone
-  -> Nemotron 3.5 ASR (OpenAI Transcriptions, :8081)
+  -> Nemotron 3.5 ASR (OpenAI Transcriptions or Realtime GA, :8081)
   -> Qwen3 4B on vLLM (OpenAI Chat Completions, :8000)
   -> Magpie multilingual v2607 (OpenAI Speech, :8082)
   -> speaker
@@ -119,6 +119,21 @@ curl http://localhost:8081/v1/audio/transcriptions \
   -F response_format=json
 ```
 
+Native cache-aware Realtime ASR:
+
+```bash
+python scripts/test_realtime_transcription.py sample.wav \
+  --url 'ws://127.0.0.1:8081/v1/realtime' \
+  --api-style openai-ga \
+  --model nvidia/nemotron-3.5-asr-streaming-0.6b \
+  --language en-US
+```
+
+The default `SPEECH_REALTIME_LOOKAHEAD_TOKENS=3` selects the model's 320 ms
+streaming point. Supported values are `0`, `1`, `3`, `6`, and `13`, mapping to
+80, 160, 320, 560, and 1120 ms respectively. This setting affects native
+Realtime ASR; the REST file endpoint remains available for comparisons.
+
 LLM:
 
 ```bash
@@ -163,7 +178,7 @@ Install MMAS, then load the bundled preset:
 ./scripts/setup_dev.sh
 source .venv/bin/activate
 multi-modal-ai-studio \
-  --preset nvidia-open-models-speech-jetson \
+  --preset nvidia-open-models-realtime-speech-jetson \
   --port 8092
 ```
 
@@ -171,13 +186,15 @@ Open `https://localhost:8092`, accept the local certificate, and select the
 browser microphone and speaker. In the configuration UI, each ASR and TTS
 backend can also be changed to **OpenAI REST API** manually.
 
+Use `nvidia-open-models-speech-jetson` instead when deliberately testing the
+original REST ASR path. Both presets retain Magpie's REST TTS endpoint.
+
 The bundled preset intentionally uses English for the public P1 smoke test.
 Treat Japanese and other languages as P2 multilingual validation, changing
 both ASR and TTS language settings together.
 
 The preset sends `chat_template_kwargs.enable_thinking=false` to Qwen3. This
 keeps chain-of-thought out of the spoken response and avoids spending the
-voice-demo token budget before a short answer is produced.
 
 The preset starts TTS from short text chunks before the LLM finishes. The
 public Magpie v2607 `do_tts()` path still returns each chunk only after that
@@ -271,9 +288,9 @@ For every candidate ASR/TTS pair, save the MMAS session and compare:
 - Peak and resident memory, power mode, clocks, temperature, and throttling.
 - Barge-in behavior and echo leakage with the target microphone/speaker.
 
-The next engineering step for Nemotron 3.5 ASR is a native streaming adapter
-using its cache-aware chunks. The current REST baseline deliberately uses the
-portable file-transcription contract and local VAD.
+Nemotron native Realtime ASR is available as a second path alongside the REST
+baseline. Continue to compare both paths for endpoint latency, first-word
+retention, transcript quality, and GPU/memory behavior.
 
 Follow-up TODOs for conversational endpointing and barge-in:
 
