@@ -34,6 +34,8 @@ class ASRConfig:
         speech_pad_ms: Pre-speech padding in ms (Riva start_history). Higher values
             help capture the beginning of utterances (e.g. avoid "Tell me a joke" → "a joke").
         speech_timeout_ms: Silence duration in milliseconds before end-of-speech
+        enable_vad: Whether the selected ASR backend should perform endpointing
+        interim_results: Whether partial transcription results should be emitted
         requires_restart: Whether changing config requires RIVA restart
     """
     scheme: Literal["riva", "openai-rest", "openai-realtime", "azure", "none"] = "riva"
@@ -48,11 +50,17 @@ class ASRConfig:
     vad_stop_threshold: float = 0.3
     speech_pad_ms: int = 500  # 500ms default to reduce leading-word loss (was 300)
     speech_timeout_ms: int = 700
+    enable_vad: bool = True
+    interim_results: bool = True
     requires_restart: bool = False
     # OpenAI Realtime API (when scheme == "openai-realtime")
     realtime_url: Optional[str] = None
     realtime_transport: Literal["websocket", "webrtc", "sip"] = "websocket"
     realtime_session_type: Literal["full", "transcription"] = "full"
+    # OpenAI GA is the default. ``openai-beta`` is an explicit compatibility
+    # mode for providers such as Speaches 0.8.x that implement the preview wire
+    # schema while retaining the same provider-neutral backend boundary.
+    realtime_api_style: Literal["openai-ga", "openai-beta"] = "openai-ga"
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -74,6 +82,15 @@ class ASRConfig:
             )
             if not self.api_key and not is_local:
                 warnings.append("OpenAI scheme requires API key")
+            if self.scheme == "openai-realtime":
+                if not endpoint:
+                    warnings.append("Realtime ASR requires realtime_url or api_base")
+                if self.realtime_transport not in ("websocket", "webrtc", "sip"):
+                    warnings.append("Unsupported Realtime transport")
+                if self.realtime_session_type not in ("full", "transcription"):
+                    warnings.append("Unsupported Realtime session type")
+                if self.realtime_api_style not in ("openai-ga", "openai-beta"):
+                    warnings.append("Unsupported Realtime API wire format")
 
         elif self.scheme == "azure":
             if not self.api_key:

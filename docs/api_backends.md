@@ -12,15 +12,17 @@ pipeline is:
 ASR -> OpenAI-compatible LLM -> TTS
 ```
 
-ASR and TTS can each use Riva gRPC or an OpenAI-compatible REST service. The
+ASR can use Riva gRPC, an OpenAI-compatible REST service, or a Realtime
+transcription WebSocket. TTS can use Riva gRPC or OpenAI-compatible REST. The
 LLM uses an OpenAI-compatible Chat Completions endpoint.
 
 | Component | MMAS scheme | Required endpoint | Streaming behavior |
 |---|---|---|---|
 | ASR | `openai-rest` | `POST /v1/audio/transcriptions` | MMAS performs local VAD and sends one WAV per utterance |
+| ASR | `openai-realtime` (`transcription`) | Realtime WebSocket | Streaming PCM, speech boundaries, partial/final transcripts when provided |
 | LLM | `openai` | `POST /v1/chat/completions` | Server-sent streaming supported |
 | TTS | `openai-rest` | `POST /v1/audio/speech` | Response body is read incrementally when the provider streams it |
-| Full voice | `openai-realtime` | OpenAI Realtime WebSocket | Bidirectional audio and events |
+| Full voice | `openai-realtime` (`full`) | OpenAI Realtime WebSocket | Bidirectional audio and events |
 | ASR/TTS | `riva` | Riva gRPC | Native streaming |
 
 ## Local OpenAI-compatible speech
@@ -74,4 +76,5 @@ portable baseline for evaluation. Use a Realtime API or a native streaming
 adapter when partial transcripts and sub-utterance latency are required.
 
 See [Open models on Jetson](setup_open_models_jetson.md) for the public
-Nemotron 3.5 ASR and Magpie deployment.
+Nemotron 3.5 ASR and Magpie deployment. See [Realtime speech](realtime_speech.md)
+for wire formats, Speaches setup, and the provider contract smoke test.

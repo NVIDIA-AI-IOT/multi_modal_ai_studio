@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+
+name: "Speaches Realtime ASR on Jetson"
+description: "Realtime Faster-Whisper ASR + OpenAI-compatible LLM + REST Kokoro TTS"
+app_version: "0.1.0"
+
+asr:
+  scheme: openai-realtime
+  realtime_url: ws://localhost:18080/v1/realtime?intent=transcription
+  realtime_transport: websocket
+  realtime_session_type: transcription
+  # Speaches 0.8.x implements the OpenAI Realtime preview wire schema.
+  realtime_api_style: openai-beta
+  model: Systran/faster-whisper-small
+  language: en
+  enable_vad: true
+  interim_results: true
+  vad_start_threshold: 0.4
+  speech_pad_ms: 500
+  speech_timeout_ms: 700
+
+llm:
+  scheme: openai
+  api_base: http://localhost:8000/v1
+  model: Qwen/Qwen3-4B-Instruct-2507
+  temperature: 0.3
+  max_tokens: 256
+  history_turns: 3
+  include_conversation_history: true
+  extra_request_body: '{"chat_template_kwargs": {"enable_thinking": false}}'
+  system_prompt: >-
+    You are a helpful voice AI assistant.
+    Answer briefly in English.
+    Plain text only, no markdown, no bullet points, no emojis.
+
+tts:
+  scheme: openai-rest
+  api_base: http://localhost:18080/v1
+  model: speaches-ai/Kokoro-82M-v1.0-ONNX
+  language: en
+  voice: af_heart
+  sample_rate: 24000
+  speed: 1.0
+  response_format: pcm
+  stream_tts: true
+  tts_chunk_words: 10
+
+devices:
+  video_source: none
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  timeline_position: right
+  session_auto_save: true
+  session_output_dir: ./sessions
