@@ -1117,6 +1117,7 @@ async def _run_voice_pipeline(
     """
     logger.info("Voice pipeline starting")
     session = Session(config=config)
+    session.system_info = system_stats_module.gather_system_info()
     use_server_mic = config.devices.audio_input_source in ("alsa", "usb") and bool(
         config.devices.audio_input_device
     )

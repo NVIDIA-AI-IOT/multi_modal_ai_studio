@@ -10,6 +10,8 @@ if (typeof localStorage !== 'undefined' && localStorage.getItem('micWaveformDebu
 const state = {
     sessions: [],
     selectedSession: null,
+    /** Host identity for the MMAS server; recorded sessions carry their own snapshot. */
+    serverSystemInfo: null,
     activeConfigTab: 'asr',
     timelineZoom: 1.0,
     timelineOffset: 0,
@@ -3692,12 +3694,17 @@ function formatTimestamp(seconds) {
 function renderTimelineMetrics() {
     const metricsEl = document.getElementById('timeline-metrics');
     if (!metricsEl) return;
-    if (!state.selectedSession) {
-        metricsEl.innerHTML = '<div class="timeline-metric"><span class="timeline-metric-label">—</span><span class="timeline-metric-value">No session</span></div>';
+    const isLiveOrStopped = state.isLiveSession && (state.sessionState === 'live' || state.sessionState === 'stopped');
+    if (!state.selectedSession && !isLiveOrStopped) {
+        metricsEl.innerHTML = '<div class="timeline-metric"><span class="timeline-metric-label">—</span><span class="timeline-metric-value">No session</span></div>'
+            + renderTimelineSystemInfo(state.serverSystemInfo);
         return;
     }
-    const session = state.selectedSession;
+    const session = state.selectedSession || {};
     const metrics = session.metrics || {};
+    // Never label an old recording with the machine currently serving the UI.
+    // Historical sessions use only the identity captured in their own JSON.
+    const systemInfo = state.selectedSession ? session.system_info : state.serverSystemInfo;
 
     metricsEl.innerHTML = `
         <div class="timeline-metric">
@@ -3736,7 +3743,54 @@ function renderTimelineMetrics() {
                 ${formatDuration(metrics.session_duration)}
             </span>
         </div>
+        ${renderTimelineSystemInfo(systemInfo)}
     `;
+}
+
+function formatMemorySize(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    return (value / (1024 ** 3)).toFixed(1) + ' GiB RAM';
+}
+
+function compactDeviceModel(value) {
+    return String(value || '')
+        .replace(/^NVIDIA\s+/i, '')
+        .replace(/\s+(?:Engineering Reference )?Developer Kit\b/i, '')
+        .trim();
+}
+
+function renderTimelineSystemInfo(info) {
+    if (!info || typeof info !== 'object') return '';
+    const cpu = info.cpu || {};
+    const gpu = info.gpu || {};
+    const osInfo = info.os || {};
+    const ips = Array.isArray(info.ip_addresses) ? info.ip_addresses.filter(Boolean) : [];
+    const parts = [
+        compactDeviceModel(info.device_model),
+        info.hostname,
+        ips[0],
+        cpu.logical_cores ? `${cpu.logical_cores}-core ${cpu.architecture || 'CPU'}` : cpu.architecture,
+        gpu.name,
+        gpu.compute_capability ? `SM ${gpu.compute_capability}` : '',
+        formatMemorySize(info.memory_total_bytes),
+        osInfo.l4t ? `L4T ${osInfo.l4t}` : '',
+    ].filter(Boolean);
+    if (!parts.length) return '';
+    const title = parts.map(part => String(part)).join(' · ');
+    return `<div class="timeline-system-info" title="${escapeHtml(title)}"><i data-lucide="cpu" class="lucide-inline" aria-hidden="true"></i>${parts.map(part => `<span>${escapeHtml(String(part))}</span>`).join('<b aria-hidden="true">·</b>')}</div>`;
+}
+
+async function fetchServerSystemInfo() {
+    try {
+        const response = await fetch('/api/system-info');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        state.serverSystemInfo = await response.json();
+        renderTimelineMetrics();
+        if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    } catch (error) {
+        console.warn('Could not load server system information:', error);
+    }
 }
 
 /** Minimize or restore timeline panel based on Configuration > App > Show Timeline Visualization. */
@@ -7517,6 +7571,7 @@ function startSessionRecording() {
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
+        renderTimelineMetrics();
         state.liveSessionStartTime = Date.now() / 1000;
         state.liveSessionClockSynchronized = false;
         if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
@@ -7586,6 +7641,7 @@ function startSessionRecording() {
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
         state.sessionState = 'live';
+        renderTimelineMetrics();
         state.liveSessionStartTime = Date.now() / 1000;
         state.liveSessionClockSynchronized = false;
         if (state.autoHideConfigOnStart) state.configPanelCollapsed = true;
@@ -9199,6 +9255,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (typeof lucide !== 'undefined' && lucide.createIcons) lucide.createIcons();
+    fetchServerSystemInfo();
 
     // Fetch server-side preset config (from --preset CLI arg) and apply before warmup
     fetchAndApplyInitialConfig().then(() => {

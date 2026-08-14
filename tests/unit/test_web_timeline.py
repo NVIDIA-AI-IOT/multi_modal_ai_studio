@@ -73,6 +73,7 @@ def test_barge_in_timeline_records_and_draws_actual_playback_stop():
         "updateBargeInDiagnosticLegend",
     ):
         assert behavior in app
+    assert "state.selectedSession ? session.system_info : state.serverSystemInfo" in app
 
 
 def test_asr_request_timing_is_forwarded_to_the_timeline():
@@ -161,3 +162,27 @@ def test_recorded_configuration_note_is_consistent_across_tabs():
     assert "This is a historical session configuration (read-only)" not in app
     assert "Recorded devices for this session (read-only)" not in app
     assert app.count("renderReadonlySessionConfigNote(") == 7
+
+
+def test_timeline_footer_renders_live_and_recorded_system_identity():
+    repository_root = Path(__file__).resolve().parents[2]
+    app = (
+        repository_root
+        / "src/multi_modal_ai_studio/webui/static/app.js"
+    ).read_text()
+    session = (
+        repository_root
+        / "src/multi_modal_ai_studio/core/session.py"
+    ).read_text()
+
+    for behavior in (
+        "serverSystemInfo",
+        "fetchServerSystemInfo",
+        "renderTimelineSystemInfo",
+        "compactDeviceModel",
+        "memory_total_bytes",
+        "compute_capability",
+    ):
+        assert behavior in app
+    assert '"system_info": getattr(self, "system_info", None)' in session
+    assert 'session.system_info = data.get("system_info")' in session
