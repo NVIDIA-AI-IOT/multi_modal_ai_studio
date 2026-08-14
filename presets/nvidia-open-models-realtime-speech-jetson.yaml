@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: "NVIDIA Open Models Realtime Speech on Jetson"
-description: "Native streaming Nemotron 3.5 ASR + OpenAI LLM + Magpie TTS"
+description: "Native Realtime Nemotron 3.5 ASR + OpenAI LLM + Realtime Magpie TTS"
 app_version: "0.1.0"
 
 asr:
@@ -34,8 +34,10 @@ llm:
     Plain text only, no markdown, no bullet points, no emojis.
 
 tts:
-  scheme: openai-rest
-  api_base: http://localhost:8082/v1
+  scheme: openai-realtime
+  realtime_url: ws://localhost:8082/v1/realtime
+  realtime_transport: websocket
+  realtime_api_style: openai-ga
   model: nvidia/magpie_tts_multilingual_357m
   language: en-US
   voice: Sofia

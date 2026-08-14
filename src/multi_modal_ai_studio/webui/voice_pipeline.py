@@ -69,6 +69,7 @@ from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
 from multi_modal_ai_studio.backends.asr.riva import RivaASRBackend
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
 from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
+from multi_modal_ai_studio.backends.tts.openai_realtime import OpenAIRealtimeTTSBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend
 from multi_modal_ai_studio.backends.realtime import (
     DISABLE_TURN_DETECTION,
@@ -1208,7 +1209,7 @@ async def _run_voice_pipeline(
 
     # Classic cascade: independently selectable ASR -> OpenAI-compatible LLM -> TTS.
     supported_asr = {"riva", "openai-rest", "openai-realtime"}
-    supported_tts = {"riva", "openai-rest"}
+    supported_tts = {"riva", "openai-rest", "openai-realtime"}
     if asr_config.scheme not in supported_asr or tts_config.scheme not in supported_tts:
         await ws.send_str(
             json.dumps(
@@ -1266,6 +1267,21 @@ async def _run_voice_pipeline(
         )
         _release_server_capture()
         return None
+    if tts_config.scheme == "openai-realtime":
+        if tts_config.realtime_transport != "websocket":
+            await ws.send_str(json.dumps({
+                "type": "error",
+                "error": "OpenAI Realtime TTS currently requires WebSocket",
+            }))
+            _release_server_capture()
+            return None
+        if not (tts_config.realtime_url or tts_config.api_base):
+            await ws.send_str(json.dumps({
+                "type": "error",
+                "error": "OpenAI Realtime TTS realtime_url required",
+            }))
+            _release_server_capture()
+            return None
     if not llm_config.api_base:
         await ws.send_str(json.dumps({"type": "error", "error": "LLM api_base required"}))
         _release_server_capture()
@@ -1284,6 +1300,8 @@ async def _run_voice_pipeline(
         llm = OpenAILLMBackend(config=llm_config)
         if tts_config.scheme == "riva":
             tts = RivaTTSBackend(config=tts_config, timeline=session.timeline)
+        elif tts_config.scheme == "openai-realtime":
+            tts = OpenAIRealtimeTTSBackend(config=tts_config)
         else:
             tts = OpenAIRestTTSBackend(config=tts_config)
     except Exception as e:

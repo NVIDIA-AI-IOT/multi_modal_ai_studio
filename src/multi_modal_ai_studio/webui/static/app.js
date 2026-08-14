@@ -1931,10 +1931,10 @@ function renderTTSConfig(config, readonly = false) {
                 </div>
             </div>
 
-            <!-- OpenAI Realtime TTS (same session as Realtime ASR): Connection tabs + optional overrides -->
+            <!-- OpenAI Realtime exact-text TTS: independent cascade backend -->
             <div class="backend-content" style="display: ${config.backend === 'openai-realtime' ? 'block' : 'none'}">
                 <div class="form-group">
-                    <p class="input-hint" style="margin: 0;">TTS for OpenAI Realtime uses the same session as Realtime ASR. Voice and model are typically configured in the Realtime session.</p>
+                    <p class="input-hint" style="margin: 0;">In transcript-only cascade mode, MMAS sends the LLM's exact text to this independent Realtime TTS service. Full-voice mode continues to share one Realtime session.</p>
                 </div>
                 <div class="config-section-label" style="margin-bottom: 8px;"><i data-lucide="radio" class="lucide-inline"></i> Connection</div>
                 <div class="backend-tabs speech-api-tabs realtime-transport-tabs" style="margin-bottom: 12px;">
@@ -1951,8 +1951,22 @@ function renderTTSConfig(config, readonly = false) {
                 ${((config.realtime_transport || 'websocket') === 'webrtc' || (config.realtime_transport || 'websocket') === 'sip') ? '<p class="input-hint" style="margin: 0 0 12px 0;"><i data-lucide="info" class="lucide-inline"></i> Not supported yet. Use WebSocket.</p>' : ''}
                 <div class="form-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' ? 'block' : 'none'};">
                     <label>WebSocket / API base</label>
-                    <input type="text" ${disabled} value="${config.realtime_url || config.openai_url || 'wss://api.openai.com/v1/realtime'}"
+                    <input type="text" ${disabled} value="${config.realtime_url || config.openai_url || 'ws://localhost:8082/v1/realtime'}"
                            onchange="updateConfig('tts', 'realtime_url', this.value); updateConfig('tts', 'openai_url', this.value)">
+                </div>
+                <div class="form-group">
+                    <label>Model</label>
+                    <input type="text" ${disabled} value="${escapeHtml(config.model || 'nvidia/magpie_tts_multilingual_357m')}"
+                           onchange="updateConfig('tts', 'model', this.value)">
+                </div>
+                <div class="form-group">
+                    <label>Voice</label>
+                    <div class="tts-voice-control-row">
+                        <input type="text" ${disabled} value="${escapeHtml(config.voice || 'Sofia')}"
+                               onchange="stopTTSVoicePreview(); updateConfig('tts', 'voice', this.value)">
+                        ${!readonly ? '<button type="button" id="tts-realtime-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>' : ''}
+                    </div>
+                    ${!readonly ? '<div id="tts-realtime-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
                 </div>
             </div>
 
@@ -2798,6 +2812,14 @@ function updateConfig(section, key, value) {
             currentConfig.asr.realtime_session_type = 'transcription';
         }
     }
+    if (section === 'tts' && key === 'backend' && value === 'openai-realtime') {
+        currentConfig.tts.realtime_transport = 'websocket';
+        currentConfig.tts.realtime_api_style = currentConfig.tts.realtime_api_style || 'openai-ga';
+        currentConfig.tts.realtime_url = currentConfig.tts.realtime_url || 'ws://localhost:8082/v1/realtime';
+        currentConfig.tts.model = currentConfig.tts.model || 'nvidia/magpie_tts_multilingual_357m';
+        currentConfig.tts.voice = currentConfig.tts.voice || 'Sofia';
+        currentConfig.tts.sample_rate = currentConfig.tts.sample_rate || 22050;
+    }
     if (section === 'llm' && key === 'include_conversation_history') {
         var wrap = document.getElementById('vlm-omit-last-assistant-wrap');
         if (wrap) wrap.style.display = value ? 'block' : 'none';
@@ -3429,9 +3451,12 @@ let _ttsVoicePreviewButton = null;
 
 function _ttsVoicePreviewStatusElement() {
     const backend = (currentConfig.tts && (currentConfig.tts.backend || currentConfig.tts.scheme)) || 'riva';
-    return document.getElementById(backend === 'riva'
-        ? 'tts-riva-preview-status'
-        : 'tts-rest-preview-status');
+    const ids = {
+        'riva': 'tts-riva-preview-status',
+        'openai-rest': 'tts-rest-preview-status',
+        'openai-realtime': 'tts-realtime-preview-status'
+    };
+    return document.getElementById(ids[backend] || 'tts-rest-preview-status');
 }
 
 function _setTTSVoicePreviewButton(button, iconName, disabled) {
@@ -7437,15 +7462,14 @@ function startSessionRecording() {
     if (state.sessionState !== 'setup') return;
 
     // Full voice uses response audio from the same Realtime session. Transcript
-    // mode instead participates in the classic cascade and uses REST/Riva TTS.
+    // mode participates in the classic cascade and may independently use
+    // Riva, REST, or Realtime exact-text TTS.
     var asrRealtime = (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime');
     var ttsRealtime = (currentConfig.tts.backend === 'openai-realtime' || currentConfig.tts.scheme === 'openai-realtime');
     var realtimeFullVoice = asrRealtime && (currentConfig.asr.realtime_session_type || 'transcription') === 'full';
-    var invalidRealtimePair = (realtimeFullVoice && !ttsRealtime) || (asrRealtime && !realtimeFullVoice && ttsRealtime);
+    var invalidRealtimePair = realtimeFullVoice && !ttsRealtime;
     if (invalidRealtimePair) {
-        var realtimePairMessage = realtimeFullVoice
-            ? 'Full voice Realtime requires Realtime response audio.'
-            : 'Realtime transcription uses the classic cascade. Select Riva or OpenAI REST TTS.';
+        var realtimePairMessage = 'Full voice Realtime requires Realtime response audio.';
         var chatEl = document.getElementById('chat-history');
         if (chatEl) {
             chatEl.innerHTML = '<div class="empty-state"><p class="error">' + escapeHtml(realtimePairMessage) + '</p></div>';
