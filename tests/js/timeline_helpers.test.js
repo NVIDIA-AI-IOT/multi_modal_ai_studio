@@ -20,6 +20,7 @@ const {
     pairTimelineEvents,
     rebuildTtsPlaybackSegments,
     selectFirstPlaybackTimes,
+    selectReplayTtlBands,
     resolveTtsFirstAudioTimes,
     splitAudioSegmentsAt,
     syncLiveSessionClock,
@@ -86,6 +87,32 @@ test('turn-scoped first audio survives a short barge-in playback gap', () => {
         ]
     );
     assert.deepEqual(playbackTimes, [12.645, 22.784]);
+});
+
+test('recorded TTL bands remain authoritative during replay', () => {
+    const persisted = [
+        { start: 17.668, end: 20.543, ttlMs: 2875 },
+    ];
+    let fallbackCalled = false;
+
+    const selected = selectReplayTtlBands(persisted, () => {
+        fallbackCalled = true;
+        return [{ start: 19.122, end: 20.543, ttlMs: 1421 }];
+    });
+
+    assert.equal(fallbackCalled, false);
+    assert.deepEqual(selected, persisted);
+});
+
+test('legacy replay reconstructs TTL when persisted bands are absent', () => {
+    const reconstructed = [
+        { start: 3.2, end: 5.1, ttlMs: 1900 },
+    ];
+
+    assert.deepEqual(
+        selectReplayTtlBands([], () => reconstructed),
+        reconstructed,
+    );
 });
 
 test('ASR request matching excludes an empty request before the next speech turn', () => {
