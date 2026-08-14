@@ -5476,12 +5476,29 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     });
 
-    // 3b. TTL bands: transparent red from JS end-of-speech to first sound out (browser); ms label on TTL lane. Live: from state; replay: always recompute from segments when we have them so band end = first AI sound (~6.6s), not stored bands from old logic (~8s).
+    // 3b. TTL bands: transparent red from browser-observed end-of-speech to
+    // first sound out.  Persisted live bands are authoritative during replay;
+    // waveform reconstruction is only a fallback for legacy recordings.
     const ttlLaneIndex = lanes.indexOf('ttl');
+    const persistedReplayBands = (
+        state.selectedSession && Array.isArray(state.selectedSession.ttl_bands)
+    ) ? state.selectedSession.ttl_bands : [];
+    const selectReplayTtlBands = (
+        window.MMASTimelineHelpers
+        && typeof window.MMASTimelineHelpers.selectReplayTtlBands === 'function'
+    ) ? window.MMASTimelineHelpers.selectReplayTtlBands : function (persisted, fallbackFactory) {
+        return persisted.length ? persisted : fallbackFactory();
+    };
     const replayBands = (!inLive && !hasStoppedLiveData && state.selectedSession)
-        ? (replayTtsSegments && replayTtsSegments.length
-            ? computeTtlBandsFromReplay(replayUserAmplitudeForTtl || [], replayTtsSegments, timeline)
-            : (state.selectedSession.ttl_bands || []))
+        ? selectReplayTtlBands(persistedReplayBands, function () {
+            return replayTtsSegments && replayTtsSegments.length
+                ? computeTtlBandsFromReplay(
+                    replayUserAmplitudeForTtl || [],
+                    replayTtsSegments,
+                    timeline
+                )
+                : [];
+        })
         : [];
     const hasLiveBands = drawLiveWaveforms && (state.liveTtlBands && state.liveTtlBands.length > 0 || state.liveTtlBandStartTime != null);
     if (ttlLaneIndex !== -1 && (hasLiveBands || replayBands.length > 0)) {
