@@ -151,6 +151,7 @@ class Session:
         self.timeline = Timeline()
         self.turns: List[Turn] = []
         self.system_stats: List[Dict[str, Any]] = []  # [{t, cpu, gpu}, ...] session-relative, from client
+        self.system_info: Optional[Dict[str, Any]] = None
         self.tts_playback_segments: List[Dict[str, Any]] = []
         self.audio_amplitude_history: List[Dict[str, Any]] = []
         self.ttl_bands: List[Dict[str, Any]] = []
@@ -402,6 +403,7 @@ class Session:
             "turns": [turn.to_dict() for turn in self.turns],
             "metrics": self._metrics.to_dict() if self._metrics else {},
             "system_stats": getattr(self, "system_stats", None) or [],
+            "system_info": getattr(self, "system_info", None),
             "tts_playback_segments": getattr(self, "tts_playback_segments", None) or [],
             "audio_amplitude_history": getattr(self, "audio_amplitude_history", None) or [],
             "ttl_bands": getattr(self, "ttl_bands", None) or [],
@@ -455,6 +457,7 @@ class Session:
             session._metrics = SessionMetrics.from_dict(data["metrics"])
         # Restore system_stats (CPU/GPU samples from live session)
         session.system_stats = data.get("system_stats") or []
+        session.system_info = data.get("system_info")
         session.tts_playback_segments = data.get("tts_playback_segments") or []
         session.audio_amplitude_history = data.get("audio_amplitude_history") or []
         session.ttl_bands = data.get("ttl_bands") or []

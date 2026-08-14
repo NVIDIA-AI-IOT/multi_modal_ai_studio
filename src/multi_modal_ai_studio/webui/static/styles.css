@@ -3260,6 +3260,36 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     font-size: 0.75rem;
     flex-shrink: 0;
     margin-top: 4px; /* Gap above stats so x-axis time labels stay visible */
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.timeline-system-info {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    margin-left: auto;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.timeline-system-info > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.timeline-system-info > span:first-of-type {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.timeline-system-info > b {
+    color: var(--border-color);
+    font-weight: 400;
 }
 
 /* Timeline Scrollbar */
