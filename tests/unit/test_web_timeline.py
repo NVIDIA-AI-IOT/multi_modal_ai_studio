@@ -186,3 +186,20 @@ def test_timeline_footer_renders_live_and_recorded_system_identity():
         assert behavior in app
     assert '"system_info": getattr(self, "system_info", None)' in session
     assert 'session.system_info = data.get("system_info")' in session
+
+
+def test_timeline_footer_stays_on_one_line_and_truncates_system_identity():
+    repository_root = Path(__file__).resolve().parents[2]
+    app = (
+        repository_root
+        / "src/multi_modal_ai_studio/webui/static/app.js"
+    ).read_text()
+    styles = (
+        repository_root
+        / "src/multi_modal_ai_studio/webui/static/styles.css"
+    ).read_text()
+
+    assert 'class="timeline-system-info-text"' in app
+    assert "flex-wrap: nowrap;" in styles
+    assert ".timeline-system-info-text" in styles
+    assert "text-overflow: ellipsis;" in styles

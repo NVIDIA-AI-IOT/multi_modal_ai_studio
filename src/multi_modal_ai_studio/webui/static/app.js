@@ -667,7 +667,7 @@ const defaultConfig = {
         model: '',
         language: 'en-US',
         enable_vad: true,
-        vad_start_threshold: 0.5,
+        vad_start_threshold: 0.4,
         vad_stop_threshold: 0.3,
         speech_pad_ms: 500,
         speech_timeout_ms: 700,
@@ -1297,6 +1297,80 @@ function renderReadonlySessionConfigNote(readonly = true) {
     return '<p class="config-note"><i data-lucide="clipboard-list" class="lucide-inline"></i> Recorded configuration for this session (read-only)</p>';
 }
 
+function renderOpenAIASRVADSettings(config, readonly = false) {
+    const profile = window.MMASConfigHelpers.getAsrVadControlProfile(config);
+    if (!profile) return '';
+
+    const disabled = readonly ? 'disabled' : '';
+    const controlsDisplay = profile.enabled ? 'block' : 'none';
+    const startThreshold = config.vad_start_threshold ?? config.vad_threshold ?? 0.4;
+    const stopThreshold = config.vad_stop_threshold ?? 0.3;
+    const speechPadding = config.speech_pad_ms ?? 500;
+    const silenceDuration = config.speech_timeout_ms ?? 700;
+
+    return `
+        <div class="config-section asr-vad-settings" data-vad-backend="${profile.backend}">
+            <div class="config-section-label">${profile.title}</div>
+            <p class="input-hint asr-vad-description">${profile.description}</p>
+            ${profile.canDisable ? `
+                <div class="form-group asr-vad-enable">
+                    <label class="checkbox-label">
+                        <input type="checkbox" ${disabled} ${profile.enabled ? 'checked' : ''}
+                               onchange="updateConfig('asr', 'enable_vad', this.checked)">
+                        Enable server voice activity detection
+                    </label>
+                </div>
+            ` : `
+                <div class="input-hint asr-vad-required"><i data-lucide="info" class="lucide-inline"></i> Required for live microphone input with the file-based REST transcription API.</div>
+            `}
+
+            <div class="vad-tuning-container" style="display: ${controlsDisplay};">
+                <div class="vad-slider-group">
+                    <div class="vad-slider-label">
+                        <span>${profile.backend === 'openai-realtime' ? 'Threshold' : 'Speech start threshold'}</span>
+                        <span class="vad-slider-value" id="openaiVadStartThresholdValue">${startThreshold}</span>
+                    </div>
+                    <input type="range" ${disabled} class="vad-slider" min="0" max="1" step="0.05" value="${startThreshold}"
+                           oninput="currentConfig.asr.vad_start_threshold = parseFloat(this.value); document.getElementById('openaiVadStartThresholdValue').textContent = this.value">
+                    <div class="input-hint">${profile.backend === 'openai-realtime' ? 'Server VAD speech probability threshold.' : 'Higher values reject more low-energy input; lower values detect quieter speech.'}</div>
+                </div>
+
+                ${profile.showStopThreshold ? `
+                    <div class="vad-slider-group">
+                        <div class="vad-slider-label">
+                            <span>Speech stop threshold</span>
+                            <span class="vad-slider-value" id="openaiVadStopThresholdValue">${stopThreshold}</span>
+                        </div>
+                        <input type="range" ${disabled} class="vad-slider" min="0" max="1" step="0.05" value="${stopThreshold}"
+                               oninput="currentConfig.asr.vad_stop_threshold = parseFloat(this.value); document.getElementById('openaiVadStopThresholdValue').textContent = this.value">
+                        <div class="input-hint">The lower end threshold adds hysteresis so brief dips do not split an utterance.</div>
+                    </div>
+                ` : ''}
+
+                <div class="vad-slider-group">
+                    <div class="vad-slider-label">
+                        <span>${profile.backend === 'openai-realtime' ? 'Prefix padding' : 'Speech padding'}</span>
+                        <span><span class="vad-slider-value" id="openaiVadSpeechPadValue">${speechPadding}</span> ms</span>
+                    </div>
+                    <input type="range" ${disabled} class="vad-slider" min="0" max="1500" step="50" value="${speechPadding}"
+                           oninput="currentConfig.asr.speech_pad_ms = parseInt(this.value); document.getElementById('openaiVadSpeechPadValue').textContent = this.value">
+                    <div class="input-hint">Keeps audio from just before speech detection to avoid clipping the first word.</div>
+                </div>
+
+                <div class="vad-slider-group">
+                    <div class="vad-slider-label">
+                        <span>Silence duration</span>
+                        <span><span class="vad-slider-value" id="openaiVadSilenceDurationValue">${silenceDuration}</span> ms</span>
+                    </div>
+                    <input type="range" ${disabled} class="vad-slider" min="100" max="3000" step="100" value="${silenceDuration}"
+                           oninput="currentConfig.asr.speech_timeout_ms = parseInt(this.value); document.getElementById('openaiVadSilenceDurationValue').textContent = this.value">
+                    <div class="input-hint">Required trailing silence before the current utterance is finalized.</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderASRConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
@@ -1534,28 +1608,20 @@ function renderASRConfig(config, readonly = false) {
                 </select>
             </div>
 
-            <div class="form-group" style="display: ${config.backend === 'riva' ? 'none' : 'block'}">
-                <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} ${config.enable_vad ? 'checked' : ''}
-                           onchange="updateConfig('asr', 'enable_vad', this.checked)">
-                    Enable Voice Activity Detection (VAD)
-                </label>
-            </div>
+            ${renderOpenAIASRVADSettings(config, readonly)}
 
-            <div class="form-group" style="display: ${(config.backend === 'riva' || !config.enable_vad) ? 'none' : 'block'}">
-                <label>VAD Threshold</label>
-                <input type="range" ${disabled} min="0" max="1" step="0.05" value="${config.vad_start_threshold ?? config.vad_threshold ?? 0.5}"
-                       oninput="updateConfig('asr', 'vad_start_threshold', parseFloat(this.value)); const el = document.getElementById('vad-threshold-value'); if(el) el.textContent = this.value;">
-                <span id="vad-threshold-value" class="range-value">${config.vad_start_threshold ?? config.vad_threshold ?? 0.5}</span>
-            </div>
-
-            <div class="form-group" style="display: ${config.backend === 'riva' ? 'none' : 'block'}">
-                <label class="checkbox-label">
-                    <input type="checkbox" ${disabled} ${config.interim_results ? 'checked' : ''}
-                           onchange="updateConfig('asr', 'interim_results', this.checked)">
-                    Show Interim Results
-                </label>
-            </div>
+            ${config.backend === 'openai-realtime' ? `
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" ${disabled} ${config.interim_results ? 'checked' : ''}
+                               onchange="updateConfig('asr', 'interim_results', this.checked)">
+                        Show partial transcripts
+                    </label>
+                </div>
+            ` : ''}
+            ${config.backend === 'openai-rest' ? `
+                <div class="input-hint"><i data-lucide="info" class="lucide-inline"></i> The file-based REST API returns one final transcript per utterance; partial transcripts require Realtime API.</div>
+            ` : ''}
         </div>
     `;
 }
@@ -2770,6 +2836,12 @@ function updateConfig(section, key, value) {
     // Sync backend -> scheme for pipeline
     if (section === 'asr' && key === 'backend') currentConfig.asr.scheme = value;
     if (section === 'tts' && key === 'backend') currentConfig.tts.scheme = value;
+    // The file-based REST transcription API has no persistent stream on which
+    // to detect utterance boundaries. MMAS local endpointing is therefore
+    // required for live microphone sessions.
+    if (section === 'asr' && key === 'backend' && value === 'openai-rest') {
+        currentConfig.asr.enable_vad = true;
+    }
     // Keep ASR Realtime API key in sync with LLM when using Realtime WebSocket
     if (section === 'llm' && key === 'api_key' && (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime') && (currentConfig.asr.realtime_transport || 'websocket') === 'websocket') {
         currentConfig.asr.api_key = value;
@@ -3778,7 +3850,7 @@ function renderTimelineSystemInfo(info) {
     ].filter(Boolean);
     if (!parts.length) return '';
     const title = parts.map(part => String(part)).join(' · ');
-    return `<div class="timeline-system-info" title="${escapeHtml(title)}"><i data-lucide="cpu" class="lucide-inline" aria-hidden="true"></i>${parts.map(part => `<span>${escapeHtml(String(part))}</span>`).join('<b aria-hidden="true">·</b>')}</div>`;
+    return `<div class="timeline-system-info" title="${escapeHtml(title)}"><i data-lucide="cpu" class="lucide-inline" aria-hidden="true"></i><span class="timeline-system-info-text">${escapeHtml(title)}</span></div>`;
 }
 
 async function fetchServerSystemInfo() {
@@ -6114,6 +6186,9 @@ function buildVoiceConfig() {
         llm_model_name: (currentConfig.llm && currentConfig.llm.model) ? String(currentConfig.llm.model) : null,
         tts_model_name: configuredTtsModelName
     };
+    if (config.asr.backend === 'openai-rest' || config.asr.scheme === 'openai-rest') {
+        config.asr.enable_vad = true;
+    }
     if (config.asr.riva_server === undefined && config.asr.server) config.asr.riva_server = config.asr.server;
     if (config.tts.riva_server === undefined && config.tts.server) config.tts.riva_server = config.tts.server;
     // Ensure backend sends scheme + realtime fields so server picks Realtime path when UI is set to Realtime
