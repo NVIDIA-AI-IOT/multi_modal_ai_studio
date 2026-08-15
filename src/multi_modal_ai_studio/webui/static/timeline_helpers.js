@@ -260,6 +260,21 @@
         });
     }
 
+    // A recorded session's browser-observed TTL bands are the source of
+    // truth.  Reconstructing them from down-sampled waveform data can move
+    // the detected end-of-speech boundary and make replay disagree with the
+    // value shown live.  Only use reconstruction for legacy recordings that
+    // do not contain persisted bands.
+    function selectReplayTtlBands(persistedBands, fallbackFactory) {
+        if (Array.isArray(persistedBands) && persistedBands.length > 0) {
+            return persistedBands;
+        }
+        const fallback = typeof fallbackFactory === 'function'
+            ? fallbackFactory()
+            : [];
+        return Array.isArray(fallback) ? fallback : [];
+    }
+
     // REST ASR can submit an utterance that later returns an empty transcript.
     // Such an orphan request must not be drawn as though it belonged to the
     // following successful speech turn. Match each final only to the closest
@@ -673,6 +688,7 @@
         pairTimelineEvents: pairTimelineEvents,
         rebuildTtsPlaybackSegments: rebuildTtsPlaybackSegments,
         selectFirstPlaybackTimes: selectFirstPlaybackTimes,
+        selectReplayTtlBands: selectReplayTtlBands,
         resolveTtsFirstAudioTimes: resolveTtsFirstAudioTimes,
         splitPointsAtTimeGaps: splitPointsAtTimeGaps,
         syncLiveSessionClock: syncLiveSessionClock,

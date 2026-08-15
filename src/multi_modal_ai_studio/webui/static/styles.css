@@ -3256,10 +3256,39 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     background: transparent;
     border-top: 1px solid var(--border-color);
     display: flex;
-    gap: var(--space-xl);
+    gap: clamp(var(--space-sm), 1.25vw, var(--space-xl));
     font-size: 0.75rem;
     flex-shrink: 0;
     margin-top: 4px; /* Gap above stats so x-axis time labels stay visible */
+    align-items: center;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.timeline-system-info {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+    flex: 1 1 auto;
+    margin-left: auto;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.timeline-system-info-text {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.timeline-system-info .lucide-inline {
+    flex: 0 0 auto;
 }
 
 /* Timeline Scrollbar */
@@ -3499,7 +3528,7 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     background: transparent;
     border-top: 1px solid var(--border-color);
     display: flex;
-    gap: var(--space-xl);
+    gap: clamp(var(--space-sm), 1.25vw, var(--space-xl));
     font-size: 0.75rem;
     flex-shrink: 0;
     margin-top: 4px; /* Gap above stats so x-axis time labels stay visible */
@@ -3508,6 +3537,8 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 .timeline-metric {
     display: flex;
     gap: var(--space-sm);
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .timeline-metric-label {
