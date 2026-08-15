@@ -114,8 +114,19 @@ and enables Gemma's small MTP draft by default. `--no-mmproj` prevents the
 combined Vision/Audio projector (about 986 MB) from being downloaded or
 loaded; MMAS vision is disabled in this preset.
 
-The model cache is preserved in the `mmas-gemma4-models` Docker volume. Useful
-lifecycle commands are:
+The model, quantization, and MTP arguments match the command planned for the
+Jetson AI Lab model page:
+
+```bash
+llama-server -hf unsloth/gemma-4-E2B-it-GGUF:Q4_K_S \
+  --spec-type draft-mtp --spec-draft-n-max 3
+```
+
+MMAS adds `--no-mmproj` because this voice pipeline uses Gemma only as a text
+LLM. The launcher also mounts `${HOME}/.cache/huggingface` at the documented
+container path and maps its `hub` directory to the cache path currently set by
+the Jetson llama.cpp image. This keeps downloads reusable across both layouts.
+Useful lifecycle commands are:
 
 ```bash
 ./scripts/gemma4_llm.sh status

@@ -48,6 +48,9 @@ def test_speaches_quick_start_keeps_llm_independent() -> None:
     assert "gemma-4-E2B-it-GGUF:Q4_K_S" in launcher
     assert "--no-mmproj" in launcher
     assert "--spec-type draft-mtp" in launcher
+    assert "--spec-draft-n-max 3" in launcher
+    assert '${GEMMA4_CACHE_DIR}:/root/.cache/huggingface' in launcher
+    assert '${GEMMA4_CACHE_DIR}/hub:/data/models/huggingface' in launcher
     assert "latest-jetson-orin" in launcher
     assert "latest-jetson-thor" in launcher
     assert "./scripts/gemma4_llm.sh start" in readme

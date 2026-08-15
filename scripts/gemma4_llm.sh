@@ -7,7 +7,7 @@
 set -euo pipefail
 
 GEMMA4_CONTAINER_NAME="${GEMMA4_CONTAINER_NAME:-mmas-gemma4-llm}"
-GEMMA4_MODEL_VOLUME="${GEMMA4_MODEL_VOLUME:-mmas-gemma4-models}"
+GEMMA4_CACHE_DIR="${GEMMA4_CACHE_DIR:-${HOME%/}/.cache/huggingface}"
 GEMMA4_MODEL="${GEMMA4_MODEL:-unsloth/gemma-4-E2B-it-GGUF:Q4_K_S}"
 GEMMA4_MODEL_ALIAS="${GEMMA4_MODEL_ALIAS:-gemma-4-e2b}"
 GEMMA4_PORT="${GEMMA4_PORT:-8080}"
@@ -80,6 +80,7 @@ doctor() {
     fi
     echo "Image: $(llama_cpp_image)"
     echo "Model: ${GEMMA4_MODEL}"
+    echo "Model cache: ${GEMMA4_CACHE_DIR}"
     echo "Text-only: yes (--no-mmproj)"
     echo "MTP: ${GEMMA4_ENABLE_MTP}"
     echo "API: ${BASE_URL}/v1"
@@ -112,12 +113,11 @@ start() {
     if [[ "${GEMMA4_PULL}" != "never" ]]; then
         docker pull "${image}"
     fi
-    docker volume inspect "${GEMMA4_MODEL_VOLUME}" >/dev/null 2>&1 ||
-        docker volume create "${GEMMA4_MODEL_VOLUME}" >/dev/null
+    mkdir -p "${GEMMA4_CACHE_DIR}/hub"
     docker rm -f "${GEMMA4_CONTAINER_NAME}" >/dev/null 2>&1 || true
 
     if [[ "${GEMMA4_ENABLE_MTP}" == "true" ]]; then
-        mtp_args=(--spec-type draft-mtp --spec-draft-n-max 3 --gpu-layers-draft all)
+        mtp_args=(--spec-type draft-mtp --spec-draft-n-max 3)
     fi
 
     docker run -d \
@@ -125,7 +125,8 @@ start() {
         --restart unless-stopped \
         --runtime nvidia \
         --network host \
-        -v "${GEMMA4_MODEL_VOLUME}:/data/models/huggingface" \
+        -v "${GEMMA4_CACHE_DIR}:/root/.cache/huggingface" \
+        -v "${GEMMA4_CACHE_DIR}/hub:/data/models/huggingface" \
         "${image}" \
         llama-server \
         -hf "${GEMMA4_MODEL}" \
@@ -148,7 +149,7 @@ start() {
 
 stop() {
     docker rm -f "${GEMMA4_CONTAINER_NAME}" >/dev/null 2>&1 || true
-    echo "Removed ${GEMMA4_CONTAINER_NAME}; model volume ${GEMMA4_MODEL_VOLUME} was preserved."
+    echo "Removed ${GEMMA4_CONTAINER_NAME}; model cache ${GEMMA4_CACHE_DIR} was preserved."
 }
 
 status() {
