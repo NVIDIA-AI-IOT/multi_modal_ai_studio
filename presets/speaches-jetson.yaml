@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-License-Identifier: Apache-2.0
 
-name: "Speaches on Jetson"
-description: "Faster-Whisper + OpenAI-compatible LLM + Kokoro TTS"
+name: "Speaches Quick Start on Jetson (RC)"
+description: "Small Faster-Whisper + independent OpenAI-compatible LLM + Kokoro TTS"
 app_version: "0.1.0"
 
 asr:
   scheme: openai-rest
   api_base: http://localhost:18080/v1
-  model: Systran/faster-whisper-small
+  model: Systran/faster-whisper-tiny.en
   # Speaches/Faster-Whisper expects an ISO 639-1 code, not en-US.
   language: en
   vad_start_threshold: 0.4
@@ -18,13 +18,14 @@ asr:
 
 llm:
   scheme: openai
-  api_base: http://localhost:8000/v1
-  model: Qwen/Qwen3-4B-Instruct-2507
+  # The speech launcher does not manage the LLM. This small Ollama model is an
+  # example; replace both fields with any OpenAI-compatible service.
+  api_base: http://localhost:11434/v1
+  model: qwen2.5:0.5b
   temperature: 0.3
   max_tokens: 256
   history_turns: 3
   include_conversation_history: true
-  extra_request_body: '{"chat_template_kwargs": {"enable_thinking": false}}'
   system_prompt: >-
     You are a helpful voice AI assistant.
     Answer briefly in English.
@@ -34,7 +35,7 @@ llm:
 tts:
   scheme: openai-rest
   api_base: http://localhost:18080/v1
-  model: speaches-ai/Kokoro-82M-v1.0-ONNX
+  model: speaches-ai/Kokoro-82M-v1.0-ONNX-fp16
   language: en
   voice: af_heart
   sample_rate: 24000

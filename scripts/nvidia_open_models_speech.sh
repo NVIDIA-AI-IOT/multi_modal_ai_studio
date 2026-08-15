@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build and run the public-model speech stack without Riva or NGC credentials.
+# Build and run NVIDIA public ASR and TTS services without Riva or NGC access.
 
 set -euo pipefail
 
@@ -10,11 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SPEECH_DIR="${REPO_ROOT}/services/openai_speech"
 CACHE_VOLUME="${CACHE_VOLUME:-mmas-hf-cache}"
-LLM_MODEL="${LLM_MODEL:-Qwen/Qwen3-4B-Instruct-2507}"
-LLM_SERVED_NAME="${LLM_SERVED_NAME:-${LLM_MODEL}}"
-LLM_IMAGE="${LLM_IMAGE:-vllm/vllm-openai:v0.25.0}"
 ASR_REVISION="${ASR_REVISION:-f3d333391852ba876df169dcc9ba902d25b6ab0b}"
-LLM_REVISION="${LLM_REVISION:-cdbee75f17c01a7cc42f958dc650907174af0554}"
 MAGPIE_REVISION="${MAGPIE_REVISION:-v2607}"
 SPEECH_SERVICE_VERSION="${SPEECH_SERVICE_VERSION:-0.3.0}"
 
@@ -64,8 +60,6 @@ doctor() {
         echo "missing"
         return 1
     fi
-    echo "LLM image: ${LLM_IMAGE}"
-    echo "LLM model: ${LLM_MODEL}"
     echo "Speech base image: ${SPEECH_BASE_IMAGE}"
     echo "NeMo Speech revision: ${TTS_NEMO_REF}"
 }
@@ -84,15 +78,8 @@ start() {
         docker volume create "${CACHE_VOLUME}" >/dev/null
 
     local hf_token_args=()
-    local llm_cache_args=()
     if [[ -n "${HF_TOKEN:-}" ]]; then
         hf_token_args=(-e "HF_TOKEN=${HF_TOKEN}")
-    fi
-    if [[ "${LLM_KV_CACHE_MEMORY_BYTES:-2G}" != "auto" ]]; then
-        llm_cache_args=(
-            --kv-cache-memory-bytes
-            "${LLM_KV_CACHE_MEMORY_BYTES:-2G}"
-        )
     fi
 
     replace_container mmas-nemotron-asr \
@@ -105,24 +92,6 @@ start() {
         -v "${CACHE_VOLUME}:/models/huggingface" \
         "mmas/nemotron-asr-openai:${SPEECH_SERVICE_VERSION}"
 
-    replace_container mmas-vllm \
-        "${docker_common[@]}" \
-        "${hf_token_args[@]}" \
-        -e HF_HOME=/models/huggingface \
-        -e HF_HUB_CACHE=/models/huggingface/hub \
-        -v "${CACHE_VOLUME}:/models/huggingface" \
-        --entrypoint vllm \
-        "${LLM_IMAGE}" \
-        serve "${LLM_MODEL}" \
-        --revision "${LLM_REVISION}" \
-        --served-model-name "${LLM_SERVED_NAME}" \
-        --port 8000 \
-        --dtype "${LLM_DTYPE:-bfloat16}" \
-        --max-model-len "${LLM_MAX_MODEL_LEN:-8192}" \
-        --max-num-seqs "${LLM_MAX_NUM_SEQS:-2}" \
-        --gpu-memory-utilization "${LLM_GPU_MEMORY_UTILIZATION:-0.30}" \
-        "${llm_cache_args[@]}"
-
     replace_container mmas-magpie-tts \
         "${docker_common[@]}" \
         "${hf_token_args[@]}" \
@@ -132,12 +101,13 @@ start() {
         -v "${CACHE_VOLUME}:/models/huggingface" \
         "mmas/magpie-tts-openai:${SPEECH_SERVICE_VERSION}"
 
-    echo "Services started. First model load can take several minutes."
+    echo "ASR and TTS services started. First model load can take several minutes."
+    echo "Connect MMAS to a separately managed OpenAI-compatible LLM."
     status
 }
 
 stop() {
-    docker rm -f mmas-nemotron-asr mmas-vllm mmas-magpie-tts \
+    docker rm -f mmas-nemotron-asr mmas-magpie-tts \
         >/dev/null 2>&1 || true
     echo "Removed MMAS open-model service containers; model cache was preserved."
 }
@@ -145,21 +115,18 @@ stop() {
 status() {
     docker ps -a \
         --filter name=mmas-nemotron-asr \
-        --filter name=mmas-vllm \
         --filter name=mmas-magpie-tts \
         --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 }
 
-verify_llm() {
-    curl --fail --silent --show-error \
-        http://localhost:8000/v1/models
+verify() {
+    curl --fail --silent --show-error http://localhost:8081/health
     echo
-    curl --fail --silent --show-error \
-        http://localhost:8000/v1/chat/completions \
-        -H 'Content-Type: application/json' \
-        -d "$(printf \
-            '{"model":"%s","messages":[{"role":"user","content":"Introduce yourself in one sentence."}],"max_tokens":64}' \
-            "${LLM_SERVED_NAME}")"
+    curl --fail --silent --show-error http://localhost:8081/v1/models
+    echo
+    curl --fail --silent --show-error http://localhost:8082/health
+    echo
+    curl --fail --silent --show-error http://localhost:8082/v1/models
     echo
 }
 
@@ -183,11 +150,11 @@ case "${1:-}" in
     doctor)
         doctor
         ;;
-    verify-llm)
-        verify_llm
+    verify)
+        verify
         ;;
     *)
-        echo "Usage: $0 {build|start|stop|restart|status|doctor|verify-llm}" >&2
+        echo "Usage: $0 {build|start|stop|restart|status|doctor|verify}" >&2
         exit 2
         ;;
 esac

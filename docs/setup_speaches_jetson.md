@@ -1,0 +1,177 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
+# Speaches on Jetson: recommended quick start (release candidate)
+
+This is the recommended path for bringing up a local MMAS voice assistant on
+Jetson. One Speaches container provides OpenAI-compatible Faster-Whisper ASR
+and Kokoro TTS. The LLM remains an independent OpenAI-compatible Chat
+Completions service, so it can be sized for the device and changed without
+restarting speech.
+
+```text
+browser microphone
+  -> Speaches Faster-Whisper (:18080)
+  -> any OpenAI-compatible LLM
+  -> Speaches Kokoro (:18080)
+  -> browser speaker
+```
+
+No Riva installation, NGC entitlement, or hosted API key is required. The
+Jetson Speaches image is currently a release candidate, not a production or GA
+claim.
+
+## Supported image
+
+The launcher pins this ARM64 CUDA 13 image:
+
+```text
+ghcr.io/nvidia-ai-iot/speaches:0.9.0-rc.3-cu130-sm87-sm110-auto
+```
+
+It contains CUDA code for SM 8.7 (Jetson Orin) and SM 11.0 (Jetson Thor). The
+published digest used for qualification is:
+
+```text
+sha256:abb7d669e73a32f8055500100cc05aa1b5e2ef1b7280d71a5391d458681e4d69
+```
+
+Use a Jetson Linux release whose GPU driver can run CUDA 13 containers. Keep
+enough free storage for the container and downloaded model cache. The starter
+models are intentionally small:
+
+| Stage | Default model | Purpose |
+| --- | --- | --- |
+| ASR | `Systran/faster-whisper-tiny.en` | Small English smoke-test model |
+| TTS | `speaches-ai/Kokoro-82M-v1.0-ONNX-fp16` | Multilingual Kokoro ONNX model |
+| Voice | `af_heart` | English Kokoro voice |
+
+## 1. Install MMAS
+
+From the repository root:
+
+```bash
+./scripts/setup_dev.sh
+source .venv/bin/activate
+```
+
+Docker and the NVIDIA container runtime must already be available. Check the
+host before downloading anything:
+
+```bash
+./scripts/speaches_speech.sh doctor
+```
+
+## 2. Start and verify speech
+
+```bash
+./scripts/speaches_speech.sh start
+./scripts/speaches_speech.sh verify
+```
+
+`start` pulls the pinned image, starts one GPU container on port `18080`, and
+downloads the two default models into the persistent Docker volume
+`mmas-speaches-models`. Re-running it is safe. `verify` synthesizes a short MP3
+and transcribes it through the two public APIs.
+
+Useful lifecycle commands are:
+
+```bash
+./scripts/speaches_speech.sh status
+./scripts/speaches_speech.sh models
+./scripts/speaches_speech.sh logs
+./scripts/speaches_speech.sh stop
+```
+
+`stop` removes the container but preserves downloaded models.
+
+## 3. Start an independent LLM
+
+MMAS only requires an OpenAI-compatible `/v1/chat/completions` endpoint. For a
+small first run, install Ollama and start this model:
+
+```bash
+ollama pull qwen2.5:0.5b
+```
+
+The bundled preset expects Ollama at `http://localhost:11434/v1`. You can
+instead use vLLM, llama.cpp, a hosted service, or another compatible server;
+change `llm.api_base` and `llm.model` in the UI or in a copied preset. See the
+LLM/VLM section of [INSTALL.md](../INSTALL.md) for alternatives.
+
+## 4. Start MMAS
+
+```bash
+multi-modal-ai-studio --preset speaches-jetson --port 8092
+```
+
+Open `https://localhost:8092`, or `https://JETSON_IP:8092` from another machine,
+accept the local development certificate, and allow browser microphone access.
+The recommended preset uses the portable REST ASR and REST TTS path.
+
+To exercise Realtime transcription instead, use:
+
+```bash
+multi-modal-ai-studio --preset speaches-realtime-asr-jetson --port 8092
+```
+
+Speaches currently performs VAD and sends completed speech chunks to
+Faster-Whisper. This provides a Realtime WebSocket session and speech-boundary
+events, but it is not model-native token-by-token Faster-Whisper decoding and
+may not provide partial transcript deltas. The REST preset is therefore the
+clearest baseline; use the Realtime preset to evaluate endpointing and
+barge-in.
+
+## API endpoints
+
+The same service supports both preset choices:
+
+| API | Endpoint |
+| --- | --- |
+| Health | `GET http://localhost:18080/health` |
+| Models | `GET http://localhost:18080/v1/models` |
+| REST ASR | `POST http://localhost:18080/v1/audio/transcriptions` |
+| REST TTS | `POST http://localhost:18080/v1/audio/speech` |
+| Realtime ASR | `ws://localhost:18080/v1/realtime?intent=transcription` |
+
+The launcher exposes the service on the host network without authentication.
+Use it only on a trusted development network or add an authenticated reverse
+proxy before broader exposure.
+
+## Model and port overrides
+
+Override launcher defaults with environment variables. Keep the preset model
+IDs and API port in sync:
+
+```bash
+ASR_MODEL=Systran/faster-whisper-small \
+TTS_MODEL=speaches-ai/Kokoro-82M-v1.0-ONNX-fp16 \
+SPEACHES_PORT=18080 \
+./scripts/speaches_speech.sh start
+```
+
+To pin the qualified digest rather than the readable tag:
+
+```bash
+SPEACHES_IMAGE=ghcr.io/nvidia-ai-iot/speaches@sha256:abb7d669e73a32f8055500100cc05aa1b5e2ef1b7280d71a5391d458681e4d69 \
+./scripts/speaches_speech.sh start
+```
+
+English is the P1 smoke-test language. The image also exposes Kokoro voices
+for Japanese, Chinese, and other languages; treat those as separate P2 quality
+tests and change the ASR model, language, and TTS voice together.
+
+## Troubleshooting
+
+- `No models found`: run `./scripts/speaches_speech.sh models`; if the defaults
+  are absent, run `start` again and inspect `logs`.
+- CUDA or GPU startup errors: run `doctor`, confirm the NVIDIA Docker runtime,
+  and verify that the host driver supports CUDA 13 containers.
+- Out of memory on smaller Orin devices: stop other GPU services, retain the
+  tiny ASR model and 0.5B LLM, and start each service sequentially.
+- No LLM models in MMAS: Speaches serves only ASR and TTS. Start the independent
+  LLM and reload its `/v1` endpoint in the LLM tab.
+- Remote browser microphone denied: access MMAS over HTTPS and grant microphone
+  permission for the Jetson URL.

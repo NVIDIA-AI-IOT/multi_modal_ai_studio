@@ -26,7 +26,9 @@ This script will:
 
 ## Run the app
 
-**Device support:** Voice and video use **browser devices (WebRTC)** by default. A **server USB microphone** (ALSA, e.g. EMEET) is supported—select it in the Devices tab; no PyAudio install needed on Linux. USB speaker and USB webcam on the server are not supported yet.
+**Device support:** Voice and video use **browser devices (WebRTC)** by default.
+On Linux, server-side ALSA USB microphones and speakers and V4L2 USB webcams
+can also be selected in the Devices tab.
 
 **View sessions only** (no Riva or LLM needed):
 
@@ -37,15 +39,28 @@ multi-modal-ai-studio --port 8092
 
 Open **https://localhost:8092** (accept the self-signed cert). Sessions in `sessions/` (or `--session-dir mock_sessions`) appear in the sidebar.
 
-**Voice with public local models on qualified Jetson Thor and Orin systems:**
-No Riva or NGC access is required. Follow
-[Open speech models on Jetson](docs/setup_open_models_jetson.md),
-then run:
+### Recommended quick start (release candidate)
+
+On Jetson Orin or Thor, use Speaches for Faster-Whisper ASR and Kokoro TTS.
+The LLM is a separate OpenAI-compatible service. No Riva or NGC access is
+required:
 
 ```bash
+./scripts/speaches_speech.sh start
+./scripts/speaches_speech.sh verify
+ollama pull qwen2.5:0.5b
+
 source .venv/bin/activate
-multi-modal-ai-studio --preset nvidia-open-models-speech-jetson --port 8092
+multi-modal-ai-studio --preset speaches-jetson --port 8092
 ```
+
+See [Speaches on Jetson](docs/setup_speaches_jetson.md) for prerequisites,
+Realtime ASR, model overrides, and troubleshooting.
+
+**NVIDIA Open Speech Models reference:** To compare Nemotron 3.5 ASR and
+Magpie TTS directly, follow
+[NVIDIA open speech models on Jetson](docs/setup_open_models_jetson.md). Its
+launcher owns only ASR and TTS; connect a separately managed LLM.
 
 **Voice with Riva + LLM:** Set up Riva and an LLM (e.g. Ollama) as in
 [NVIDIA Riva Setup](#nvidia-riva-setup-for-voice-asrtts) below, then:
@@ -721,7 +736,7 @@ pip install new-package
 Once installed:
 
 1. **Set up a backend**: See [LLM / VLM Backend Setup](#llm--vlm-backend-setup) (Ollama is the fastest way to get started)
-2. **Add voice**: Complete [NVIDIA Riva Setup](#nvidia-riva-setup-for-voice-asrtts)
+2. **Add voice**: Start with the [Speaches release-candidate quick start](docs/setup_speaches_jetson.md), or use [NVIDIA Riva](#nvidia-riva-setup-for-voice-asrtts) for an existing Riva deployment
 3. **Run the app**: See [Run the app](#run-the-app) above
 4. **Add vision**: Enable in the UI and see the [VLM Guide](docs/vlm_guide.md) for details
 

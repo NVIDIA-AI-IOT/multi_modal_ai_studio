@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # No Riva, NGC entitlement, or API key is required.
-# Public checkpoints are downloaded from Hugging Face on first use.
+# Public speech checkpoints are downloaded from Hugging Face on first use.
+# The LLM is a separately managed qualified example; the speech launcher does
+# not start or stop it.
 
 name: "NVIDIA Open Speech Models on Jetson"
-description: "Nemotron 3.5 ASR + OpenAI-compatible LLM + Magpie v2607 TTS"
+description: "Nemotron 3.5 ASR + independent OpenAI-compatible LLM + Magpie v2607 TTS"
 app_version: "0.1.0"
 
 asr:

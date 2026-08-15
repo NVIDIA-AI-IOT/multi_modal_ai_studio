@@ -16,10 +16,12 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 ### Multi-backend Architecture
 - Speech
+  - **Speaches**: recommended public Jetson quick start with Faster-Whisper and Kokoro (release candidate)
+  - **NVIDIA Open Speech Models**: Nemotron ASR and Magpie TTS reference services
   - **NVIDIA Riva**: gRPC streaming ASR/TTS (Jetson/ARM64)
   - **OpenAI-compatible REST**: independent transcription and speech services
-  - **OpenAI-compatible Realtime API**: Realtime API
-- LLM: **OpenAI-compatible** REST API, to works with many inference engines for various LLM/VLM models
+  - **OpenAI-compatible Realtime API**: WebSocket transcription and audio
+- LLM: **OpenAI-compatible** Chat Completions API, independently served by Ollama, llama.cpp, vLLM, or another provider
 - **Extensible**: Plugin-style backends; Azure Speech and others can be added
 
 ### Session Management
@@ -84,19 +86,43 @@ python -m multi_modal_ai_studio --port 8092
 
 Open **https://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
 
-### Public voice stack on Jetson Thor and Orin
+### Recommended quick start (release candidate)
 
-Run Nemotron 3.5 ASR, an OpenAI-compatible LLM, and Magpie multilingual TTS
-locally without Riva setup or an NGC entitlement:
+The recommended Jetson voice path uses one Speaches service for
+Faster-Whisper ASR and Kokoro TTS, plus a separately managed
+OpenAI-compatible LLM. It requires no Riva or NGC access. The pinned Speaches
+image is a release candidate while its Jetson packaging is being qualified.
+
+```bash
+# Start the speech service and download the small English starter models.
+./scripts/speaches_speech.sh start
+./scripts/speaches_speech.sh verify
+
+# Small LLM example. Any OpenAI-compatible Chat Completions service can replace it.
+ollama pull qwen2.5:0.5b
+
+# Start MMAS with browser microphone and speaker defaults.
+multi-modal-ai-studio --preset speaches-jetson --port 8092
+```
+
+See [Speaches on Jetson](docs/setup_speaches_jetson.md) for prerequisites,
+model overrides, API checks, Realtime ASR, and troubleshooting.
+
+### NVIDIA open speech model reference stack
+
+To evaluate Nemotron 3.5 ASR and Magpie TTS directly, build and start the two
+NVIDIA speech services. The script intentionally does not install or manage an
+LLM:
 
 ```bash
 ./scripts/nvidia_open_models_speech.sh build
 ./scripts/nvidia_open_models_speech.sh start
-multi-modal-ai-studio --preset nvidia-open-models-speech-jetson --port 8092
+./scripts/nvidia_open_models_speech.sh verify
 ```
 
-See [Open speech models on Jetson](docs/setup_open_models_jetson.md) for
-verified API calls, Thor and Orin measurements, and model cache behavior.
+Connect a separately managed OpenAI-compatible LLM, then use either the REST
+or Realtime NVIDIA Open Models preset. See
+[NVIDIA open speech models on Jetson](docs/setup_open_models_jetson.md).
 
 ### Kill a Running Server
 
@@ -133,12 +159,13 @@ python -m multi_modal_ai_studio --mode headless \
 | Doc | Description |
 |-----|-------------|
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
-| [Open Models on Jetson](docs/setup_open_models_jetson.md) | Public Nemotron ASR + LLM + Magpie TTS |
+| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended RC quick start: Faster-Whisper + Kokoro |
+| [NVIDIA Open Speech Models](docs/setup_open_models_jetson.md) | Nemotron ASR + Magpie TTS reference services |
 | [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
 | [Realtime Speech](docs/realtime_speech.md) | Realtime transcription, response audio, and Speaches reference setup |
 | [Riva Setup](docs/setup_riva.md) | NVIDIA Riva ASR/TTS (Jetson/ARM64) |
 | [VLM Guide](docs/vlm_guide.md) | Vision-language models, frame capture, tuning |
-| [Architecture](docs/architecture.md) | System design and components |
+| [Architecture](docs/development/architecture.md) | System design and components |
 
 ## 🤝 Contributing
 
