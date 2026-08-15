@@ -41,14 +41,16 @@ Open **https://localhost:8092** (accept the self-signed cert). Sessions in `sess
 
 ### Recommended quick start (release candidate)
 
-On Jetson Orin or Thor, use Speaches for Faster-Whisper ASR and Kokoro TTS.
-The LLM is a separate OpenAI-compatible service. No Riva or NGC access is
-required:
+On Jetson Orin or Thor, use Speaches for Faster-Whisper ASR and Kokoro TTS,
+plus text-only Gemma 4 E2B served by llama.cpp. Both services run in containers
+pulled from GHCR. No separate Ollama installation, Riva setup, or NGC access
+is required:
 
 ```bash
 ./scripts/speaches_speech.sh start
 ./scripts/speaches_speech.sh verify
-ollama pull qwen2.5:0.5b
+./scripts/gemma4_llm.sh start
+./scripts/gemma4_llm.sh verify
 
 source .venv/bin/activate
 multi-modal-ai-studio --preset speaches-jetson --port 8092

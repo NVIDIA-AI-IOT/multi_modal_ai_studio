@@ -35,12 +35,22 @@ def test_speaches_launcher_matches_recommended_preset() -> None:
 
 def test_speaches_quick_start_keeps_llm_independent() -> None:
     preset = yaml.safe_load(_text("presets/speaches-jetson.yaml"))
+    realtime_preset = yaml.safe_load(
+        _text("presets/speaches-realtime-asr-jetson.yaml")
+    )
     readme = _text("README.md")
+    launcher = _text("scripts/gemma4_llm.sh")
 
     assert "Recommended quick start (release candidate)" in readme
-    assert preset["llm"]["api_base"] == "http://localhost:11434/v1"
-    assert preset["llm"]["model"] == "qwen2.5:0.5b"
-    assert "separately managed" in readme
+    assert preset["llm"]["api_base"] == "http://localhost:8080/v1"
+    assert preset["llm"]["model"] == "gemma-4-e2b"
+    assert realtime_preset["llm"] == preset["llm"]
+    assert "gemma-4-E2B-it-GGUF:Q4_K_S" in launcher
+    assert "--no-mmproj" in launcher
+    assert "--spec-type draft-mtp" in launcher
+    assert "latest-jetson-orin" in launcher
+    assert "latest-jetson-thor" in launcher
+    assert "./scripts/gemma4_llm.sh start" in readme
 
 
 def test_nvidia_open_models_launcher_owns_only_asr_and_tts() -> None:

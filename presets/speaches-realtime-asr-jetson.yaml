@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: "Speaches Realtime ASR on Jetson (RC)"
-description: "Realtime chunked Faster-Whisper ASR + independent LLM + REST Kokoro TTS"
+description: "Realtime chunked Faster-Whisper ASR + text-only Gemma 4 E2B + REST Kokoro TTS"
 app_version: "0.1.0"
 
 asr:
@@ -22,10 +22,9 @@ asr:
 
 llm:
   scheme: openai
-  # The speech launcher does not manage the LLM. This small Ollama model is an
-  # example; replace both fields with any OpenAI-compatible service.
-  api_base: http://localhost:11434/v1
-  model: qwen2.5:0.5b
+  # The independent Gemma launcher serves this text-only OpenAI-compatible API.
+  api_base: http://localhost:8080/v1
+  model: gemma-4-e2b
   temperature: 0.3
   max_tokens: 256
   history_turns: 3
@@ -34,6 +33,7 @@ llm:
     You are a helpful voice AI assistant.
     Answer briefly in English.
     Plain text only, no markdown, no bullet points, no emojis.
+  enable_vision: false
 
 tts:
   scheme: openai-rest

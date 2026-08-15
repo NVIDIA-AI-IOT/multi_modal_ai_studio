@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: "Speaches Quick Start on Jetson (RC)"
-description: "Small Faster-Whisper + independent OpenAI-compatible LLM + Kokoro TTS"
+description: "Small Faster-Whisper + text-only Gemma 4 E2B + Kokoro TTS"
 app_version: "0.1.0"
 
 asr:
@@ -18,10 +18,9 @@ asr:
 
 llm:
   scheme: openai
-  # The speech launcher does not manage the LLM. This small Ollama model is an
-  # example; replace both fields with any OpenAI-compatible service.
-  api_base: http://localhost:11434/v1
-  model: qwen2.5:0.5b
+  # The independent Gemma launcher serves this text-only OpenAI-compatible API.
+  api_base: http://localhost:8080/v1
+  model: gemma-4-e2b
   temperature: 0.3
   max_tokens: 256
   history_turns: 3

@@ -89,17 +89,20 @@ Open **https://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) 
 ### Recommended quick start (release candidate)
 
 The recommended Jetson voice path uses one Speaches service for
-Faster-Whisper ASR and Kokoro TTS, plus a separately managed
-OpenAI-compatible LLM. It requires no Riva or NGC access. The pinned Speaches
-image is a release candidate while its Jetson packaging is being qualified.
+Faster-Whisper ASR and Kokoro TTS, plus a text-only Gemma 4 E2B llama.cpp
+service. Both are pulled from GHCR by the bundled launchers, so no separate
+Ollama installation, Riva setup, or NGC access is required. The pinned
+Speaches image is a release candidate while its Jetson packaging is being
+qualified.
 
 ```bash
 # Start the speech service and download the small English starter models.
 ./scripts/speaches_speech.sh start
 ./scripts/speaches_speech.sh verify
 
-# Small LLM example. Any OpenAI-compatible Chat Completions service can replace it.
-ollama pull qwen2.5:0.5b
+# Start text-only Gemma 4 E2B with the correct Orin or Thor image.
+./scripts/gemma4_llm.sh start
+./scripts/gemma4_llm.sh verify
 
 # Start MMAS with browser microphone and speaker defaults.
 multi-modal-ai-studio --preset speaches-jetson --port 8092
@@ -159,7 +162,7 @@ python -m multi_modal_ai_studio --mode headless \
 | Doc | Description |
 |-----|-------------|
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
-| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended RC quick start: Faster-Whisper + Kokoro |
+| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended RC quick start: Faster-Whisper + Gemma 4 E2B + Kokoro |
 | [NVIDIA Open Speech Models](docs/setup_open_models_jetson.md) | Nemotron ASR + Magpie TTS reference services |
 | [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
 | [Realtime Speech](docs/realtime_speech.md) | Realtime transcription, response audio, and Speaches reference setup |

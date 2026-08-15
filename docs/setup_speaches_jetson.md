@@ -14,7 +14,7 @@ restarting speech.
 ```text
 browser microphone
   -> Speaches Faster-Whisper (:18080)
-  -> any OpenAI-compatible LLM
+  -> text-only Gemma 4 E2B llama.cpp (:8080)
   -> Speaches Kokoro (:18080)
   -> browser speaker
 ```
@@ -23,7 +23,7 @@ No Riva installation, NGC entitlement, or hosted API key is required. The
 Jetson Speaches image is currently a release candidate, not a production or GA
 claim.
 
-## Supported image
+## Supported images
 
 The launcher pins this ARM64 CUDA 13 image:
 
@@ -38,6 +38,16 @@ published digest used for qualification is:
 sha256:abb7d669e73a32f8055500100cc05aa1b5e2ef1b7280d71a5391d458681e4d69
 ```
 
+The Gemma launcher follows the device-specific llama.cpp images used by the
+[Jetson AI Lab Gemma 4 tutorial](https://www.jetson-ai-lab.com/tutorials/gemma4-on-jetson/):
+
+| Device | llama.cpp image |
+| --- | --- |
+| Jetson Orin | `ghcr.io/nvidia-ai-iot/llama_cpp:latest-jetson-orin` |
+| Jetson Thor | `ghcr.io/nvidia-ai-iot/llama_cpp:latest-jetson-thor` |
+
+Set `LLAMA_CPP_IMAGE` to pin or replace that image without editing the script.
+
 Use a Jetson Linux release whose GPU driver can run CUDA 13 containers. Keep
 enough free storage for the container and downloaded model cache. The starter
 models are intentionally small:
@@ -47,6 +57,7 @@ models are intentionally small:
 | ASR | `Systran/faster-whisper-tiny.en` | Small English smoke-test model |
 | TTS | `speaches-ai/Kokoro-82M-v1.0-ONNX-fp16` | Multilingual Kokoro ONNX model |
 | Voice | `af_heart` | English Kokoro voice |
+| LLM | `unsloth/gemma-4-E2B-it-GGUF:Q4_K_S` | Text-only Gemma 4 E2B with optional MTP |
 
 ## 1. Install MMAS
 
@@ -87,19 +98,39 @@ Useful lifecycle commands are:
 
 `stop` removes the container but preserves downloaded models.
 
-## 3. Start an independent LLM
+## 3. Start the independent LLM
 
-MMAS only requires an OpenAI-compatible `/v1/chat/completions` endpoint. For a
-small first run, install Ollama and start this model:
+The recommended LLM is Gemma 4 E2B Q4_K_S served by the Jetson llama.cpp
+container:
 
 ```bash
-ollama pull qwen2.5:0.5b
+./scripts/gemma4_llm.sh start
+./scripts/gemma4_llm.sh verify
 ```
 
-The bundled preset expects Ollama at `http://localhost:11434/v1`. You can
-instead use vLLM, llama.cpp, a hosted service, or another compatible server;
-change `llm.api_base` and `llm.model` in the UI or in a copied preset. See the
-LLM/VLM section of [INSTALL.md](../INSTALL.md) for alternatives.
+The launcher detects Jetson Orin or Thor and pulls the corresponding Jetson AI
+Lab llama.cpp image. It limits context to 4096 tokens, uses one server slot,
+and enables Gemma's small MTP draft by default. `--no-mmproj` prevents the
+combined Vision/Audio projector (about 986 MB) from being downloaded or
+loaded; MMAS vision is disabled in this preset.
+
+The model cache is preserved in the `mmas-gemma4-models` Docker volume. Useful
+lifecycle commands are:
+
+```bash
+./scripts/gemma4_llm.sh status
+./scripts/gemma4_llm.sh models
+./scripts/gemma4_llm.sh logs
+./scripts/gemma4_llm.sh stop
+```
+
+Set `GEMMA4_ENABLE_MTP=false` before `start` to disable MTP. You can instead
+use vLLM, Ollama, a hosted service, or another compatible server; change
+`llm.api_base` and `llm.model` in the UI or in a copied preset.
+
+For a smaller-memory fallback, serve Qwen 2.5 0.5B with any compatible server
+and point the preset at it. Gemma 4 E2B is the default because it matches the
+Jetson AI Lab path and the pipeline used for this project's Orin Nano tests.
 
 ## 4. Start MMAS
 
@@ -170,8 +201,9 @@ tests and change the ASR model, language, and TTS voice together.
 - CUDA or GPU startup errors: run `doctor`, confirm the NVIDIA Docker runtime,
   and verify that the host driver supports CUDA 13 containers.
 - Out of memory on smaller Orin devices: stop other GPU services, retain the
-  tiny ASR model and 0.5B LLM, and start each service sequentially.
+  tiny ASR model, use the 4096-token Gemma default, and start each service
+  sequentially. If needed, choose a smaller OpenAI-compatible LLM.
 - No LLM models in MMAS: Speaches serves only ASR and TTS. Start the independent
-  LLM and reload its `/v1` endpoint in the LLM tab.
+  Gemma service and reload `http://localhost:8080/v1` in the LLM tab.
 - Remote browser microphone denied: access MMAS over HTTPS and grant microphone
   permission for the Jetson URL.

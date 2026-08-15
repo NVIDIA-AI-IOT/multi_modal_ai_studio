@@ -38,7 +38,7 @@ The launcher sets the required loopback URL and pins
 quick start. The Realtime preset uses:
 
 - Realtime WebSocket chunk transcription for Faster-Whisper ASR;
-- a separately managed OpenAI-compatible LLM stage;
+- the separately managed text-only Gemma 4 E2B llama.cpp service by default;
 - REST `/v1/audio/speech` for Kokoro TTS.
 
 Speaches 0.9.0-rc.3 emits speech start/end and final transcripts, but
