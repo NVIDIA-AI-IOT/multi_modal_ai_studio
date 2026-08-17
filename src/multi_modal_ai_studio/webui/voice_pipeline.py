@@ -82,6 +82,7 @@ logger = logging.getLogger(__name__)
 
 _RED = "\033[91m"
 _RESET = "\033[0m"
+_SESSION_STOP_GRACE_SECONDS = 3.0
 
 
 class BargeInController:
@@ -94,7 +95,11 @@ class BargeInController:
         partial_count: int = 3,
     ) -> None:
         self.enabled = bool(enabled)
-        self.trigger = "partial" if trigger == "partial" else "final"
+        self.trigger = (
+            trigger
+            if trigger in {"final", "partial", "vad"}
+            else "final"
+        )
         self.partial_count = max(1, min(20, int(partial_count or 3)))
         self.requested = asyncio.Event()
         self.tts_active = False
@@ -117,6 +122,8 @@ class BargeInController:
         """Observe ASR activity and return True when it requests interruption."""
         if not self.enabled or not (text or "").strip():
             return False
+        if self.trigger == "vad":
+            return False
         if self.trigger == "partial":
             if is_final:
                 self._partials_seen = 0
@@ -135,6 +142,13 @@ class BargeInController:
         # queued turn can start.
         self.requested.set()
         return self.tts_active
+
+    def observe_vad_start(self) -> bool:
+        """Request the low-latency VAD barge-in only while TTS is active."""
+        if not self.enabled or self.trigger != "vad" or not self.tts_active:
+            return False
+        self.requested.set()
+        return True
 
 
 async def _wait_for_task_or_barge_in(
@@ -1117,6 +1131,7 @@ async def _run_voice_pipeline(
     """
     logger.info("Voice pipeline starting")
     session = Session(config=config)
+    session.system_info = system_stats_module.gather_system_info()
     use_server_mic = config.devices.audio_input_source in ("alsa", "usb") and bool(
         config.devices.audio_input_device
     )
@@ -1702,6 +1717,10 @@ async def _run_voice_pipeline(
                             # Both mics: start session and set pipeline_live so ASR/timeline run from here on
                             if session.timeline.start_time is None:
                                 session.start()
+                                await ws.send_str(json.dumps({
+                                    "type": "session_started",
+                                    "session_id": session.session_id,
+                                }))
                                 await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
                                 # VLM: Start browser frame capture when session starts
                                 await start_vlm_capture()
@@ -1813,6 +1832,71 @@ async def _run_voice_pipeline(
         finally:
             stopped.set()
 
+    async def request_tts_barge_in(
+        *,
+        trigger_name: str,
+        text: str,
+        trigger_ts: float,
+        record_event: bool,
+    ) -> None:
+        """Record one interruption and cancel any active synthesis request."""
+        nonlocal barge_in_cancel_requested_at
+        if record_event:
+            turn_id = (
+                session._current_turn.get("turn_id")
+                if session._current_turn
+                else len(session.turns) + 1
+            )
+            trigger_data = {
+                "trigger": trigger_name,
+                "text": text,
+                "turn_id": turn_id,
+            }
+            session.timeline.add_event(
+                "barge_in_triggered",
+                Lane.SYSTEM,
+                data=trigger_data,
+                timestamp=trigger_ts,
+            )
+            await send_event({
+                "event_type": "barge_in_triggered",
+                "lane": "system",
+                "data": trigger_data,
+                "timestamp": trigger_ts,
+            })
+            cancel_ts = (
+                time.time() - session.timeline.start_time
+                if session.timeline.start_time
+                else trigger_ts
+            )
+            barge_in_cancel_requested_at = cancel_ts
+            cancel_data = {
+                "reason": "barge_in",
+                "trigger": trigger_name,
+                "turn_id": turn_id,
+            }
+            session.timeline.add_event(
+                "tts_cancel_requested",
+                Lane.TTS,
+                data=cancel_data,
+                timestamp=cancel_ts,
+            )
+            await send_event({
+                "event_type": "tts_cancel_requested",
+                "lane": "tts",
+                "data": cancel_data,
+                "timestamp": cancel_ts,
+            })
+
+        cancel_synthesis = getattr(tts, "cancel_synthesis", None)
+        if callable(cancel_synthesis):
+            cancelled_rpcs = cancel_synthesis()
+            if cancelled_rpcs:
+                logger.info(
+                    "[barge_in] Cancelled %d active TTS RPC(s)",
+                    cancelled_rpcs,
+                )
+
     async def asr_consumer() -> None:
         """Independent ASR task: forward every partial/final to client immediately; enqueue finals for turn_executor.
         Enables barge-in (turn_executor can be cancelled when new final arrives) and avoids phantom partial at tts_complete.
@@ -1923,7 +2007,7 @@ async def _run_voice_pipeline(
                             else 0
                         )
                     control_data = {
-                        "source": "openai-realtime",
+                        "source": result_metadata.get("backend") or "asr",
                         "backend": result_metadata.get("backend"),
                         "model": result_metadata.get("model"),
                         "item_id": result_metadata.get("item_id"),
@@ -1940,6 +2024,19 @@ async def _run_voice_pipeline(
                         "data": control_data,
                         "timestamp": control_ts,
                     })
+                    if (
+                        control_event == "vad_start"
+                        and barge_in.observe_vad_start()
+                    ):
+                        logger.info(
+                            "[barge_in] Backend interruption requested by VAD start"
+                        )
+                        await request_tts_barge_in(
+                            trigger_name="vad_start",
+                            text="",
+                            trigger_ts=control_ts,
+                            record_event=True,
+                        )
                     continue
 
                 asr_received_count += 1
@@ -1982,6 +2079,7 @@ async def _run_voice_pipeline(
                 if (
                     is_final
                     and asr_config.scheme == "openai-rest"
+                    and not result_metadata.get("vad_events_emitted")
                     and result_start is not None
                     and result_end is not None
                     and result_end >= result_start
@@ -2044,63 +2142,16 @@ async def _run_voice_pipeline(
                     not interruption_was_requested
                     and barge_in.requested.is_set()
                 ):
-                    if interruption_active:
-                        trigger_name = (
-                            "final_transcript" if is_final else "partial_transcript"
-                        )
-                        turn_id = (
-                            session._current_turn.get("turn_id")
-                            if session._current_turn
-                            else len(session.turns) + 1
-                        )
-                        trigger_data = {
-                            "trigger": trigger_name,
-                            "text": text,
-                            "turn_id": turn_id,
-                        }
-                        session.timeline.add_event(
-                            "barge_in_triggered",
-                            Lane.SYSTEM,
-                            data=trigger_data,
-                            timestamp=ts,
-                        )
-                        await send_event({
-                            "event_type": "barge_in_triggered",
-                            "lane": "system",
-                            "data": trigger_data,
-                            "timestamp": ts,
-                        })
-                        cancel_ts = (
-                            time.time() - session.timeline.start_time
-                            if session.timeline.start_time
-                            else ts
-                        )
-                        barge_in_cancel_requested_at = cancel_ts
-                        cancel_data = {
-                            "reason": "barge_in",
-                            "trigger": trigger_name,
-                            "turn_id": turn_id,
-                        }
-                        session.timeline.add_event(
-                            "tts_cancel_requested",
-                            Lane.TTS,
-                            data=cancel_data,
-                            timestamp=cancel_ts,
-                        )
-                        await send_event({
-                            "event_type": "tts_cancel_requested",
-                            "lane": "tts",
-                            "data": cancel_data,
-                            "timestamp": cancel_ts,
-                        })
-                    cancel_synthesis = getattr(tts, "cancel_synthesis", None)
-                    if callable(cancel_synthesis):
-                        cancelled_rpcs = cancel_synthesis()
-                        if cancelled_rpcs:
-                            logger.info(
-                                "[barge_in] Cancelled %d active TTS RPC(s)",
-                                cancelled_rpcs,
-                            )
+                    await request_tts_barge_in(
+                        trigger_name=(
+                            "final_transcript"
+                            if is_final
+                            else "partial_transcript"
+                        ),
+                        text=text,
+                        trigger_ts=ts,
+                        record_event=interruption_active,
+                    )
 
                 if not is_final:
                     # VLM: Track speech start time for frame synchronization.
@@ -3015,11 +3066,22 @@ async def _run_voice_pipeline(
             system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS / 1000.0
         )
 
-        async def emit_sample(cpu: Optional[float], gpu: Optional[float]) -> None:
-            t = time.time() - session.timeline.start_time
+        async def emit_sample(
+            cpu: Optional[float],
+            gpu: Optional[float],
+            *,
+            timestamp: Optional[float] = None,
+            record: bool = True,
+        ) -> None:
+            t = (
+                time.time() - session.timeline.start_time
+                if timestamp is None
+                else timestamp
+            )
             stats = {"cpu_percent": cpu, "gpu_percent": gpu}
             system_stats_module.set_system_stats_cache(stats)
-            session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
+            if record:
+                session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
             try:
                 await ws.send_str(json.dumps({
                     "type": "system_stats",
@@ -3034,24 +3096,84 @@ async def _run_voice_pipeline(
             await asyncio.sleep(max(0.0, deadline - loop.time()))
 
         async def run_sysfs_sampler(path: Path) -> bool:
-            """Read Orin's cheap nvgpu load counter on a fixed 10 Hz grid."""
-            deadline = loop.time()
-            while not stopped.is_set():
-                gpu = system_stats_module.read_jetson_sysfs_gpu_percent(path)
-                if gpu is None:
-                    logger.warning("Jetson GPU load counter became unreadable: %s", path)
-                    return False
-                await emit_sample(
-                    system_stats_module.read_cpu_percent_nonblocking(),
-                    gpu,
-                )
-                deadline = system_stats_module.next_periodic_deadline(
-                    deadline,
-                    loop.time(),
-                    interval,
-                )
-                await sleep_until(deadline)
-            return True
+            """Sample Orin in a thread so inference cannot starve telemetry."""
+            samples: queue.Queue = queue.Queue(maxsize=3600)
+            sampler_stop = threading.Event()
+            unreadable = threading.Event()
+
+            def collect() -> None:
+                deadline = time.monotonic()
+                try:
+                    while not sampler_stop.is_set() and not stopped.is_set():
+                        gpu = system_stats_module.read_jetson_sysfs_gpu_percent(
+                            path
+                        )
+                        if gpu is None:
+                            unreadable.set()
+                            logger.warning(
+                                "Jetson GPU load counter became unreadable: %s",
+                                path,
+                            )
+                            break
+                        cpu = system_stats_module.read_cpu_percent_nonblocking()
+                        timestamp = time.time() - session.timeline.start_time
+                        system_stats_module.set_system_stats_cache({
+                            "cpu_percent": cpu,
+                            "gpu_percent": gpu,
+                        })
+                        # Persist from the sampler thread. WebSocket delivery
+                        # may lag under unified-memory pressure, but replay data
+                        # must retain the real 10 Hz measurement grid.
+                        session.system_stats.append({
+                            "t": timestamp,
+                            "cpu": cpu,
+                            "gpu": gpu,
+                        })
+                        try:
+                            samples.put_nowait((timestamp, cpu, gpu))
+                        except queue.Full:
+                            logger.warning(
+                                "Dropping live telemetry delivery; persisted "
+                                "samples remain complete"
+                            )
+                        deadline = (
+                            system_stats_module.next_periodic_deadline(
+                                deadline,
+                                time.monotonic(),
+                                interval,
+                            )
+                        )
+                        sampler_stop.wait(
+                            max(0.0, deadline - time.monotonic())
+                        )
+                finally:
+                    try:
+                        samples.put_nowait(None)
+                    except queue.Full:
+                        pass
+
+            sampler = threading.Thread(
+                target=collect,
+                name="mmas-system-stats",
+                daemon=True,
+            )
+            sampler.start()
+            try:
+                while not stopped.is_set():
+                    sample = await loop.run_in_executor(None, samples.get)
+                    if sample is None:
+                        break
+                    timestamp, cpu, gpu = sample
+                    await emit_sample(
+                        cpu,
+                        gpu,
+                        timestamp=timestamp,
+                        record=False,
+                    )
+            finally:
+                sampler_stop.set()
+                sampler.join(timeout=1.0)
+            return not unreadable.is_set()
 
         async def run_nvidia_smi_stream() -> bool:
             """Consume one persistent nvidia-smi process; return False on failure."""
@@ -3170,6 +3292,15 @@ async def _run_voice_pipeline(
         turn_task = asyncio.create_task(turn_executor())
         system_stats_task = asyncio.create_task(_system_stats_loop())
         await stopped.wait()
+    tts_was_active_at_stop = barge_in.tts_active
+    cancel_synthesis = getattr(tts, "cancel_synthesis", None)
+    if callable(cancel_synthesis):
+        cancelled_rpcs = cancel_synthesis()
+        if cancelled_rpcs:
+            logger.info(
+                "[session_stop] Cancelled %d active TTS request(s)",
+                cancelled_rpcs,
+            )
     stop_server_mic_capture(
         stop_capture,
         capture_thread,
@@ -3183,7 +3314,16 @@ async def _run_voice_pipeline(
             await system_stats_task
         except asyncio.CancelledError:
             pass
-    await asr.stop_stream()
+    try:
+        await asyncio.wait_for(
+            asr.stop_stream(),
+            timeout=_SESSION_STOP_GRACE_SECONDS + 0.5,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "ASR stream did not stop within %.1fs",
+            _SESSION_STOP_GRACE_SECONDS + 0.5,
+        )
     recv_task.cancel()
     if asr_task is not None:
         asr_task.cancel()
@@ -3206,11 +3346,18 @@ async def _run_voice_pipeline(
             pass
     if turn_task is not None:
         try:
-            await asyncio.wait_for(turn_task, timeout=120.0)
+            await asyncio.wait_for(
+                turn_task,
+                timeout=(
+                    0.5
+                    if tts_was_active_at_stop
+                    else _SESSION_STOP_GRACE_SECONDS
+                ),
+            )
         except asyncio.CancelledError:
             pass
         except asyncio.TimeoutError:
-            logger.warning("turn_executor did not finish within 120s")
+            logger.warning("Cancelling turn_executor during session stop")
             turn_task.cancel()
             try:
                 await turn_task
@@ -3266,7 +3413,10 @@ async def _run_voice_pipeline(
                 logger.info("Session title: %s", session.name)
 
         try:
-            await asyncio.wait_for(_generate_title(), timeout=15.0)
+            await asyncio.wait_for(
+                _generate_title(),
+                timeout=_SESSION_STOP_GRACE_SECONDS,
+            )
         except (asyncio.TimeoutError, Exception) as e:
             logger.warning("Could not generate session title: %s", e)
 

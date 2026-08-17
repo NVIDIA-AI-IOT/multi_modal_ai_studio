@@ -45,6 +45,7 @@ from multi_modal_ai_studio.devices.local import (
 )
 from multi_modal_ai_studio.webui.voice_pipeline import handle_voice_ws, handle_mic_preview_ws
 from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
+from multi_modal_ai_studio.webui.system_stats import gather_system_info
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -499,6 +500,7 @@ class WebUIServer:
         self._session_dir_override: Optional[str] = None  # "sessions" | "mock_sessions" | None
         self.ssl_context = ssl_context
         self.initial_config = initial_config
+        self.system_info = gather_system_info()
         self._openai_tts_language_cache: Dict[tuple, Set[str]] = {}
         self.app = web.Application()
         self.app["session_dir"] = self.session_dir
@@ -532,6 +534,7 @@ class WebUIServer:
         self.app.router.add_get('/api/devices/audio-outputs', self.handle_list_audio_outputs)
         self.app.router.add_get('/api/camera/stream', self.handle_camera_stream)
         self.app.router.add_get('/api/config/initial', self.handle_initial_config)
+        self.app.router.add_get('/api/system-info', self.handle_system_info)
         self.app.router.add_get('/api/config/defaults', self.handle_config_defaults)
         self.app.router.add_get('/api/presets', self.handle_list_presets)
         self.app.router.add_post('/api/presets', self.handle_save_preset)
@@ -727,6 +730,10 @@ class WebUIServer:
         if self.initial_config:
             return web.json_response(self.initial_config)
         return web.json_response({})
+
+    async def handle_system_info(self, request: web.Request) -> web.Response:
+        """GET /api/system-info: return the host identity recorded with new sessions."""
+        return web.json_response(self.system_info)
 
     async def handle_config_defaults(self, request: web.Request) -> web.Response:
         """GET /api/config/defaults: return a full SessionConfig with all schema defaults.

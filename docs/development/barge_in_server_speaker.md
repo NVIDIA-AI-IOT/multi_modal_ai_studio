@@ -21,7 +21,7 @@ The trigger is configured by:
 ```yaml
 app:
   barge_in_enabled: true
-  barge_in_trigger: final   # final or partial
+  barge_in_trigger: final   # final, partial, or vad
   barge_in_partial_count: 3
 ```
 
