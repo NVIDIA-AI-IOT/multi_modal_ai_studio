@@ -49,6 +49,7 @@ def test_speaches_quick_start_keeps_llm_independent() -> None:
     assert "--no-mmproj" in launcher
     assert "--spec-type draft-mtp" in launcher
     assert "--spec-draft-n-max 3" in launcher
+    assert 'GEMMA4_CONTEXT_SIZE="${GEMMA4_CONTEXT_SIZE:-2048}"' in launcher
     assert 'GEMMA4_REASONING="${GEMMA4_REASONING:-off}"' in launcher
     assert '--reasoning "${GEMMA4_REASONING}"' in launcher
     assert '${GEMMA4_CACHE_DIR}:/root/.cache/huggingface' in launcher

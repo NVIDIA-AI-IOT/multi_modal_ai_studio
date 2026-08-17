@@ -109,7 +109,7 @@ container:
 ```
 
 The launcher detects Jetson Orin or Thor and pulls the corresponding Jetson AI
-Lab llama.cpp image. It limits context to 4096 tokens, uses one server slot,
+Lab llama.cpp image. It limits context to 2048 tokens, uses one server slot,
 enables Gemma's small MTP draft, and disables hidden reasoning by default.
 Reasoning is disabled because a short voice response should not wait several
 seconds for an internal thinking trace before its first audible token.
@@ -217,7 +217,7 @@ tests and change the ASR model, language, and TTS voice together.
 - CUDA or GPU startup errors: run `doctor`, confirm the NVIDIA Docker runtime,
   and verify that the host driver supports CUDA 13 containers.
 - Out of memory on smaller Orin devices: stop other GPU services, retain the
-  tiny ASR model, use the 4096-token Gemma default, and start each service
+  tiny ASR model, use the 2048-token Gemma default, and start each service
   sequentially. If needed, choose a smaller OpenAI-compatible LLM.
 - No LLM models in MMAS: Speaches serves only ASR and TTS. Start the independent
   Gemma service and reload `http://localhost:8080/v1` in the LLM tab.
