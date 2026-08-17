@@ -7,6 +7,7 @@ import struct
 import time
 from types import SimpleNamespace
 
+import aiohttp
 import pytest
 
 from multi_modal_ai_studio.backends.asr.openai_rest import OpenAIRestASRBackend
@@ -349,6 +350,22 @@ class _FakeTTSSession:
         return _FakeRequestContext(_FakeResponse())
 
 
+class _DisconnectOnceTTSSession(_FakeTTSSession):
+    def post(self, _url, *, json, headers):
+        self.inputs.append(json["input"])
+        if len(self.inputs) == 1:
+            return _FakeRequestContextThatDisconnects()
+        return _FakeRequestContext(_FakeResponse())
+
+
+class _FakeRequestContextThatDisconnects:
+    async def __aenter__(self):
+        raise aiohttp.ServerDisconnectedError()
+
+    async def __aexit__(self, *_args):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_openai_rest_tts_preserves_normal_completed_llm_response():
     backend = OpenAIRestTTSBackend(
@@ -375,6 +392,27 @@ async def test_openai_rest_tts_preserves_normal_completed_llm_response():
     assert fake_session.inputs == [text]
     assert chunks
     assert not any(chunk.is_final for chunk in chunks[:-1])
+    assert chunks[-1].is_final
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_tts_retries_stale_keepalive_before_audio():
+    backend = OpenAIRestTTSBackend(
+        TTSConfig(
+            scheme="openai-rest",
+            api_base="http://localhost:8082/v1",
+            model="speaches-ai/Kokoro-82M-v1.0-ONNX-fp16",
+            voice="af_heart",
+            sample_rate=24000,
+        )
+    )
+    fake_session = _DisconnectOnceTTSSession()
+    backend._session = fake_session
+
+    chunks = [chunk async for chunk in backend.synthesize_stream("Hello")]
+
+    assert fake_session.inputs == ["Hello", "Hello"]
+    assert chunks
     assert chunks[-1].is_final
 
 
