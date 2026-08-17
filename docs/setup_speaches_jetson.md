@@ -110,16 +110,19 @@ container:
 
 The launcher detects Jetson Orin or Thor and pulls the corresponding Jetson AI
 Lab llama.cpp image. It limits context to 4096 tokens, uses one server slot,
-and enables Gemma's small MTP draft by default. `--no-mmproj` prevents the
-combined Vision/Audio projector (about 986 MB) from being downloaded or
-loaded; MMAS vision is disabled in this preset.
+enables Gemma's small MTP draft, and disables hidden reasoning by default.
+Reasoning is disabled because a short voice response should not wait several
+seconds for an internal thinking trace before its first audible token.
+`--no-mmproj` prevents the combined Vision/Audio projector (about 986 MB) from
+being downloaded or loaded; MMAS vision is disabled in this preset.
 
 The model, quantization, and MTP arguments match the command planned for the
 Jetson AI Lab model page:
 
 ```bash
 llama-server -hf unsloth/gemma-4-E2B-it-GGUF:Q4_K_S \
-  --spec-type draft-mtp --spec-draft-n-max 3
+  --spec-type draft-mtp --spec-draft-n-max 3 \
+  --reasoning off
 ```
 
 MMAS adds `--no-mmproj` because this voice pipeline uses Gemma only as a text
@@ -136,8 +139,10 @@ Useful lifecycle commands are:
 ```
 
 Set `GEMMA4_ENABLE_MTP=false` before `start` to disable MTP. You can instead
-use vLLM, Ollama, a hosted service, or another compatible server; change
-`llm.api_base` and `llm.model` in the UI or in a copied preset.
+set `GEMMA4_REASONING=auto` (or `on`) before `start` when a use case benefits
+from a reasoning trace and can accept the extra time to first speech. You can
+instead use vLLM, Ollama, a hosted service, or another compatible server;
+change `llm.api_base` and `llm.model` in the UI or in a copied preset.
 
 For a smaller-memory fallback, serve Qwen 2.5 0.5B with any compatible server
 and point the preset at it. Gemma 4 E2B is the default because it matches the

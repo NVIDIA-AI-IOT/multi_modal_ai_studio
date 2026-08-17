@@ -63,6 +63,17 @@ async def test_openai_rest_vad_uses_timeline_clock_across_audio_gaps(monkeypatch
     await backend.send_audio(silence)
     await backend.send_audio(silence)
 
+    controls = [
+        backend._results.get_nowait(),
+        backend._results.get_nowait(),
+    ]
+    assert [item.metadata["control_event"] for item in controls] == [
+        "vad_start",
+        "vad_end",
+    ]
+    assert controls[0].metadata["event_timestamp"] == pytest.approx(4.9)
+    assert controls[1].metadata["event_timestamp"] == pytest.approx(9.9)
+
     pcm, start_time, end_time = backend._requests.get_nowait()
     assert pcm
     assert start_time == pytest.approx(4.9)
@@ -89,6 +100,41 @@ async def test_openai_rest_asr_preserves_utterance_order():
     await worker
 
     assert observed == [b"first", b"second"]
+
+
+@pytest.mark.asyncio
+async def test_openai_rest_stop_cancels_stalled_request_worker(monkeypatch):
+    backend = OpenAIRestASRBackend(_asr_config())
+    backend._results = asyncio.Queue()
+    backend._requests = asyncio.Queue()
+
+    class FakeSession:
+        async def close(self):
+            return None
+
+    backend._session = FakeSession()
+    started = asyncio.Event()
+
+    async def stalled_transcribe(*_args, **_kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    backend._transcribe = stalled_transcribe
+    backend._request_worker = asyncio.create_task(
+        backend._run_request_worker()
+    )
+    await backend._requests.put(b"stalled")
+    await started.wait()
+    monkeypatch.setattr(
+        "multi_modal_ai_studio.backends.asr.openai_rest."
+        "_STOP_DRAIN_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    await backend.stop_stream()
+
+    assert backend._request_worker is None
+    assert backend._session is None
 
 
 class _FakeASRResponse:

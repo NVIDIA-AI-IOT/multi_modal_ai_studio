@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _SAMPLE_RATE = 16000
 _SAMPLE_WIDTH = 2
+_STOP_DRAIN_TIMEOUT_SECONDS = 3.0
 
 
 class OpenAIRestASRBackend(ASRBackend):
@@ -132,6 +133,10 @@ class OpenAIRestASRBackend(ASRBackend):
                     self._rms_threshold(self.config.vad_start_threshold),
                     self.config.speech_pad_ms,
                 )
+                self._queue_control_result(
+                    "vad_start",
+                    (self._speech_start_ms or 0.0) / 1000.0,
+                )
         else:
             self._utterance.extend(audio_chunk)
             if speech:
@@ -158,6 +163,10 @@ class OpenAIRestASRBackend(ASRBackend):
                         "silence=%.0fms, queueing transcription",
                         utterance_ms,
                         self._silence_ms,
+                    )
+                    self._queue_control_result(
+                        "vad_end",
+                        speech_end_ms / 1000.0,
                     )
                     self._queue_transcription(
                         bytes(self._utterance),
@@ -187,15 +196,17 @@ class OpenAIRestASRBackend(ASRBackend):
                 "[OpenAI REST ASR] Stream stopped during speech; flushing %.0fms",
                 len(self._utterance) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0,
             )
+            end_time = (
+                max(0.0, time.time() - self.timeline.start_time)
+                if self.timeline is not None
+                and self.timeline.start_time is not None
+                else self._audio_position_ms / 1000.0
+            )
+            self._queue_control_result("vad_end", end_time)
             self._queue_transcription(
                 bytes(self._utterance),
                 start_time=(self._speech_start_ms or 0.0) / 1000.0,
-                end_time=(
-                    max(0.0, time.time() - self.timeline.start_time)
-                    if self.timeline is not None
-                    and self.timeline.start_time is not None
-                    else self._audio_position_ms / 1000.0
-                ),
+                end_time=end_time,
             )
         elif self._chunk_count:
             logger.info(
@@ -208,7 +219,19 @@ class OpenAIRestASRBackend(ASRBackend):
         if self._requests is not None:
             await self._requests.put(None)
         if self._request_worker is not None:
-            await self._request_worker
+            try:
+                await asyncio.wait_for(
+                    self._request_worker,
+                    timeout=_STOP_DRAIN_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[OpenAI REST ASR] Cancelling pending transcription "
+                    "after %.1fs stop drain timeout",
+                    _STOP_DRAIN_TIMEOUT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                pass
         if self._results is not None:
             await self._results.put(None)
         await self._session.close()
@@ -217,6 +240,29 @@ class OpenAIRestASRBackend(ASRBackend):
         self._requests = None
         self._request_worker = None
         self._reset_audio_state()
+
+    def _queue_control_result(
+        self,
+        event_type: str,
+        timestamp: float,
+    ) -> None:
+        """Publish local VAD boundaries before the REST request completes."""
+        if self._results is None:
+            return
+        self._results.put_nowait(
+            ASRResult(
+                text="",
+                is_final=False,
+                start_time=timestamp if event_type == "vad_start" else None,
+                end_time=timestamp if event_type == "vad_end" else None,
+                metadata={
+                    "backend": "openai-rest",
+                    "model": self.config.model,
+                    "control_event": event_type,
+                    "event_timestamp": timestamp,
+                },
+            )
+        )
 
     def _queue_transcription(
         self,
@@ -310,6 +356,7 @@ class OpenAIRestASRBackend(ASRBackend):
             result_metadata = {
                 "backend": "openai-rest",
                 "model": self.config.model,
+                "vad_events_emitted": True,
                 "inference_start_time": inference_start_time,
                 "inference_end_time": inference_end_time,
                 "inference_duration_ms": inference_duration_ms,

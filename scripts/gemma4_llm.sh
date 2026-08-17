@@ -13,6 +13,7 @@ GEMMA4_MODEL_ALIAS="${GEMMA4_MODEL_ALIAS:-gemma-4-e2b}"
 GEMMA4_PORT="${GEMMA4_PORT:-8080}"
 GEMMA4_CONTEXT_SIZE="${GEMMA4_CONTEXT_SIZE:-4096}"
 GEMMA4_ENABLE_MTP="${GEMMA4_ENABLE_MTP:-true}"
+GEMMA4_REASONING="${GEMMA4_REASONING:-off}"
 GEMMA4_PULL="${GEMMA4_PULL:-always}"
 BASE_URL="${GEMMA4_BASE_URL:-http://127.0.0.1:${GEMMA4_PORT}}"
 
@@ -83,6 +84,7 @@ doctor() {
     echo "Model cache: ${GEMMA4_CACHE_DIR}"
     echo "Text-only: yes (--no-mmproj)"
     echo "MTP: ${GEMMA4_ENABLE_MTP}"
+    echo "Reasoning: ${GEMMA4_REASONING}"
     echo "API: ${BASE_URL}/v1"
 }
 
@@ -137,6 +139,7 @@ start() {
         --gpu-layers all \
         --cache-type-k q8_0 \
         --cache-type-v q8_0 \
+        --reasoning "${GEMMA4_REASONING}" \
         --no-webui \
         --host 0.0.0.0 \
         --port "${GEMMA4_PORT}" \

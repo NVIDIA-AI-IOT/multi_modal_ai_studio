@@ -50,6 +50,9 @@ devices:
 
 app:
   barge_in_enabled: true
+  # REST ASR has no partial transcripts. Stop playback as soon as its local
+  # endpointing detects new speech instead of waiting for the final REST call.
+  barge_in_trigger: vad
   timeline_position: right
   session_auto_save: true
   session_output_dir: ./sessions

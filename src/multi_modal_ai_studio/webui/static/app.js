@@ -2269,7 +2269,9 @@ function renderAppConfig(config, readonly = false) {
     const roClass = readonly ? 'readonly' : '';
     const overrideVal = (typeof uiSettings.sessionDirOverride === 'string' && uiSettings.sessionDirOverride) ? uiSettings.sessionDirOverride : '';
     const bargeInEnabled = !!config.barge_in_enabled;
-    const bargeInTrigger = config.barge_in_trigger === 'partial' ? 'partial' : 'final';
+    const bargeInTrigger = ['final', 'partial', 'vad'].includes(config.barge_in_trigger)
+        ? config.barge_in_trigger
+        : 'final';
     const partialCount = Math.max(1, Math.min(20, parseInt(config.barge_in_partial_count, 10) || 3));
 
     const startMuted = !!config.start_with_microphone_muted;
@@ -2320,6 +2322,11 @@ function renderAppConfig(config, readonly = false) {
                         <input type="radio" ${disabled} name="app-barge-in-trigger" value="partial" ${bargeInTrigger === 'partial' ? 'checked' : ''}
                                onchange="updateConfig('app', 'barge_in_trigger', 'partial'); appConfigRefresh();">
                         <span><strong>Partial transcript</strong> (fast, may have false positive)</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" ${disabled} name="app-barge-in-trigger" value="vad" ${bargeInTrigger === 'vad' ? 'checked' : ''}
+                               onchange="updateConfig('app', 'barge_in_trigger', 'vad'); appConfigRefresh();">
+                        <span><strong>Speech / VAD</strong> (fastest, may have false positive)</span>
                     </label>
                 </div>
             </div>
@@ -6698,8 +6705,9 @@ function updateLiveSessionUI() {
             sessionTitle.textContent = 'Session – ' + turnsSuffix;
             var recordedLine = 'Session recorded: ' + turnsSuffix;
             var filenameHtml = '';
-            if (state.lastSavedSessionId) {
-                var sessionFileName = state.lastSavedSessionId + '.json';
+            var stoppedSessionId = state.lastSavedSessionId || state.liveSessionId;
+            if (stoppedSessionId) {
+                var sessionFileName = stoppedSessionId + '.json';
                 filenameHtml = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
             }
             setSessionMetaRight(recordedLine, filenameHtml);
@@ -7062,6 +7070,20 @@ function handleVoiceWsMessage(ev) {
             var speechTimingHandled = window.MMASTimelineHelpers.applySpeechTimingEvent(state, evt);
             if (speechTimingHandled) {
                 // VAD/user-speech timing state is fully handled by the shared helper.
+                var appVad = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
+                if (
+                    evt.event_type === 'vad_start'
+                    && appVad.barge_in_enabled
+                    && appVad.barge_in_trigger === 'vad'
+                ) {
+                    stopTtsPlayback({
+                        reason: 'barge_in',
+                        trigger: 'vad_start',
+                        triggerTimestamp: (
+                            evt.timestamp != null ? Number(evt.timestamp) : null
+                        ),
+                    });
+                }
             } else if (evt.event_type === 'asr_partial') {
                 state.voiceTurnActive = true;
                 state.ttsEligibleForCurrentTtl = false;
@@ -7092,7 +7114,7 @@ function handleVoiceWsMessage(ev) {
                 state.bargeInPartialCount = 0;
                 // Barge-in (final trigger): stop frontend TTS when user final transcript arrives
                 var appFinal = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
-                if (appFinal.barge_in_enabled && appFinal.barge_in_trigger !== 'partial') {
+                if (appFinal.barge_in_enabled && appFinal.barge_in_trigger === 'final') {
                     var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (finalTxt.length > 0) {
                         stopTtsPlayback({
@@ -7185,8 +7207,15 @@ function handleVoiceWsMessage(ev) {
             } else if (!state.ttsPlaybackStoppedByBargeIn) {
                 playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments);
             }
+        } else if (msg.type === 'session_started' && msg.session_id) {
+            // The filename is deterministic from session start. Keep it
+            // available when STOP is pressed even if a slow backend is still
+            // draining before the JSON is physically written.
+            state.liveSessionId = msg.session_id;
+            updateLiveSessionUI();
         } else if (msg.type === 'session_saved' && msg.session_id) {
             state.lastSavedSessionId = msg.session_id;
+            state.liveSessionId = msg.session_id;
             loadSessions();
             updateLiveSessionUI();
         } else if (msg.type === 'error') {
@@ -7516,6 +7545,8 @@ function startSessionRecording() {
         state.ttsEligibleForCurrentTtl = false;
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
+        state.liveSessionId = null;
+        state.lastSavedSessionId = null;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
         state.liveSessionClockSynchronized = false;
@@ -7585,6 +7616,8 @@ function startSessionRecording() {
         state.ttsEligibleForCurrentTtl = false;
         state.liveSystemStats = [];
         state.liveTimelineInitialZoomSet = false;
+        state.liveSessionId = null;
+        state.lastSavedSessionId = null;
         state.sessionState = 'live';
         state.liveSessionStartTime = Date.now() / 1000;
         state.liveSessionClockSynchronized = false;
