@@ -92,6 +92,36 @@
         return normalized;
     }
 
+    /**
+     * Describe which endpointing controls are meaningful for an ASR backend.
+     * REST transcription needs MMAS's local energy endpointing, while a
+     * Realtime provider owns server_vad and may allow it to be disabled.
+     */
+    function getAsrVadControlProfile(config) {
+        const normalized = normalizeSpeechBackendConfig(config);
+        if (normalized.backend === 'openai-rest') {
+            return {
+                backend: 'openai-rest',
+                title: 'Local endpointing (MMAS Energy VAD)',
+                description: 'MMAS buffers microphone audio, detects the utterance boundary locally, then sends one WAV file to /v1/audio/transcriptions.',
+                enabled: true,
+                canDisable: false,
+                showStopThreshold: true,
+            };
+        }
+        if (normalized.backend === 'openai-realtime') {
+            return {
+                backend: 'openai-realtime',
+                title: 'Server VAD (Realtime API)',
+                description: 'These values are sent in the Realtime session turn_detection configuration. Provider support and accepted ranges may vary.',
+                enabled: normalized.enable_vad !== false,
+                canDisable: true,
+                showStopThreshold: false,
+            };
+        }
+        return null;
+    }
+
     /** Merge UI defaults only after the recorded speech backend is normalized. */
     function mergeRecordedSpeechConfig(defaults, recorded) {
         return Object.assign(
@@ -188,6 +218,7 @@
     return {
         buildResetConfig,
         getTtsModelName,
+        getAsrVadControlProfile,
         matchesRivaDiscovery,
         matchesOpenAiAsrDiscovery,
         matchesOpenAiTtsDiscovery,

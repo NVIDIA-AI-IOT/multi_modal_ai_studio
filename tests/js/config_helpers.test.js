@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const {
     buildResetConfig,
+    getAsrVadControlProfile,
     getTtsModelName,
     matchesOpenAiAsrDiscovery,
     matchesOpenAiTtsDiscovery,
@@ -18,6 +19,22 @@ const {
     resolveTtsVoiceSelection,
     ttsVoicesForLanguage,
 } = require('../../src/multi_modal_ai_studio/webui/static/config_helpers.js');
+
+test('ASR VAD controls reflect REST-local and Realtime-server endpointing', () => {
+    const rest = getAsrVadControlProfile({scheme: 'openai-rest', enable_vad: false});
+    assert.equal(rest.backend, 'openai-rest');
+    assert.equal(rest.enabled, true);
+    assert.equal(rest.canDisable, false);
+    assert.equal(rest.showStopThreshold, true);
+
+    const realtime = getAsrVadControlProfile({backend: 'openai-realtime', enable_vad: false});
+    assert.equal(realtime.backend, 'openai-realtime');
+    assert.equal(realtime.enabled, false);
+    assert.equal(realtime.canDisable, true);
+    assert.equal(realtime.showStopThreshold, false);
+
+    assert.equal(getAsrVadControlProfile({backend: 'riva'}), null);
+});
 
 test('reset defaults retain the server preset without mutating either input', () => {
     const defaults = {

@@ -71,6 +71,10 @@ def test_app_config_validates_partial_barge_in_count():
     assert AppConfig(barge_in_partial_count=21).validate()
 
 
+def test_app_config_accepts_vad_barge_in_trigger():
+    assert AppConfig(barge_in_trigger="vad").barge_in_trigger == "vad"
+
+
 @pytest.mark.parametrize("source", ["alsa", "usb"])
 def test_server_audio_device_config_round_trip(source):
     config = SessionConfig(

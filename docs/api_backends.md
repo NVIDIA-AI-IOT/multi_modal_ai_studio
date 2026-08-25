@@ -17,6 +17,17 @@ transcription WebSocket. TTS can use Riva gRPC, OpenAI-compatible REST, or an
 independent exact-text Realtime WebSocket. The
 LLM uses an OpenAI-compatible Chat Completions endpoint.
 
+## Recommended provider paths
+
+Speech and LLM lifecycle are intentionally separate in every path. Choose the
+speech service first, then connect any suitably sized OpenAI-compatible LLM.
+
+| Path | Positioning | ASR | TTS | Setup |
+| --- | --- | --- | --- | --- |
+| Speaches | Recommended quick start (release candidate) | Faster-Whisper REST or Realtime chunk transcription | Kokoro REST | [Speaches on Jetson](setup_speaches_jetson.md) |
+| NVIDIA Open Speech Models | NVIDIA model reference and performance evaluation | Nemotron 3.5 REST or native Realtime | Magpie REST or Realtime adapter | [NVIDIA open speech models](setup_open_models_jetson.md) |
+| NVIDIA Riva | Existing Riva deployments and gRPC comparison | Native gRPC streaming | Native gRPC streaming | [Riva setup](setup_riva.md) |
+
 | Component | MMAS scheme | Required endpoint | Streaming behavior |
 |---|---|---|---|
 | ASR | `openai-rest` | `POST /v1/audio/transcriptions` | MMAS performs local VAD and sends one WAV per utterance |
@@ -85,6 +96,6 @@ detects end-of-utterance, then calls `/audio/transcriptions`. This is a good
 portable baseline for evaluation. Use a Realtime API or a native streaming
 adapter when partial transcripts and sub-utterance latency are required.
 
-See [Open models on Jetson](setup_open_models_jetson.md) for the public
+See [NVIDIA open speech models](setup_open_models_jetson.md) for the public
 Nemotron 3.5 ASR and Magpie deployment. See [Realtime speech](realtime_speech.md)
-for wire formats, Speaches setup, and the provider contract smoke test.
+for wire formats and the provider contract smoke test.

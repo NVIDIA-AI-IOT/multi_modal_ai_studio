@@ -13,8 +13,10 @@ from multi_modal_ai_studio.webui import system_stats
 @pytest.fixture(autouse=True)
 def reset_nvidia_smi_support_cache():
     system_stats._nvidia_smi_gpu_supported = None
+    system_stats.gather_system_info.cache_clear()
     yield
     system_stats._nvidia_smi_gpu_supported = None
+    system_stats.gather_system_info.cache_clear()
 
 
 def test_nvidia_smi_numeric_utilization_is_used_and_cached(monkeypatch):
@@ -208,3 +210,45 @@ def test_stream_failure_retries_nvidia_smi_when_thor_has_no_sysfs_load(
 
     assert system_stats.read_nvidia_smi_gpu_percent_after_stream_failure() == 28.0
     assert system_stats._nvidia_smi_gpu_supported is None
+
+
+def test_gpu_identity_reads_name_and_compute_capability(monkeypatch):
+    monkeypatch.setattr(
+        system_stats.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, stdout="Orin (nvgpu), 8.7\n", stderr=""
+        ),
+    )
+
+    assert system_stats._gpu_identity() == {
+        "name": "Orin (nvgpu)",
+        "compute_capability": "8.7",
+    }
+
+
+def test_gather_system_info_has_stable_serializable_shape(monkeypatch):
+    monkeypatch.setattr(system_stats.socket, "gethostname", lambda: "jetson-test")
+    monkeypatch.setattr(system_stats, "_network_ipv4_addresses", lambda: ["10.0.0.5"])
+    monkeypatch.setattr(system_stats, "_gpu_identity", lambda: {"name": "Test GPU"})
+    monkeypatch.setattr(system_stats, "_l4t_release", lambda: "R39.2.1")
+    monkeypatch.setattr(system_stats, "_read_first_text", lambda paths: "Jetson Test")
+    monkeypatch.setattr(system_stats.os, "cpu_count", lambda: 6)
+    monkeypatch.setattr(system_stats.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(system_stats.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(system_stats.platform, "release", lambda: "test-kernel")
+    monkeypatch.setattr(
+        system_stats,
+        "psutil",
+        SimpleNamespace(virtual_memory=lambda: SimpleNamespace(total=8 * 1024**3)),
+    )
+
+    assert system_stats.gather_system_info() == {
+        "hostname": "jetson-test",
+        "ip_addresses": ["10.0.0.5"],
+        "device_model": "Jetson Test",
+        "cpu": {"architecture": "aarch64", "logical_cores": 6},
+        "gpu": {"name": "Test GPU"},
+        "memory_total_bytes": 8 * 1024**3,
+        "os": {"name": "Linux", "kernel": "test-kernel", "l4t": "R39.2.1"},
+    }

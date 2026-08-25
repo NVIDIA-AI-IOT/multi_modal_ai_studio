@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Longer responses split at sentence/phrase boundaries rather than the former
 # 50-character limit that restarted prosody every few words.
 MAX_REST_TTS_CHARS = 400
+REST_TTS_CONNECTION_RETRIES = 1
 
 
 @dataclass
@@ -99,53 +100,69 @@ class OpenAIRestTTSBackend(TTSBackend):
     ) -> None:
         """Run one HTTP request in an isolated, cancellable worker task."""
         try:
-            async with self._session.post(
-                url,
-                json=request,
-                headers=headers,
-            ) as response:
-                if response.status >= 400:
-                    body = await response.text()
-                    raise ConnectionError(
-                        f"TTS request failed ({response.status}): {body[:300]}"
-                    )
-                pending = None
-                aligner = _PCM16FrameAligner()
-                async for audio in response.content.iter_chunked(16384):
-                    audio = aligner.feed(audio)
-                    if not audio:
-                        continue
-                    if pending is not None:
-                        output.put_nowait(
-                            TTSChunk(
-                                audio=pending,
-                                sample_rate=self.config.sample_rate,
-                                is_final=False,
-                                metadata={
-                                    "text_chunk_index": text_index,
-                                    "total_text_chunks": total_text_chunks,
-                                },
+            for attempt in range(REST_TTS_CONNECTION_RETRIES + 1):
+                published_audio = False
+                try:
+                    async with self._session.post(
+                        url,
+                        json=request,
+                        headers=headers,
+                    ) as response:
+                        if response.status >= 400:
+                            body = await response.text()
+                            raise ConnectionError(
+                                f"TTS request failed ({response.status}): {body[:300]}"
                             )
-                        )
-                    pending = audio
-                trailing = aligner.finish()
-                if trailing:
+                        pending = None
+                        aligner = _PCM16FrameAligner()
+                        async for audio in response.content.iter_chunked(16384):
+                            audio = aligner.feed(audio)
+                            if not audio:
+                                continue
+                            if pending is not None:
+                                output.put_nowait(
+                                    TTSChunk(
+                                        audio=pending,
+                                        sample_rate=self.config.sample_rate,
+                                        is_final=False,
+                                        metadata={
+                                            "text_chunk_index": text_index,
+                                            "total_text_chunks": total_text_chunks,
+                                        },
+                                    )
+                                )
+                                published_audio = True
+                            pending = audio
+                        trailing = aligner.finish()
+                        if trailing:
+                            logger.warning(
+                                "OpenAI-compatible TTS returned %d trailing byte(s) "
+                                "outside a complete PCM16 frame; dropping them",
+                                len(trailing),
+                            )
+                        if pending:
+                            output.put_nowait(
+                                TTSChunk(
+                                    audio=pending,
+                                    sample_rate=self.config.sample_rate,
+                                    is_final=is_last_text,
+                                    metadata={
+                                        "text_chunk_index": text_index,
+                                        "total_text_chunks": total_text_chunks,
+                                    },
+                                )
+                            )
+                            published_audio = True
+                    break
+                except aiohttp.ClientConnectionError:
+                    if (
+                        attempt >= REST_TTS_CONNECTION_RETRIES
+                        or published_audio
+                    ):
+                        raise
                     logger.warning(
-                        "OpenAI-compatible TTS returned %d trailing byte(s) "
-                        "outside a complete PCM16 frame; dropping them",
-                        len(trailing),
-                    )
-                if pending:
-                    output.put_nowait(
-                        TTSChunk(
-                            audio=pending,
-                            sample_rate=self.config.sample_rate,
-                            is_final=is_last_text,
-                            metadata={
-                                "text_chunk_index": text_index,
-                                "total_text_chunks": total_text_chunks,
-                            },
-                        )
+                        "OpenAI-compatible TTS connection closed before audio; "
+                        "retrying request once with a fresh connection"
                     )
         except asyncio.CancelledError:
             output.put_nowait(_RequestDone(cancelled=True))

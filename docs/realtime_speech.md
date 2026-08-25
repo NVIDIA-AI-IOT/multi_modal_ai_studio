@@ -20,37 +20,31 @@ TTS. The latter continues to use `POST /v1/audio/speech`.
 Two wire formats are selectable:
 
 - `openai-ga` uses the current typed session and nested `audio.input` schema.
-- `openai-beta` supports preview-schema providers such as Speaches 0.8.x.
+- `openai-beta` supports preview-schema providers such as Speaches 0.9.0-rc.3.
 
-## Speaches reference setup
+## Speaches release-candidate setup
 
 Speaches is a conformance provider for this path; it is not hard-coded in the
-MMAS backend. Speaches 0.8.x must be able to call its own REST transcription
-endpoint from the Realtime server. Set its loopback URL when starting the
-container:
+MMAS backend. Start the pinned dual-SM Jetson image and its default models with:
 
 ```bash
-docker run --rm --runtime nvidia --ipc host \
-  -p 18080:8000 \
-  -v "$HOME/.cache/mmas-speaches:/data" \
-  -e LOOPBACK_HOST_URL=http://127.0.0.1:8000 \
-  -e WHISPER__INFERENCE_DEVICE=cuda \
-  -e WHISPER__COMPUTE_TYPE=float16 \
-  ghcr.io/nvidia-ai-iot/speaches:0.8.3-cu130-sm87-sm110-auto
+./scripts/speaches_speech.sh start
+./scripts/speaches_speech.sh verify
 ```
 
-Use `presets/speaches-realtime-asr-jetson.yaml` after downloading the ASR and
-TTS models listed in that preset. The preset uses:
+The launcher sets the required loopback URL and pins
+`ghcr.io/nvidia-ai-iot/speaches:0.9.0-rc.3-cu130-sm87-sm110-auto`. See
+[Speaches on Jetson](setup_speaches_jetson.md) for the complete recommended
+quick start. The Realtime preset uses:
 
-- Realtime WebSocket transcription for Faster-Whisper ASR;
-- the existing OpenAI-compatible LLM stage;
+- Realtime WebSocket chunk transcription for Faster-Whisper ASR;
+- the separately managed text-only Gemma 4 E2B llama.cpp service by default;
 - REST `/v1/audio/speech` for Kokoro TTS.
 
-Speaches 0.8.x emits speech start/end and final transcripts, but may not emit
-incremental transcript deltas. It can also report `prefix_padding_ms` as
-read-only after requiring that field in the session request; MMAS treats that
-specific compatibility notice as a warning. MMAS will display partials whenever
-a compatible provider sends them.
+Speaches 0.9.0-rc.3 emits speech start/end and final transcripts, but
+Faster-Whisper is invoked on completed VAD chunks rather than decoding the
+entire stream token by token. It may therefore not emit incremental transcript
+deltas. MMAS displays partials whenever a compatible provider sends them.
 
 ## Provider contract smoke test
 
@@ -61,7 +55,7 @@ mono WAV:
 python scripts/test_realtime_transcription.py sample.wav \
   --url 'ws://127.0.0.1:18080/v1/realtime?intent=transcription' \
   --api-style openai-beta \
-  --model Systran/faster-whisper-small \
+  --model Systran/faster-whisper-tiny.en \
   --language en
 ```
 
@@ -88,6 +82,8 @@ cache-aware feature generator and RNNT token streamer. It emits
 uses its lightweight energy VAD for server-side utterance boundaries.
 
 Load `presets/nvidia-open-models-realtime-speech-jetson.yaml` to use this ASR
-with the existing OpenAI Chat Completions LLM and Magpie REST TTS stages.
-Realtime response audio and exact-text streaming TTS are separate follow-up
-contracts; this ASR milestone does not claim either one.
+with a separately managed OpenAI Chat Completions LLM and the Magpie exact-text
+Realtime adapter. The adapter returns completed Magpie text chunks as PCM
+deltas and supports delivery cancellation; the underlying `do_tts()` call is
+still phrase-level generation rather than model-native incremental waveform
+synthesis.

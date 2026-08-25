@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: "NVIDIA Open Models Realtime Speech on Jetson"
-description: "Native Realtime Nemotron 3.5 ASR + OpenAI LLM + Realtime Magpie TTS"
+description: "Native Realtime Nemotron ASR + independent OpenAI LLM + Realtime Magpie TTS"
 app_version: "0.1.0"
 
 asr:

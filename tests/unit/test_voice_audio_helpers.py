@@ -142,6 +142,18 @@ def test_partial_barge_in_requires_configured_number_of_partials():
     assert controller.observe_asr(is_final=False, text="three")
 
 
+def test_vad_barge_in_only_triggers_while_tts_is_active():
+    controller = BargeInController(enabled=True, trigger="vad")
+    controller.begin_turn()
+
+    assert not controller.observe_vad_start()
+    assert not controller.requested.is_set()
+
+    controller.start_tts()
+    assert controller.observe_vad_start()
+    assert controller.requested.is_set()
+
+
 @pytest.mark.asyncio
 async def test_wait_for_task_returns_true_when_tts_completes():
     task = asyncio.create_task(asyncio.sleep(0))
