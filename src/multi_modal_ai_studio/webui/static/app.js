@@ -710,6 +710,7 @@ const defaultConfig = {
         voice: '',
         language: 'en-US',
         sample_rate: 22050,
+        speed: 1.0,
         quality: 'high',
         realtime_transport: 'websocket',
         stream_tts: true,
@@ -1881,6 +1882,10 @@ function renderTTSConfig(config, readonly = false) {
     const configuredRestVoice = config.voice || '';
     const configuredRestLanguage = config.language || 'en-US';
     const configuredRestModel = config.model || '';
+    const parsedRestSpeed = Number(config.speed);
+    const configuredRestSpeed = Number.isFinite(parsedRestSpeed)
+        ? Math.min(4.0, Math.max(0.25, parsedRestSpeed))
+        : 1.0;
     const restVoiceOptions = configuredRestVoice
         ? '<option value="' + escapeHtml(configuredRestVoice) + '" selected>' + escapeHtml(configuredRestVoice) + ' (configured)</option>'
         : '<option value="">Default</option>';
@@ -1996,6 +2001,14 @@ function renderTTSConfig(config, readonly = false) {
                     </div>
                     ${!readonly ? '<div id="tts-rest-metadata-hint" class="input-hint">Discovering voices and languages from the selected model…</div>' : ''}
                     ${!readonly ? '<div id="tts-rest-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
+                </div>
+
+                <div class="form-group">
+                    <label for="tts-rest-speed">Speech speed</label>
+                    <input type="range" ${disabled} id="tts-rest-speed" min="0.25" max="4.0" step="0.05" value="${configuredRestSpeed}"
+                           oninput="updateConfig('tts', 'speed', parseFloat(this.value)); document.getElementById('tts-rest-speed-value').textContent = Number(this.value).toFixed(2) + '×';">
+                    <span id="tts-rest-speed-value" class="range-value">${configuredRestSpeed.toFixed(2)}×</span>
+                    ${!readonly ? '<span class="input-hint">OpenAI-compatible range: 0.25–4.00×. Provider support varies.</span>' : ''}
                 </div>
             </div>
 
