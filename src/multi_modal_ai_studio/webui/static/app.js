@@ -146,6 +146,8 @@ const state = {
 // ===== UI Settings (Global, persisted in localStorage) =====
 const uiSettings = {
     combineSpeechLanes: false,
+    /** UI-only density for Configuration forms: 'standard' or 'compact'. */
+    configurationLayout: 'standard',
     showSessionThumbnails: true,
     autoScrollChat: true,
     showTimestamps: false,
@@ -180,6 +182,9 @@ function loadUISettings() {
     if (saved) {
         try {
             Object.assign(uiSettings, JSON.parse(saved));
+            if (uiSettings.configurationLayout !== 'compact') {
+                uiSettings.configurationLayout = 'standard';
+            }
         } catch (e) {
             console.error('Failed to load UI settings:', e);
         }
@@ -1966,49 +1971,84 @@ function renderTTSConfig(config, readonly = false) {
             </div>
 
             <!-- OpenAI REST TTS Settings -->
-            <div class="backend-content" style="display: ${config.backend === 'openai-rest' ? 'block' : 'none'}">
-                <div class="form-group">
-                    <label>API Endpoint</label>
-                    <input type="text" ${disabled} id="tts-rest-api-base" value="${config.api_base || config.openai_url || 'http://localhost:8082/v1'}"
-                           onchange="updateConfig('tts', 'api_base', this.value)">
-                </div>
+            <div class="backend-content tts-rest-settings" style="display: ${config.backend === 'openai-rest' ? 'block' : 'none'}">
+                <div class="tts-rest-compact-layout">
+                    <section class="compact-config-section">
+                        <div class="compact-config-section-title"><i data-lucide="radio" class="lucide-inline" aria-hidden="true"></i> Connection</div>
+                        <div class="compact-config-grid">
+                            <div class="form-group compact-config-field--wide">
+                                <label><i data-lucide="server" class="lucide-inline" aria-hidden="true"></i> API Endpoint</label>
+                                <input type="text" ${disabled} id="tts-rest-api-base" value="${config.api_base || config.openai_url || 'http://localhost:8082/v1'}"
+                                       onchange="updateConfig('tts', 'api_base', this.value)">
+                            </div>
 
-                <div class="form-group">
-                    <label>Model</label>
-                    ${readonly
-                        ? `<input type="text" value="${escapeHtml(configuredRestModel)}" readonly class="readonly-config-input">`
-                        : `<select id="tts-rest-model-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'model', this.value)">
-                               <option value="${escapeHtml(configuredRestModel)}" selected>${escapeHtml(configuredRestModel || 'Loading...')}</option>
-                           </select>`
-                    }
-                    ${!readonly ? '<div id="tts-rest-model-hint" class="input-hint">Discovering TTS models from the provider…</div>' : ''}
-                </div>
+                            <div class="form-group compact-config-field--wide">
+                                <label><i data-lucide="cpu" class="lucide-inline" aria-hidden="true"></i> Model</label>
+                                ${readonly
+                                    ? `<input type="text" value="${escapeHtml(configuredRestModel)}" readonly class="readonly-config-input">`
+                                    : `<select id="tts-rest-model-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'model', this.value)">
+                                           <option value="${escapeHtml(configuredRestModel)}" selected>${escapeHtml(configuredRestModel || 'Loading...')}</option>
+                                       </select>`
+                                }
+                                ${!readonly ? '<div id="tts-rest-model-hint" class="input-hint">Discovering TTS models from the provider…</div>' : ''}
+                            </div>
+                        </div>
+                    </section>
 
-                <div class="form-group">
-                    <label>Language</label>
-                    <select ${disabled} id="tts-rest-language-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'language', this.value)">
-                        <option value="${escapeHtml(configuredRestLanguage)}" selected>${escapeHtml(configuredRestLanguage)} (configured)</option>
-                    </select>
-                </div>
+                    <section class="compact-config-section">
+                        <div class="compact-config-section-title"><i data-lucide="audio-lines" class="lucide-inline" aria-hidden="true"></i> Voice</div>
+                        <div class="compact-config-grid">
+                            <div class="form-group">
+                                <label><i data-lucide="globe-2" class="lucide-inline" aria-hidden="true"></i> Language</label>
+                                <select ${disabled} id="tts-rest-language-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'language', this.value)">
+                                    <option value="${escapeHtml(configuredRestLanguage)}" selected>${escapeHtml(configuredRestLanguage)} (configured)</option>
+                                </select>
+                            </div>
 
-                <div class="form-group">
-                    <label>Voice</label>
-                    <div class="tts-voice-control-row">
-                        <select ${disabled} id="tts-rest-voice-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'voice', this.value)">
-                            ${restVoiceOptions}
-                        </select>
-                        ${!readonly ? '<button type="button" id="tts-rest-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>' : ''}
-                    </div>
-                    ${!readonly ? '<div id="tts-rest-metadata-hint" class="input-hint">Discovering voices and languages from the selected model…</div>' : ''}
-                    ${!readonly ? '<div id="tts-rest-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
-                </div>
+                            <div class="form-group">
+                                <div class="config-label-row">
+                                    <label for="tts-rest-voice-select"><i data-lucide="audio-lines" class="lucide-inline" aria-hidden="true"></i> Voice</label>
+                                    ${!readonly ? `
+                                    <button type="button" class="config-info-trigger" aria-label="Voice metadata details" aria-describedby="tts-rest-metadata-hint">
+                                        <i data-lucide="info" class="lucide-inline" aria-hidden="true"></i>
+                                    </button>
+                                    <span id="tts-rest-metadata-hint" class="config-info-tooltip-content" role="tooltip">Discovering voices and languages from the selected model…</span>
+                                    ` : ''}
+                                </div>
+                                <div class="tts-voice-control-row">
+                                    <select ${disabled} id="tts-rest-voice-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'voice', this.value)">
+                                        ${restVoiceOptions}
+                                    </select>
+                                    ${!readonly ? '<button type="button" id="tts-rest-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>' : ''}
+                                </div>
+                                ${!readonly ? '<div id="tts-rest-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
+                            </div>
+                        </div>
+                    </section>
 
-                <div class="form-group">
-                    <label for="tts-rest-speed">Speech speed</label>
-                    <input type="range" ${disabled} id="tts-rest-speed" min="0.25" max="4.0" step="0.05" value="${configuredRestSpeed}"
-                           oninput="updateConfig('tts', 'speed', parseFloat(this.value)); document.getElementById('tts-rest-speed-value').textContent = Number(this.value).toFixed(2) + '×';">
-                    <span id="tts-rest-speed-value" class="range-value">${configuredRestSpeed.toFixed(2)}×</span>
-                    ${!readonly ? '<span class="input-hint">OpenAI-compatible range: 0.25–4.00×. Provider support varies.</span>' : ''}
+                    <section class="compact-config-section">
+                        <div class="compact-config-section-title"><i data-lucide="audio-waveform" class="lucide-inline" aria-hidden="true"></i> Audio</div>
+                        <div class="compact-config-grid">
+                            <div class="form-group">
+                                <label><i data-lucide="audio-waveform" class="lucide-inline" aria-hidden="true"></i> Sample Rate (Hz)</label>
+                                <select ${disabled} id="tts-rest-sample-rate" value="${config.sample_rate}" onchange="updateConfig('tts', 'sample_rate', parseInt(this.value))">
+                                    <option value="16000" ${config.sample_rate === 16000 ? 'selected' : ''}>16000</option>
+                                    <option value="22050" ${config.sample_rate === 22050 ? 'selected' : ''}>22050</option>
+                                    <option value="24000" ${config.sample_rate === 24000 ? 'selected' : ''}>24000</option>
+                                    <option value="44100" ${config.sample_rate === 44100 ? 'selected' : ''}>44100</option>
+                                    <option value="48000" ${config.sample_rate === 48000 ? 'selected' : ''}>48000</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="tts-rest-speed"><i data-lucide="gauge" class="lucide-inline" aria-hidden="true"></i> Speech speed</label>
+                                <input type="range" ${disabled} id="tts-rest-speed" min="0.25" max="4.0" step="0.05" value="${configuredRestSpeed}"
+                                       oninput="updateConfig('tts', 'speed', parseFloat(this.value)); document.getElementById('tts-rest-speed-value').textContent = Number(this.value).toFixed(2) + '×';">
+                                <span id="tts-rest-speed-value" class="range-value">${configuredRestSpeed.toFixed(2)}×</span>
+                                ${!readonly ? '<span class="input-hint">OpenAI-compatible range: 0.25–4.00×. Provider support varies.</span>' : ''}
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </div>
 
@@ -2064,7 +2104,7 @@ function renderTTSConfig(config, readonly = false) {
                 </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" style="display: ${config.backend === 'openai-rest' || config.scheme === 'openai-rest' ? 'none' : 'block'}">
                 <label>Sample Rate (Hz)</label>
                 <select ${disabled} value="${config.sample_rate}" onchange="updateConfig('tts', 'sample_rate', parseInt(this.value))">
                     <option value="16000" ${config.sample_rate === 16000 ? 'selected' : ''}>16000</option>
@@ -2075,7 +2115,7 @@ function renderTTSConfig(config, readonly = false) {
                 </select>
             </div>
 
-            <div class="form-group">
+            <div class="form-group tts-quality-setting ${config.backend === 'openai-rest' || config.scheme === 'openai-rest' ? 'tts-quality-setting--rest' : ''}">
                 <label>Quality</label>
                 <select ${disabled} value="${config.quality}" onchange="updateConfig('tts', 'quality', this.value)">
                     <option value="low" ${config.quality === 'low' ? 'selected' : ''}>Low (Faster)</option>
@@ -9692,6 +9732,8 @@ function openSettingsModal() {
     document.getElementById('ui-show-debug-info').checked = uiSettings.showDebugInfo;
     const limitSessionImageHeightEl = document.getElementById('ui-limit-session-image-height');
     if (limitSessionImageHeightEl) limitSessionImageHeightEl.checked = !!uiSettings.limitSessionImageHeight;
+    const configurationLayoutEl = document.querySelector('input[name="ui-configuration-layout"][value="' + uiSettings.configurationLayout + '"]');
+    if (configurationLayoutEl) configurationLayoutEl.checked = true;
 
     const timelineAuto = document.getElementById('ui-timeline-height-auto');
     const timelinePx = document.getElementById('ui-timeline-height-px');
@@ -9789,6 +9831,7 @@ function applyUISettingsToLayout() {
     // Use body data attribute so limit applies to .session-image-container even if element is recreated or not yet in DOM
     if (document.body) {
         document.body.setAttribute('data-limit-session-image-height', uiSettings.limitSessionImageHeight ? 'true' : 'false');
+        document.body.setAttribute('data-configuration-layout', uiSettings.configurationLayout === 'compact' ? 'compact' : 'standard');
     }
     if (state.selectedSession) {
         renderTimeline();
@@ -9807,6 +9850,8 @@ function saveSettingsFromModal() {
     uiSettings.showDebugInfo = document.getElementById('ui-show-debug-info').checked;
     const limitSessionImageHeightEl = document.getElementById('ui-limit-session-image-height');
     uiSettings.limitSessionImageHeight = limitSessionImageHeightEl ? limitSessionImageHeightEl.checked : false;
+    const configurationLayoutEl = document.querySelector('input[name="ui-configuration-layout"]:checked');
+    uiSettings.configurationLayout = configurationLayoutEl && configurationLayoutEl.value === 'compact' ? 'compact' : 'standard';
 
     const timelineAuto = document.getElementById('ui-timeline-height-auto');
     const timelinePx = document.getElementById('ui-timeline-height-px');
@@ -9834,6 +9879,7 @@ function saveSettingsFromModal() {
 function resetUISettings() {
     if (confirm('Reset all UI settings to defaults?')) {
         uiSettings.combineSpeechLanes = false;
+        uiSettings.configurationLayout = 'standard';
         uiSettings.showSessionThumbnails = true;
         uiSettings.autoScrollChat = true;
         uiSettings.showTimestamps = false;
@@ -9852,6 +9898,8 @@ function resetUISettings() {
         saveUISettings();
 
         document.getElementById('ui-combine-speech-lanes').checked = uiSettings.combineSpeechLanes;
+        const configurationLayoutResetEl = document.querySelector('input[name="ui-configuration-layout"][value="standard"]');
+        if (configurationLayoutResetEl) configurationLayoutResetEl.checked = true;
         document.getElementById('ui-show-session-thumbnails').checked = uiSettings.showSessionThumbnails;
         document.getElementById('ui-show-pipeline-in-session-list').checked = uiSettings.showPipelineInSessionList;
         document.getElementById('ui-show-new-chat-with-default-config').checked = uiSettings.showNewChatWithDefaultConfig;
