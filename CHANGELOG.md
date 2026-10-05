@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Barge-in now stops browser and server playback, cancels queued TTS work, and prevents cancelled audio from leaking into the next turn.
 - REST TTS first-audio events are retained even for very short responses.
 - Recorded session replay preserves the live TTL start point and AI waveform timing.
+- Bundled and imported sessions remain reviewable when their JSON filename does not match the embedded session ID.
 - ASR intervals no longer merge across separate utterances.
 - Stale REST connections are retried without requiring a server restart.
 - Voice metadata discovery remains optional and no longer breaks providers that do not implement extension endpoints.
