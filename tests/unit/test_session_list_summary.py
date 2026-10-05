@@ -3,6 +3,7 @@
 """Regression tests for lightweight session-list responses."""
 
 import base64
+import json
 
 from multi_modal_ai_studio.webui.server import WebUIServer
 
@@ -77,3 +78,22 @@ def test_session_list_exposes_only_thumbnail_presence():
 
     assert summary["has_thumbnail"] is True
     assert "thumbnail" not in summary
+
+
+def test_session_file_lookup_supports_descriptive_legacy_filename(tmp_path):
+    session_id = "91ed50ce-88b4-496a-84b2-26ca6240ed70"
+    legacy_path = tmp_path / "example_session.json"
+    legacy_path.write_text(json.dumps({"session_id": session_id, "name": "Example"}))
+    server = WebUIServer(session_dir=tmp_path)
+
+    assert server._session_file_path(session_id) == legacy_path
+
+
+def test_session_file_lookup_prefers_canonical_filename(tmp_path):
+    session_id = "canonical-session"
+    canonical_path = tmp_path / f"{session_id}.json"
+    canonical_path.write_text(json.dumps({"session_id": session_id}))
+    (tmp_path / "legacy.json").write_text(json.dumps({"session_id": session_id}))
+    server = WebUIServer(session_dir=tmp_path)
+
+    assert server._session_file_path(session_id) == canonical_path

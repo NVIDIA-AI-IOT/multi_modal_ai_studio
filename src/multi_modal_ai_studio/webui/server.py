@@ -707,12 +707,33 @@ class WebUIServer:
             return web.json_response({"error": str(e)}, status=500)
 
     def _session_file_path(self, session_id: str) -> Optional[Path]:
-        """Resolve session JSON file path; return None if session_id is invalid (e.g. path traversal)."""
+        """Resolve a session ID to its JSON file.
+
+        Sessions created by MMAS use ``{session_id}.json``. Older, imported,
+        and bundled example sessions can have a descriptive filename while
+        keeping the canonical ID inside the JSON document. The session list
+        exposes that canonical ID, so retain a compatibility lookup for those
+        files instead of returning a detail-view 404.
+        """
         if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
             return None
         base = self._get_effective_session_dir()
         path = base / f"{session_id}.json"
-        return path if path.exists() else None
+        if path.exists():
+            return path
+
+        if not base.exists():
+            return None
+        for candidate in base.glob("*.json"):
+            try:
+                with open(candidate, "r") as session_file:
+                    if json.load(session_file).get("session_id") == session_id:
+                        return candidate
+            except (OSError, json.JSONDecodeError, AttributeError):
+                # Listing sessions already skips unreadable documents. Keep
+                # detail lookup equally tolerant of unrelated invalid files.
+                continue
+        return None
 
     async def handle_patch_session(self, request: web.Request) -> web.Response:
         """PATCH /api/sessions/{session_id}: update session (e.g. name). Body: { \"name\": \"...\" }."""
