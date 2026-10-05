@@ -6,7 +6,7 @@ Multi-modal AI Studio
 A voice/text/video AI interface with advanced performance analysis.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0rc1"
 __author__ = "Multi-modal AI Studio Contributors"
 __license__ = "Apache-2.0"
 

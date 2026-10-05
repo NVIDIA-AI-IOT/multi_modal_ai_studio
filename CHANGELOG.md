@@ -6,47 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.2.0-rc.1] - 2026-10-09
+
 ### Added
-- Core project structure with Python packaging (pyproject.toml)
-- Configuration schema with dataclasses (ASR, LLM, TTS, Device, App, Session)
-- 5 example configuration presets (default, low-latency, high-accuracy, openai-realtime, text-only)
-- Abstract backend interfaces (ASRBackend, LLMBackend, TTSBackend)
-- Riva ASR backend with streaming recognition and VAD
-- OpenAI-compatible LLM backend with streaming generation
-- Riva TTS backend with streaming audio synthesis
-- Timeline system for recording all pipeline events
-- Session management with turn tracking and TTL calculation
-- Session save/load to JSON with full timeline preservation
-- Comprehensive documentation (SESSION_MANAGEMENT.md, AUDIO_MODES.md, TIMELINE_DESIGN.md)
-- Development environment setup script (scripts/setup_dev.sh)
-- Integration tests for ASR, LLM, and TTS backends
-- Cursor AI rules for consistent development (.cursor/rules/*.mdc)
+- Recommended Jetson quick start using Speaches Faster-Whisper and Kokoro with a text-only Gemma 4 E2B llama.cpp service.
+- Jetson Orin and Thor launchers with health checks, persistent model caches, MTP speculative decoding, and reproducible API verification.
+- OpenAI-compatible REST ASR and TTS backends with model, language, and voice discovery.
+- Provider-neutral OpenAI-compatible Realtime transcription and response-audio backends.
+- Native Realtime reference services for NVIDIA Nemotron 3.5 ASR and Magpie TTS.
+- NVIDIA open speech model launcher, presets, API documentation, and Jetson qualification notes.
+- Browser WebRTC and server USB microphone, speaker, and camera paths.
+- Voice preview, speech-speed control, and optional compact OpenAI REST TTS configuration layout.
+- Session thumbnails, recorded device and model configuration, and Jetson host information.
+- Timeline visualization for VAD, ASR request/streaming/finalization, LLM prefill/generation, TTS, playback, barge-in, cancellation, and discarded audio.
+- Manual speech release test plan and automated speech service contract tests.
 
 ### Changed
-- **[2026-02-03] Removed `timeline_buffer_sec` configuration** (BREAKING)
-  - Timeline now always collects ALL events (no buffer limit)
-  - Rationale: Data collection should be unlimited; rendering limits belong in UI layer
-  - Removed from `AppConfig` and all presets
-  - See `docs/TIMELINE_DESIGN.md` for architectural details
-- **[2026-02-03] Changed default `timeline_position` from `bottom` to `right`**
-  - Matches UI design where timeline is beside session list
-  - `text-only` preset still uses `hidden` (no timeline needed)
-- Made `pyaudio` an optional dependency (only needed for USB audio devices)
+- Separated speech services from the LLM so each stage can be sized, restarted, and replaced independently.
+- Made the public quick start independent of Riva, NGC entitlement, Ollama, and hosted APIs.
+- Hardened live and recorded timeline timing so TTL and audio waveforms remain associated with the correct turn.
+- Increased Jetson GPU telemetry sampling and preserved short utilization peaks in session data.
+- Unified browser and server-device session behavior, cancellation, and replay semantics.
 
 ### Fixed
-- Riva TTS voice selection now handles missing `list_voices` API gracefully
-- Riva TTS correctly uses `en-US` language code instead of invalid `pcm`
-- Empty voice string (`""`) now uses Riva's default voice successfully
+- Barge-in now stops browser and server playback, cancels queued TTS work, and prevents cancelled audio from leaking into the next turn.
+- REST TTS first-audio events are retained even for very short responses.
+- Recorded session replay preserves the live TTL start point and AI waveform timing.
+- ASR intervals no longer merge across separate utterances.
+- Stale REST connections are retried without requiring a server restart.
+- Voice metadata discovery remains optional and no longer breaks providers that do not implement extension endpoints.
 
 ### Testing
-- ✅ Backend initialization test (scripts/test_backends.py)
-- ✅ Integration test with live Riva and Ollama (scripts/test_integration.py)
-- ✅ Session management test with TTL calculation (scripts/test_session.py)
+- Qualified the recommended stack on Jetson Orin Nano, Jetson AGX Orin, and Jetson AGX Thor.
+- Added unit coverage for audio devices, VAD, Realtime adapters, cancellation, session replay, system telemetry, voice metadata, speed controls, and previews.
+- Added OpenAI-compatible speech service contract tests and idempotent launcher verification commands.
 
-### Known Issues
-- Backends don't emit timeline events yet (timeline integration pending)
-- Headless CLI mode not implemented
-- WebUI not implemented
+### Known limitations
+- The pinned Jetson Speaches image is a release candidate intended for evaluation and demos.
+- Speaches Realtime transcription uses VAD-delimited Faster-Whisper requests rather than model-native token-by-token streaming, so partial transcripts may be unavailable.
+- `Start speaking before LLM finishes` uses application-level text chunks. Very small chunks can produce prosody resets or playback underruns; keep it disabled for the baseline quality test.
+- An 8 GB Orin Nano should stop unrelated GPU workloads and use swap for transient CPU-side allocations during model loading. Swap does not increase GPU memory.
+- The bundled local services expose unauthenticated development endpoints. Use them only on a trusted network or behind an authenticated proxy.
+- Headless mode remains experimental. Browser WebRTC is the recommended public-preview device path.
+- Qwen3-TTS and other provider-specific servers are experimental integrations rather than part of the default quick start.
 
 ## [0.1.0] - 2026-02-03
 
@@ -60,4 +62,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## Version History
 
 - **v0.1.0** (2026-02-03): Project initialization, core infrastructure
-- **Unreleased**: Session management, timeline system, backend implementations
+- **v0.2.0-rc.1** (2026-10-09): Public preview for interchangeable local speech and LLM services on Jetson
