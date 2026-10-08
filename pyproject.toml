@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 # Distribution name (hyphens); Python package is multi_modal_ai_studio (underscores)
 name = "multi-modal-ai-studio"
-version = "0.1.0"
+version = "0.2.0rc1"
 description = "Multi-modal AI interface with voice, text, and video support for analyzing conversational AI systems"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,7 +17,7 @@ authors = [
 ]
 keywords = ["ai", "voice", "multimodal", "riva", "nvidia", "openai", "conversational-ai"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
