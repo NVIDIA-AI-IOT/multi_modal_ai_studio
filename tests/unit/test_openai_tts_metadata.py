@@ -4,6 +4,7 @@
 from multi_modal_ai_studio.webui.server import (
     _is_loopback_api_base,
     _merge_openai_tts_models,
+    _merge_openai_tts_voice_endpoint,
     _parse_openai_tts_metadata,
 )
 
@@ -63,6 +64,43 @@ def test_single_tts_model_is_selected_when_requested_name_is_stale():
     assert result["model"] == "installed-kokoro"
     assert result["voices"] == [{"id": "voice-a", "name": "voice-a"}]
     assert result["languages"] == ["en-US"]
+
+
+def test_vllm_omni_voice_endpoint_enriches_requested_model():
+    model = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    payload = _merge_openai_tts_voice_endpoint(
+        {"object": "list", "data": [{"id": model, "object": "model"}]},
+        {
+            "voices": ["aiden", "ryan", "ono_anna"],
+            "uploaded_voices": ["custom_voice"],
+        },
+        model,
+    )
+
+    result = _parse_openai_tts_metadata(payload, model)
+
+    assert result["model"] == model
+    assert result["models"] == [model]
+    assert result["voices"] == [
+        {"id": "aiden", "name": "aiden"},
+        {"id": "ryan", "name": "ryan"},
+        {"id": "ono_anna", "name": "ono_anna"},
+        {"id": "custom_voice", "name": "custom_voice"},
+    ]
+
+
+def test_voice_endpoint_without_requested_model_does_not_guess_among_models():
+    original = {
+        "data": [
+            {"id": "text-model"},
+            {"id": "speech-model"},
+        ]
+    }
+
+    assert _merge_openai_tts_voice_endpoint(
+        original,
+        {"voices": ["ryan"]},
+    ) == original
 
 
 def test_active_language_qualification_is_limited_to_loopback_servers():

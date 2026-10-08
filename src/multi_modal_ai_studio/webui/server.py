@@ -131,6 +131,61 @@ def _parse_openai_tts_metadata(payload: Any, requested_model: str = "") -> Dict[
     }
 
 
+def _merge_openai_tts_voice_endpoint(
+    models_payload: Any,
+    voices_payload: Any,
+    requested_model: str = "",
+) -> Any:
+    """Attach `/v1/audio/voices` metadata to its model-list record.
+
+    Speaches reports voices as extensions on each `/v1/models` item, while
+    vLLM-Omni follows a separate `/v1/audio/voices` discovery route. Normalize
+    the latter into the former shape so the rest of MMAS can stay provider
+    agnostic.
+    """
+    if not isinstance(models_payload, dict) or not isinstance(voices_payload, dict):
+        return models_payload
+    raw_voices = voices_payload.get("voices", [])
+    uploaded_voices = voices_payload.get("uploaded_voices", [])
+    if not isinstance(raw_voices, list):
+        raw_voices = []
+    if isinstance(uploaded_voices, list):
+        raw_voices = [*raw_voices, *uploaded_voices]
+    if not raw_voices:
+        return models_payload
+
+    data = models_payload.get("data", [])
+    if not isinstance(data, list):
+        data = []
+    copied_items = [dict(item) if isinstance(item, dict) else item for item in data]
+    target_index = next(
+        (
+            index for index, item in enumerate(copied_items)
+            if isinstance(item, dict)
+            and requested_model
+            and str(item.get("id", "")) == requested_model
+        ),
+        None,
+    )
+    if target_index is None and not requested_model:
+        model_indices = [
+            index for index, item in enumerate(copied_items)
+            if isinstance(item, dict) and item.get("id")
+        ]
+        if len(model_indices) == 1:
+            target_index = model_indices[0]
+    if target_index is None and requested_model:
+        copied_items.append({"id": requested_model})
+        target_index = len(copied_items) - 1
+    if target_index is None:
+        return models_payload
+
+    target = copied_items[target_index]
+    target["task"] = "text-to-speech"
+    target["voices"] = raw_voices
+    return {**models_payload, "data": copied_items}
+
+
 def _merge_openai_tts_models(
     local_payload: Any,
     registry_payload: Any = None,
@@ -1060,6 +1115,29 @@ class WebUIServer:
                             status=502,
                         )
                     local_payload = json.loads(body)
+                try:
+                    async with session.get(
+                        f"{api_base}/audio/voices",
+                        headers=headers,
+                    ) as response:
+                        if response.status < 400:
+                            voices_payload = json.loads(await response.text())
+                            local_payload = _merge_openai_tts_voice_endpoint(
+                                local_payload,
+                                voices_payload,
+                                model,
+                            )
+                except (
+                    asyncio.TimeoutError,
+                    ClientError,
+                    json.JSONDecodeError,
+                    OSError,
+                ) as exc:
+                    logger.debug(
+                        "Optional OpenAI TTS voice discovery failed for %s: %s",
+                        api_base,
+                        exc,
+                    )
                 registry_payload: Any = None
                 registry_available = False
                 async with session.get(
@@ -1090,6 +1168,7 @@ class WebUIServer:
                 if (
                     selected_model
                     and metadata.get("voices")
+                    and reported_languages
                     and selected_model_downloaded
                     and _is_loopback_api_base(api_base)
                 ):

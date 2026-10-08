@@ -1261,6 +1261,129 @@ code, pre {
     opacity: 0.8;
 }
 
+/* Compact Configuration layout (UI-only, currently scoped to OpenAI REST TTS). */
+.compact-config-section-title {
+    display: none;
+}
+
+.compact-config-grid {
+    display: block;
+}
+
+.tts-rest-settings .form-group label .lucide-inline {
+    width: 14px;
+    height: 14px;
+    margin-right: 5px;
+    vertical-align: -2px;
+    color: var(--text-secondary);
+}
+
+.tts-rest-settings .config-label-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-bottom: var(--space-sm);
+}
+
+.tts-rest-settings .config-label-row > label {
+    display: inline-flex;
+    align-items: center;
+    margin-bottom: 0;
+}
+
+.config-info-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: help;
+}
+
+.config-info-trigger .lucide-inline {
+    width: 15px;
+    height: 15px;
+}
+
+.config-info-trigger:hover,
+.config-info-trigger:focus-visible {
+    color: var(--nvidia-green);
+    outline: none;
+}
+
+.config-info-tooltip-content {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    right: 0;
+    width: max-content;
+    max-width: min(360px, calc(100vw - 48px));
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.4;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-2px);
+    transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+}
+
+.config-info-trigger:hover + .config-info-tooltip-content,
+.config-info-trigger:focus-visible + .config-info-tooltip-content {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+body[data-configuration-layout="compact"] .tts-rest-compact-layout {
+    display: block;
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .compact-config-section {
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .compact-config-section + .compact-config-section {
+    margin-top: var(--space-md);
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .compact-config-section-title {
+    display: none;
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .compact-config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    gap: var(--space-md);
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .compact-config-field--wide {
+    grid-column: 1 / -1;
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .form-group {
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+body[data-configuration-layout="compact"] .tts-quality-setting--rest {
+    display: none;
+}
+
 /* Read-only forms */
 .config-form.readonly input,
 .config-form.readonly select,
@@ -3934,6 +4057,60 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 .settings-slider-value {
     font-variant-numeric: tabular-nums;
     min-width: 2.5em;
+}
+
+.settings-layout-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.settings-layout-option {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    min-width: 0;
+    padding: var(--space-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    cursor: pointer;
+}
+
+.settings-layout-option:has(input:checked) {
+    border-color: var(--nvidia-green);
+    box-shadow: 0 0 0 2px rgba(118, 185, 0, 0.12);
+}
+
+.settings-layout-option input {
+    margin-top: 2px;
+    accent-color: var(--nvidia-green);
+}
+
+.settings-layout-option-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.settings-layout-option-title {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.settings-layout-option-desc {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+@media (max-width: 620px) {
+    .settings-layout-options {
+        grid-template-columns: 1fr;
+    }
 }
 
 @keyframes fadeIn {

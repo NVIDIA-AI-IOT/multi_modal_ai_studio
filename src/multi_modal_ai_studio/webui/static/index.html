@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=20260815-timeline-footer-nowrap">
+    <link rel="stylesheet" href="styles.css?v=20260826-compact-configuration-3">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
@@ -313,6 +313,7 @@
             <div class="modal-body settings-panes">
                 <nav class="settings-nav" aria-label="Settings categories">
                     <button type="button" class="settings-nav-item active" data-pane="sessions">Sessions</button>
+                    <button type="button" class="settings-nav-item" data-pane="configuration">Configuration</button>
                     <button type="button" class="settings-nav-item" data-pane="timeline">Timeline</button>
                     <button type="button" class="settings-nav-item" data-pane="display">Display</button>
                     <button type="button" class="settings-nav-item" data-pane="advanced">Advanced</button>
@@ -357,6 +358,32 @@
                                         <div class="settings-desc">When unchecked, preview camera image is not saved with session data</div>
                                     </span>
                                 </label>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Configuration pane -->
+                    <div class="settings-pane" id="settings-pane-configuration">
+                        <div class="settings-section">
+                            <h3>Configuration layout</h3>
+                            <div class="settings-item">
+                                <div class="settings-title">Layout density</div>
+                                <div class="settings-desc">Compact groups related fields and uses two columns when the Configuration pane is wide enough. It currently applies to TTS &gt; OpenAI REST API.</div>
+                                <div class="settings-layout-options" role="radiogroup" aria-label="Configuration layout">
+                                    <label class="settings-layout-option">
+                                        <input type="radio" name="ui-configuration-layout" value="standard">
+                                        <span class="settings-layout-option-text">
+                                            <span class="settings-layout-option-title">Standard</span>
+                                            <span class="settings-layout-option-desc">One setting per row</span>
+                                        </span>
+                                    </label>
+                                    <label class="settings-layout-option">
+                                        <input type="radio" name="ui-configuration-layout" value="compact">
+                                        <span class="settings-layout-option-text">
+                                            <span class="settings-layout-option-title">Compact</span>
+                                            <span class="settings-layout-option-desc">Grouped, space-efficient layout</span>
+                                        </span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -484,6 +511,6 @@
 
     <script src="timeline_helpers.js?v=20260814-ttl-replay-1"></script>
     <script src="config_helpers.js?v=20260815-asr-vad-controls-1"></script>
-    <script src="app.js?v=20260815-asr-vad-controls-1"></script>
+    <script src="app.js?v=20260826-compact-configuration-4"></script>
 </body>
 </html>

@@ -344,9 +344,11 @@ class _FakeRequestContext:
 class _FakeTTSSession:
     def __init__(self):
         self.inputs = []
+        self.requests = []
 
     def post(self, _url, *, json, headers):
         self.inputs.append(json["input"])
+        self.requests.append(json)
         return _FakeRequestContext(_FakeResponse())
 
 
@@ -393,6 +395,37 @@ async def test_openai_rest_tts_preserves_normal_completed_llm_response():
     assert chunks
     assert not any(chunk.is_final for chunk in chunks[:-1])
     assert chunks[-1].is_final
+
+
+def test_openai_rest_tts_forwards_configured_speed():
+    async def run_test():
+        backend = OpenAIRestTTSBackend(
+            TTSConfig(
+                scheme="openai-rest",
+                api_base="http://localhost:18083/v1",
+                model="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+                voice="ryan",
+                sample_rate=24000,
+                speed=1.25,
+            )
+        )
+        fake_session = _FakeTTSSession()
+        backend._session = fake_session
+
+        chunks = [chunk async for chunk in backend.synthesize_stream("Hello from Thor.")]
+
+        assert chunks[-1].is_final
+        assert fake_session.requests == [
+            {
+                "model": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+                "input": "Hello from Thor.",
+                "voice": "ryan",
+                "response_format": "pcm",
+                "speed": 1.25,
+            }
+        ]
+
+    asyncio.run(run_test())
 
 
 @pytest.mark.asyncio
