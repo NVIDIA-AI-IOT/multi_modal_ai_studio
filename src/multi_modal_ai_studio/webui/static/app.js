@@ -9157,7 +9157,7 @@ function pipelineModelLabel(model) {
 /**
  * Build pipeline config HTML: grid with device slots (icon + name) + connected pipeline bar ( > ASR > LLM > TTS > ).
  * @param {Object} config - Session config: { devices, asr, llm, tts }
- * @param {{ condensed?: boolean, deviceLabels?: { mic?: string, camera?: string, speaker?: string }, deviceTypes?: { mic?: 'browser'|'usb'|null, camera?: 'browser'|'usb'|null, speaker?: 'browser'|'usb'|null } }} options - deviceLabels: when provided use for slot text; deviceTypes: when provided show small icon at end of name (chromium=browser, usb=local)
+ * @param {{ condensed?: boolean, deviceLabels?: { mic?: string, camera?: string, speaker?: string }, deviceTypes?: { mic?: 'browser'|'usb'|null, camera?: 'browser'|'usb'|null, speaker?: 'browser'|'usb'|null } }} options - deviceLabels: when provided use for slot text; deviceTypes: when provided show small icon at end of name (monitor=browser, usb=local)
  */
 function getPipelineTableHtml(config, options) {
     if (!config) return '';
@@ -9209,7 +9209,7 @@ function getPipelineTableHtml(config, options) {
     function slot(icon, shortLabel, fullTitle, typeIcon) {
         var titleAttr = fullTitle ? ' title="' + escapeHtml(fullTitle) + '"' : '';
         var dataFull = ' data-full-label="' + escapeHtml(fullLabel(shortLabel, fullTitle)) + '"';
-        var typeIconHtml = typeIcon === 'browser' ? '<i data-lucide="chromium" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : (typeIcon === 'usb' ? '<i data-lucide="usb" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : '');
+        var typeIconHtml = typeIcon === 'browser' ? '<i data-lucide="monitor" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : (typeIcon === 'usb' ? '<i data-lucide="usb" class="lucide-inline pipeline-device-type-icon" aria-hidden="true"></i>' : '');
         return '<span class="pipeline-device-slot"' + titleAttr + dataFull + '><span class="pipeline-device-slot-icon"><i data-lucide="' + icon + '" class="lucide-inline"></i></span><span class="pipeline-device-slot-label"><span class="pipeline-device-slot-name">' + escapeHtml(shortLabel) + '</span>' + typeIconHtml + '</span></span>';
     }
     var micType = deviceTypesOpt && deviceTypesOpt.mic != null ? deviceTypesOpt.mic : null;
