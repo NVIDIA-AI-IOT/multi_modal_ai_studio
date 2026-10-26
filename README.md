@@ -46,7 +46,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 ### Prerequisites
 
-- **Python 3.8+**
+- **Python 3.11+**
 - **Audio/video**: Browser (WebRTC) for mic, speaker, and camera. On Linux, server **USB microphone**, **USB speaker**, and **USB webcam** are also supported; see [INSTALL.md](INSTALL.md).
 - **Backends (as needed)**: Public local models, NVIDIA Riva, or hosted
   OpenAI-compatible services.
@@ -54,7 +54,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 ### Installation
 
-Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
+Python 3.11 or newer is required. Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
 
 > **Note:** If `python3 -m venv` fails with "No module named venv", install the venv package for your Python version:
 > ```bash
@@ -72,6 +72,16 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 # Install in development mode
 pip install -e .
+```
+
+Optional device and vision features are installed explicitly so a speech-only
+deployment does not inherit image/video parsing dependencies:
+
+```bash
+pip install -e ".[audio]"       # PyAudio devices
+pip install -e ".[camera]"      # server-side USB camera preview
+pip install -e ".[video-input]" # MP4 input for video-capable VLMs
+pip install -e ".[webrtc-camera]"
 ```
 
 One-line setup (creates `.venv`, installs deps): `./scripts/setup_dev.sh`

@@ -12,6 +12,11 @@ set -e  # Exit on error
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
+    echo "Error: Python 3.11 or newer is required." >&2
+    exit 1
+fi
+
 echo "========================================="
 echo "Multi-modal AI Studio - Dev Setup"
 echo "========================================="

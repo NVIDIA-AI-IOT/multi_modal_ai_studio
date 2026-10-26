@@ -49,7 +49,7 @@ def _log_video_encode_unavailable() -> None:
         "********************************************************************************\n"
         "  VIDEO INPUT UNAVAILABLE: PyAV and/or PIL are not installed.\n"
         "  Vision will use N-Image (multiple JPEGs) instead of MP4.\n"
-        "  To enable Video Input: pip install av Pillow\n"
+        '  To enable Video Input: pip install -e ".[video-input]"\n'
         "  Or in the UI select \"N-Image Input\" instead of \"Video Input\".\n"
         "********************************************************************************\n"
     )

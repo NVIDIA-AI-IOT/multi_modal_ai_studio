@@ -5,6 +5,8 @@ and running the WebUI.
 
 ## Quick Start
 
+Python 3.11 or newer is required.
+
 The fastest way to get started:
 
 ```bash
@@ -125,6 +127,16 @@ pip install -e .
 # - numpy (audio processing)
 # - websockets (WebSocket support)
 # - ... and other dependencies
+```
+
+Optional features have separate dependency sets. Install only what the target
+system uses:
+
+```bash
+pip install -e ".[audio]"       # PyAudio devices
+pip install -e ".[camera]"      # server-side USB camera preview
+pip install -e ".[video-input]" # PyAV + Pillow MP4 input for VLMs
+pip install -e ".[webrtc-camera]"
 ```
 
 ## Verify Installation
@@ -619,25 +631,25 @@ deactivate
 ### Python Packages (Installed Automatically)
 
 **Core:**
-- `aiohttp>=3.8.0` - Async HTTP client/server
+- `aiohttp>=3.14.5` - Async HTTP client/server
 - `psutil>=5.9.0` - CPU/GPU stats for timeline (WebUI)
-- `grpcio>=1.50.0` - gRPC support
+- `grpcio>=1.56.2` - gRPC support
 - `nvidia-riva-client>=2.14.0` - NVIDIA Riva SDK
 - `openai>=1.0.0` - OpenAI API client
 - `pyyaml>=6.0` - YAML config files
-- `python-dotenv>=1.0.0` - Environment variables
-- `numpy>=1.21.0` - Array operations
+- `python-dotenv>=1.2.2` - Environment variables
+- `numpy>=1.23.2` - Array operations
 - `websockets>=11.0` - WebSocket support
 
 **Audio:**
 - `pyaudio>=0.2.13` - Audio I/O (requires portaudio)
 
 **Development (Optional):**
-- `pytest>=7.0.0` - Testing
-- `pytest-asyncio>=0.21.0` - Async testing
-- `black>=23.0.0` - Code formatting
-- `ruff>=0.1.0` - Linting
-- `mypy>=1.0.0` - Type checking
+- `pytest>=9.0.3` - Testing
+- `pytest-asyncio>=1.3.0` - Async testing
+- `black>=26.10.1` - Code formatting
+- `ruff>=0.17.2` - Linting
+- `mypy>=2.4.0` - Type checking
 
 ### System Dependencies
 
@@ -723,9 +735,13 @@ deactivate
 To add a new dependency:
 
 ```bash
-# 1. Add to requirements.txt or pyproject.toml
+# 1. Add it to pyproject.toml (the dependency source of truth)
 
-# 2. Reinstall
+# 2. Refresh and verify the committed lock
+uv lock --upgrade
+uv lock --check
+
+# 3. Reinstall
 source .venv/bin/activate
 pip install -e .
 

@@ -20,7 +20,6 @@ def check_structure():
     
     required_dirs = [
         ".cursor/rules",
-        "docs/cursor",
         "presets",
         "src/multi_modal_ai_studio/config",
         "src/multi_modal_ai_studio/backends/asr",
@@ -55,16 +54,14 @@ def check_files():
     
     required_files = [
         "pyproject.toml",
-        "requirements.txt",
         "README.md",
         "LICENSE",
         ".gitignore",
         ".cursor/index.mdc",
-        "presets/default.yaml",
+        "presets/speaches-jetson.yaml",
         "src/multi_modal_ai_studio/__init__.py",
         "src/multi_modal_ai_studio/config/schema.py",
         "src/multi_modal_ai_studio/cli/main.py",
-        "docs/cursor/PLAN_MULTI_MODAL_AI_STUDIO.md",
     ]
     
     root = Path(__file__).parent.parent
@@ -202,9 +199,9 @@ def main():
     if all(results):
         print("✅ All checks passed! Setup is complete.")
         print("\nNext steps:")
-        print("  1. Install package: pip install -e .")
-        print("  2. Start Phase 1: Port backends from live-riva-webui")
-        print("  3. See docs/cursor/PLAN_MULTI_MODAL_AI_STUDIO.md")
+        print("  1. Start the recommended services: see README.md")
+        print("  2. Run: multi-modal-ai-studio --preset speaches-jetson --port 8092")
+        print("  3. Open https://localhost:8092")
         return 0
     else:
         print("❌ Some checks failed. Please review errors above.")
