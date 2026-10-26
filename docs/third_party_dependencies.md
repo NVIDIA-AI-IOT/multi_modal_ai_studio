@@ -11,12 +11,17 @@ From the repo root (no venv or activation needed):
 ```bash
 chmod +x scripts/generate_third_party_licenses.sh
 ./scripts/generate_third_party_licenses.sh
+
+# Generate separate optional-runtime manifests when those features ship.
+./scripts/generate_third_party_licenses.sh video-input
+./scripts/generate_third_party_licenses.sh audio,camera,video-input,webrtc-camera
 ```
 
 The script uses a temporary virtual environment so it works even when system Python is externally managed (PEP 668). It uses [pip-licenses](https://pypi.org/project/pip-licenses/) to write:
 
-- `third_party_licenses.csv` – for spreadsheets / nSpect submission
-- `third_party_licenses.md` – human-readable table
+- `third_party_licenses.csv` – core environment for spreadsheets / nSpect submission
+- `third_party_licenses.md` – core human-readable table
+- `third_party_licenses-<profile>.*` – separately generated optional environments
 
 ### Option 2: Manual pip-licenses
 
@@ -29,7 +34,11 @@ pip-licenses --format=markdown -o third_party_licenses.md
 
 ### Declared dependencies (pyproject.toml)
 
-Runtime and optional dependencies are declared in `pyproject.toml` under `[project]` and `[project.optional-dependencies]`. The generated list will include all transitive dependencies of the installed environment, not only the direct ones listed there.
+`pyproject.toml` is the single source of truth for runtime and optional
+dependencies. Core, audio, camera, Video Input, and WebRTC-camera environments
+must be reviewed separately because optional image/video parsers are not part
+of a speech-only installation. The generated list includes all transitive
+dependencies of the installed environment, not only the direct declarations.
 
 ## License of this project
 

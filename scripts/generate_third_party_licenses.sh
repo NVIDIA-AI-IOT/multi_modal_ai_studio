@@ -7,20 +7,38 @@
 #
 # Usage (from repo root):
 #   ./scripts/generate_third_party_licenses.sh
+#   ./scripts/generate_third_party_licenses.sh video-input
+#   ./scripts/generate_third_party_licenses.sh audio,camera,video-input,webrtc-camera
 #
 # Uses a temporary venv so it works even when system Python is externally
 # managed (PEP 668). No active venv required.
 #
-# Output: third_party_licenses.csv, third_party_licenses.md, and THIRD-PARTY-NOTICES.md in repo root.
+# The core profile writes the historical unsuffixed filenames. Optional extras
+# write profile-suffixed files so separate nSpect inputs are not overwritten.
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT_CSV="$REPO_ROOT/third_party_licenses.csv"
-OUT_MD="$REPO_ROOT/third_party_licenses.md"
-OUT_NOTICES="$REPO_ROOT/THIRD-PARTY-NOTICES.md"
+EXTRAS="${1:-}"
+if [[ -n "$EXTRAS" && ! "$EXTRAS" =~ ^[a-z0-9,-]+$ ]]; then
+    echo "Invalid extras list: $EXTRAS" >&2
+    exit 2
+fi
+
+if [[ -n "$EXTRAS" ]]; then
+    PROFILE="${EXTRAS//,/-}"
+    INSTALL_SPEC=".[${EXTRAS}]"
+    OUT_CSV="$REPO_ROOT/third_party_licenses-${PROFILE}.csv"
+    OUT_MD="$REPO_ROOT/third_party_licenses-${PROFILE}.md"
+    OUT_NOTICES="$REPO_ROOT/THIRD-PARTY-NOTICES-${PROFILE}.md"
+else
+    INSTALL_SPEC="."
+    OUT_CSV="$REPO_ROOT/third_party_licenses.csv"
+    OUT_MD="$REPO_ROOT/third_party_licenses.md"
+    OUT_NOTICES="$REPO_ROOT/THIRD-PARTY-NOTICES.md"
+fi
 
 TMPVENV=$(mktemp -d)
 trap "rm -rf '$TMPVENV'" EXIT
@@ -29,7 +47,7 @@ echo "Using temporary venv..."
 python3 -m venv "$TMPVENV"
 "$TMPVENV/bin/pip" install -q --upgrade pip
 "$TMPVENV/bin/pip" install -q pip-licenses
-"$TMPVENV/bin/pip" install -q -e .
+"$TMPVENV/bin/pip" install -q -e "$INSTALL_SPEC"
 
 echo "Writing $OUT_CSV"
 "$TMPVENV/bin/pip-licenses" --format=csv --output-file="$OUT_CSV" 2>/dev/null || "$TMPVENV/bin/pip-licenses" --format=csv > "$OUT_CSV"

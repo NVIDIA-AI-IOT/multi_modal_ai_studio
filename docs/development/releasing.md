@@ -33,6 +33,9 @@ Before starting the release process, ensure:
 - [ ] Required P0/P1 rows in the [Manual Speech Release Test Plan](manual_speech_release_test.md) are complete, with session evidence
 - [ ] Code quality checks pass (Black, Ruff, etc.)
 - [ ] Documentation is up to date
+- [ ] `uv lock --check` passes and the committed lock matches `pyproject.toml`
+- [ ] Core and optional dependency audits have no unexplained High/Critical findings
+- [ ] Current nSpect findings have been mapped to the exact release lock and dispositioned
 - [ ] CHANGELOG.md is updated with all changes since last release
 - [ ] **Version in two places (both must match exactly):**
   - `pyproject.toml` – `version = "X.Y.Z"`

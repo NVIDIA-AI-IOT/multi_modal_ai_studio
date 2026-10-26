@@ -1752,7 +1752,7 @@ function renderLLMConfig(config, readonly = false) {
                 </div>
                 ${!readonly ? '<span class="input-hint">N-Image sends individual JPEG frames; Video encodes frames into MP4</span>' : ''}
                 <div id="vision-video-unavailable-banner" class="vision-video-unavailable-banner" style="display: none; margin-top: 10px;" role="alert">
-                    <strong>Video Input unavailable:</strong> PyAV and PIL are not installed. Install with <code>pip install av Pillow</code> or use N-Image Input instead.
+                    <strong>Video Input unavailable:</strong> PyAV and PIL are not installed. Install with <code>pip install -e ".[video-input]"</code> or use N-Image Input instead.
                 </div>
 
                 <label style="margin-top: 10px;" id="vision-frames-label">${config.vision_video_encode ? 'Video Frames' : 'Frames per Turn'}</label>
@@ -2841,7 +2841,7 @@ function showVisionVideoUnavailableToast() {
         toast.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 12px 20px; background: rgba(239, 68, 68, 0.95); color: #fff; border-radius: 8px; font-size: 14px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
         document.body.appendChild(toast);
     }
-    toast.innerHTML = 'Video Input unavailable: PyAV and PIL are not installed. Install with <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:4px;">pip install av Pillow</code> or use N-Image Input instead. Switched to N-Image.';
+    toast.innerHTML = 'Video Input unavailable: PyAV and PIL are not installed. Install with <code style="background:rgba(0,0,0,0.2);padding:2px 6px;border-radius:4px;">pip install -e ".[video-input]"</code> or use N-Image Input instead. Switched to N-Image.';
     toast.style.display = 'block';
     setTimeout(function () { toast.style.display = 'none'; }, 6000);
 }

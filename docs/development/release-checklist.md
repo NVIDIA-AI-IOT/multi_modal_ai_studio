@@ -53,6 +53,9 @@ Copy this checklist when creating a release:
 
 **Pre-Release:**
 - [ ] All tests passing on `main`
+- [ ] `uv lock --check` passes and `uv.lock` matches `pyproject.toml`
+- [ ] Core and optional dependency security audits have no unexplained High/Critical findings
+- [ ] Current nSpect findings are mapped to the exact release lock and dispositioned
 - [ ] Update version in `pyproject.toml`
 - [ ] Update version in `src/multi_modal_ai_studio/__init__.py` (must match)
 - [ ] Update `CHANGELOG.md` with release notes (move Unreleased → [X.Y.Z])
