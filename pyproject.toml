@@ -45,6 +45,7 @@ dev = [
     "black>=26.10.1",
     "ruff>=0.17.2",
     "mypy>=2.4.0",
+    "uv>=0.13.5",
 ]
 audio = [
     "pyaudio>=0.2.13",  # For local USB device access (headless mode)
