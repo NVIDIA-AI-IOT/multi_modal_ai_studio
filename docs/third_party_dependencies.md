@@ -32,13 +32,29 @@ pip-licenses --format=csv -o third_party_licenses.csv
 pip-licenses --format=markdown -o third_party_licenses.md
 ```
 
-### Declared dependencies (pyproject.toml)
+### Declared and resolved dependencies
 
 `pyproject.toml` is the single source of truth for runtime and optional
 dependencies. Core, audio, camera, Video Input, and WebRTC-camera environments
 must be reviewed separately because optional image/video parsers are not part
 of a speech-only installation. The generated list includes all transitive
 dependencies of the installed environment, not only the direct declarations.
+
+`uv.lock` is the canonical resolved dependency set. Because nSpect and some
+other source scanners discover Python dependencies only from a conventional
+`requirements.txt`, the repository also checks in a generated compatibility
+manifest. It includes core dependencies and all shipped runtime extras, but
+excludes development tools. Do not edit it directly.
+
+Regenerate and verify it with:
+
+```bash
+./scripts/generate_nspect_requirements.sh
+./scripts/generate_nspect_requirements.sh --check
+```
+
+The unit-test suite runs the same check in CI so `requirements.txt` cannot
+silently drift from `uv.lock`.
 
 ## License of this project
 
