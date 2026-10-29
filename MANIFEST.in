@@ -1,0 +1,4 @@
+include LICENSE NOTICE
+recursive-include presets *.yaml
+recursive-include src/multi_modal_ai_studio/webui/static *.html *.js *.css
+global-exclude *.backup
