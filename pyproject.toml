@@ -76,7 +76,7 @@ Issues = "https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-multi_modal_ai_studio = ["webui/static/**/*"]
+multi_modal_ai_studio = ["webui/static/**/*.html", "webui/static/**/*.js", "webui/static/**/*.css", "config/presets/*.yaml"]
 
 [tool.black]
 line-length = 100

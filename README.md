@@ -56,6 +56,10 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 Python 3.11 or newer is required. Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
 
+Published release candidates provide a wheel and source distribution on [GitHub Releases](https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/releases). Once the candidate is also published to PyPI, install it with `pip install multi-modal-ai-studio==0.2.0rc1`. Do not assume the PyPI version exists until the Release notes confirm publication.
+
+The installed package includes the Web UI and built-in presets, so `multi-modal-ai-studio --preset speaches-jetson --port 8092` works outside a source checkout when the backend services are already running. The backend launch scripts below are repository tools, not part of the wheel: use a checkout of the matching release tag to start Speaches/Gemma or NVIDIA open-model services. See the [package release/install guide](docs/development/releasing.md#what-is-shipped) for the distinction.
+
 > **Note:** If `python3 -m venv` fails with "No module named venv", install the venv package for your Python version:
 > ```bash
 > sudo apt install python3-venv   # or python3.X-venv, e.g. python3.10-venv, python3.12-venv
@@ -65,6 +69,8 @@ Python 3.11 or newer is required. Use a virtual environment (e.g. `.venv`) so de
 # Clone repository
 git clone https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio.git
 cd multi_modal_ai_studio
+# For a published release, check out its exact tag instead of moving main:
+# git checkout v0.2.0-rc.1
 
 # Create and activate virtual environment
 python3 -m venv .venv

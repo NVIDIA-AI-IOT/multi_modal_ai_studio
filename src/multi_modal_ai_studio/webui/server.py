@@ -32,6 +32,7 @@ load_dotenv()
 from aiohttp.abc import AbstractAccessLogger
 
 from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig, TTSConfig
+from multi_modal_ai_studio.config.presets import available_presets, find_preset, writable_presets_dir
 from multi_modal_ai_studio.core.session import decode_session_thumbnail
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
@@ -824,26 +825,15 @@ class WebUIServer:
     # ── Preset management ────────────────────────────────────────────────
 
     def _get_presets_dir(self) -> Path:
-        """Return the presets/ folder (repo root or next to session_dir)."""
-        candidates = [
-            Path(__file__).resolve().parents[3] / "presets",
-            self.session_dir.parent / "presets",
-            Path("presets"),
-        ]
-        for d in candidates:
-            if d.is_dir():
-                return d
-        return candidates[0]
+        """Return the writable preset directory, not the installed defaults."""
+        return writable_presets_dir(self.session_dir)
 
     async def handle_list_presets(self, request: web.Request) -> web.Response:
         """GET /api/presets — list available preset YAML files with name/description/app_version."""
         import yaml as _yaml
         presets_dir = self._get_presets_dir()
-        if not presets_dir.is_dir():
-            return web.json_response({"presets": [], "presets_dir": str(presets_dir)})
-
         result = []
-        for f in sorted(presets_dir.iterdir()):
+        for f in available_presets(presets_dir).values():
             if f.suffix.lower() in (".yaml", ".yml") and f.is_file():
                 try:
                     data = _yaml.safe_load(f.read_text()) or {}
@@ -862,8 +852,8 @@ class WebUIServer:
         import yaml as _yaml
         name = request.match_info["name"].removesuffix(".yaml")
         presets_dir = self._get_presets_dir()
-        preset_path = presets_dir / f"{name}.yaml"
-        if not preset_path.is_file():
+        preset_path = find_preset(name, presets_dir)
+        if preset_path is None:
             return web.json_response({"error": f"Preset '{name}' not found"}, status=404)
         try:
             data = _yaml.safe_load(preset_path.read_text()) or {}
@@ -914,9 +904,11 @@ class WebUIServer:
         """DELETE /api/presets/{name} — delete a preset YAML file."""
         name = request.match_info["name"].removesuffix(".yaml")
         presets_dir = self._get_presets_dir()
-        preset_path = presets_dir / f"{name}.yaml"
-        if not preset_path.is_file():
+        preset_path = find_preset(name, presets_dir)
+        if preset_path is None:
             return web.json_response({"error": f"Preset '{name}' not found"}, status=404)
+        if preset_path.parent != presets_dir:
+            return web.json_response({"error": "Bundled presets are read-only; save a local copy"}, status=403)
         preset_path.unlink()
         logger.info("Deleted preset '%s' at %s", name, preset_path)
         return web.json_response({"deleted": name})

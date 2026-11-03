@@ -50,7 +50,7 @@ Examples:
   multi-modal-ai-studio --port 8092 --asr-server localhost:50051 --tts-server localhost:50051 --llm-api-base http://localhost:11434/v1 --llm-model llama3.2:3b
 
   # WebUI with preset
-  multi-modal-ai-studio --preset low-latency
+  multi-modal-ai-studio --preset speaches-jetson
 
   # Headless mode with config file
   multi-modal-ai-studio --mode headless --config my-preset.yaml
@@ -58,7 +58,7 @@ Examples:
   # Text-only mode
   multi-modal-ai-studio --audio-input none --audio-output none
 
-For more information, visit: https://github.com/yourusername/multi-modal-ai-studio
+For more information, visit: https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio
         """
     )
 
@@ -79,7 +79,7 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
 
     parser.add_argument(
         "--preset",
-        help="Load system preset (default, low-latency, high-accuracy, text-only, openai-realtime)"
+        help="Load a bundled preset (e.g. speaches-jetson) or a YAML file"
     )
 
     # Server options (WebUI mode)
@@ -220,19 +220,14 @@ For more information, visit: https://github.com/yourusername/multi-modal-ai-stud
         initial_config = None
         if args.preset:
             import yaml
-            preset_name = args.preset.removesuffix(".yaml")
-            candidates = [
-                Path(args.preset),  # exact/absolute path
-                Path(__file__).resolve().parent.parent.parent.parent / "presets" / f"{preset_name}.yaml",
-                Path("presets") / f"{preset_name}.yaml",
-            ]
-            preset_path = next((p for p in candidates if p.exists()), None)
+            from multi_modal_ai_studio.config.presets import resolve_cli_preset
+            preset_path = resolve_cli_preset(args.preset)
             if preset_path:
                 with open(preset_path) as f:
                     initial_config = yaml.safe_load(f)
                 logger.info(f"Loaded preset '{args.preset}' from {preset_path}")
             else:
-                logger.warning(f"Preset '{args.preset}' not found (searched: {[str(c) for c in candidates]})")
+                parser.error(f"Preset '{args.preset}' not found; use a bundled name or a YAML file")
         elif args.config:
             import yaml
             if args.config.exists():

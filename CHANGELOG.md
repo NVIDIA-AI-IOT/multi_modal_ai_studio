@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Release preparation
+- Include canonical presets in wheel/sdist builds and expose them in the CLI and Web UI outside a source checkout, with writable local overrides kept out of site-packages.
+- Verify clean wheel installation, preset APIs, and static UI assets in CI; attach wheel, sdist, dependency manifests, and checksums to GitHub Releases.
+- Add explicitly opted-in, approval-gated TestPyPI/PyPI Trusted Publishing and an rc1 security/hardware qualification record.
+
 ## [0.2.0-rc.1] - 2026-10-09
 
 ### Added

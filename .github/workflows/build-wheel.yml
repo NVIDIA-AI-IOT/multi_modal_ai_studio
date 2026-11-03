@@ -1,5 +1,4 @@
-# Build Python wheel and run tests.
-# On release publish: optionally attach wheel to GitHub Release; PyPI publish can be added later.
+# Build once, test outside the checkout, then explicitly promote distributions.
 name: Build and Test
 
 on:
@@ -9,15 +8,44 @@ on:
     branches: [main]
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit/ref to build (PyPI requires a published release tag)"
+        required: true
+        default: main
+      publish_to:
+        description: "Explicit package-index promotion (requires repository opt-in and environment approval)"
+        required: true
+        default: none
+        type: choice
+        options: [none, testpypi, pypi]
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
+      - name: Validate manual publishing opt-in
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_to != 'none'
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+          DESTINATION: ${{ inputs.publish_to }}
+          TESTPYPI_ENABLED: ${{ vars.TESTPYPI_PUBLISH_ENABLED }}
+          PYPI_ENABLED: ${{ vars.PYPI_PUBLISH_ENABLED }}
+        run: |
+          test "$WORKFLOW_REF" = refs/heads/main || { echo 'Run publishing workflows from main only'; exit 1; }
+          if [ "$DESTINATION" = testpypi ]; then
+            test "$TESTPYPI_ENABLED" = true || { echo 'Configure testpypi approval/Trusted Publisher, then enable TESTPYPI_PUBLISH_ENABLED'; exit 1; }
+          else
+            test "$PYPI_ENABLED" = true || { echo 'Configure pypi approval/Trusted Publisher, then enable PYPI_PUBLISH_ENABLED'; exit 1; }
+          fi
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,10 +65,32 @@ jobs:
           pip install -e "./services/openai_speech[dev]"
           pytest services/openai_speech/tests -v
 
+      - name: Verify release tag and package version
+        if: github.event_name == 'release' || inputs.publish_to == 'pypi'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.ref }}
+          DESTINATION: ${{ inputs.publish_to }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from packaging.version import Version
+          with open('pyproject.toml', 'rb') as source:
+              version = tomllib.load(source)['project']['version']
+          tag = os.environ['RELEASE_TAG']
+          assert tag.startswith('v'), 'Use a v-prefixed release tag, not a branch or SHA'
+          assert Version(tag[1:]) == Version(version), (tag, version)
+          PY
+          if [ "$DESTINATION" = pypi ]; then
+            gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' | grep -qx false
+            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          fi
+
       - name: Install build tools
         run: pip install build twine
 
-      - name: Build wheel
+      - name: Build sdist and wheel from sdist
         run: python -m build
 
       - name: Check wheel
@@ -48,22 +98,75 @@ jobs:
           twine check dist/*
           ls -la dist/
 
-      - name: Test wheel installation
+      - name: Test clean wheel installation outside the repository
         run: |
-          pip install dist/*.whl
-          python -c "import multi_modal_ai_studio; print('Version:', multi_modal_ai_studio.__version__)"
-          multi-modal-ai-studio --version
-          multi-modal-ai-studio --help
+          python scripts/check_distribution.py dist/*.whl
 
-      - name: Upload wheel as artifact
+      - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
-          name: python-wheel
-          path: dist/*.whl
+          name: python-distributions
+          path: dist/*
           retention-days: 30
 
-      - name: Upload wheel to GitHub Release
-        if: github.event_name == 'release'
+      - name: Assemble release assets and checksums
+        run: |
+          mkdir release-assets
+          cp dist/*.whl dist/*.tar.gz requirements.txt uv.lock release-assets/
+          (cd release-assets && sha256sum *.whl *.tar.gz requirements.txt uv.lock > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets/*
+          retention-days: 30
+
+  github-release:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Attach verified artifacts to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.whl
+          files: release-assets/*
+
+  testpypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/multi-modal-ai-studio
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'pypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/multi-modal-ai-studio
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-distributions
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
