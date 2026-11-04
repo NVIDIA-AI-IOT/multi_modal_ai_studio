@@ -15,6 +15,7 @@ import wave
 
 import aiohttp
 
+from multi_modal_ai_studio.backends.asr.language import transcription_language
 from multi_modal_ai_studio.backends.base import (
     ASRBackend,
     ASRResult,
@@ -319,7 +320,9 @@ class OpenAIRestASRBackend(ASRBackend):
             content_type="audio/wav",
         )
         form.add_field("model", self.config.model)
-        form.add_field("language", self.config.language or "auto")
+        language = transcription_language(self.config.language)
+        if language:
+            form.add_field("language", language)
         form.add_field("response_format", "json")
         headers = {}
         if self.config.api_key:

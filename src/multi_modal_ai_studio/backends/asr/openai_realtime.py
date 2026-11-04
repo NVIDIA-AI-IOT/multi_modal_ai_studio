@@ -8,6 +8,9 @@ from typing import AsyncIterator, Dict, Optional
 
 import numpy as np
 
+from multi_modal_ai_studio.backends.asr.language import (
+    transcription_language as _language_code,
+)
 from multi_modal_ai_studio.backends.base import ASRBackend, ASRResult, ConfigError
 from multi_modal_ai_studio.backends.realtime.client import (
     DISABLE_TURN_DETECTION,
@@ -20,14 +23,6 @@ from multi_modal_ai_studio.core.timeline import Timeline
 logger = logging.getLogger(__name__)
 
 _PIPELINE_SAMPLE_RATE = 16000
-
-
-def _language_code(value: Optional[str]) -> Optional[str]:
-    """Return an ISO-639-style language code accepted by common providers."""
-    value = (value or "").strip()
-    if not value or value.lower() == "auto":
-        return None
-    return value.split("-", 1)[0].lower()
 
 
 def _resample_pcm16(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
