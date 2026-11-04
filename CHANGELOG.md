@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - REST ASR model-list Reload and explicit, confirmed Download for providers advertising the Speaches model-management API.
 - Session JSON download next to the filename copy control, including after Stop and during recorded review.
+- Disabled-by-default, private, bounded REST ASR WAV diagnostics and an identical-input replay script for ASR-only/TTS-overlap/post-TTS comparisons.
 - Regression coverage for language normalization, provider-specific downloads, cancellation event ordering, mixed reasoning/answer deltas, and original JSON downloads.
 
 ## [0.2.0-rc.1] - 2026-10-09
