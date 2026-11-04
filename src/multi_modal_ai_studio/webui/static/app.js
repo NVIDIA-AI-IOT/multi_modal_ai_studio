@@ -7,6 +7,9 @@
 if (typeof localStorage !== 'undefined' && localStorage.getItem('micWaveformDebug')) window._micWaveformDebug = true;
 
 // ===== State Management =====
+let asrModelDiscovery = null;
+let asrModelDiscoverySequence = 0;
+const asrModelDownloads = new Set();
 const state = {
     sessions: [],
     selectedSession: null,
@@ -1523,9 +1526,13 @@ function renderASRConfig(config, readonly = false) {
                     <label>Model</label>
                     ${readonly
                         ? `<input type="text" value="${escapeHtml(config.model || '')}" readonly class="readonly-config-input">`
-                        : `<select id="asr-rest-model-select" class="config-select" onchange="updateConfig('asr', 'model', this.value)">
+                        : `<div style="display:flex;gap:8px;align-items:center">
+                           <select id="asr-rest-model-select" class="config-select" style="flex:1;min-width:0" onchange="updateConfig('asr', 'model', this.value); updateASRDownloadButton()">
                                <option value="${escapeHtml(config.model || '')}" selected>${escapeHtml(config.model || 'Loading...')}</option>
-                           </select>`
+                           </select>
+                           <button type="button" class="btn-secondary" id="asr-model-reload" onclick="fetchOpenAIASRModels()" title="Refresh available and downloaded models; does not load a model into GPU memory"><i data-lucide="refresh-cw" class="lucide-inline"></i> Reload</button>
+                           <button type="button" class="btn-secondary" id="asr-model-download" onclick="downloadASRModel()" hidden>Download</button>
+                           </div>`
                     }
                     ${!readonly ? '<div id="asr-rest-model-hint" class="input-hint">Discovering ASR models from the provider…</div>' : ''}
                 </div>
@@ -3152,11 +3159,16 @@ async function fetchASRModels(server) {
 }
 
 async function fetchOpenAIASRModels() {
+    const sequence = ++asrModelDiscoverySequence;
     const config = currentConfig.asr || {};
     const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
     const select = document.getElementById('asr-rest-model-select');
     const hint = document.getElementById('asr-rest-model-hint');
     if (!apiBase || !select) return;
+    const reload = document.getElementById('asr-model-reload');
+    if (reload) reload.disabled = true;
+    asrModelDiscovery = null;
+    updateASRDownloadButton();
     if (hint) hint.textContent = 'Discovering ASR models from the provider…';
 
     try {
@@ -3169,10 +3181,11 @@ async function fetchOpenAIASRModels() {
             }),
         });
         const data = await response.json().catch(function () { return {}; });
-        if (!window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
+        if (sequence !== asrModelDiscoverySequence || !window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
         if (!response.ok) throw new Error(data.error || ('Request failed: ' + response.status));
 
         const models = Array.isArray(data.models) ? data.models : [];
+        asrModelDiscovery = {apiBase: apiBase, data: data};
         const configured = String(currentConfig.asr.model || '');
         if (configured && !models.some(function (model) { return String(model.id) === configured; })) {
             models.unshift({id: configured, downloaded: false, configuredOnly: true, languages: []});
@@ -3199,14 +3212,70 @@ async function fetchOpenAIASRModels() {
                 (id === selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
         }).join('');
         select.value = selected;
+        updateASRDownloadButton();
         if (hint) {
             hint.textContent = data.registry_available
-                ? models.length + ' compatible models reported; ' + (data.downloaded_count || 0) + ' downloaded locally. Undownloaded models are fetched on first use.'
+                ? models.length + ' registry candidates; ' + (data.downloaded_count || 0) + ' downloaded to the server. Download before use. Downloaded does not mean loaded into GPU memory.'
                 : models.length + ' locally available models reported by this provider.';
+            if (asrModelDownloads.has(JSON.stringify([apiBase, String(currentConfig.asr.model || '')]))) {
+                hint.textContent = 'Downloading model to the server… First download may take several minutes.';
+            }
         }
     } catch (error) {
+        if (sequence !== asrModelDiscoverySequence) return;
         if (hint) hint.textContent = 'Model discovery failed: ' + (error.message || String(error));
         console.error('fetchOpenAIASRModels failed:', error);
+    } finally {
+        if (sequence === asrModelDiscoverySequence && reload) reload.disabled = false;
+    }
+}
+
+function updateASRDownloadButton() {
+    const button = document.getElementById('asr-model-download');
+    if (!button) return;
+    const config = currentConfig.asr || {};
+    const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+    const data = asrModelDiscovery && asrModelDiscovery.apiBase === apiBase
+        ? asrModelDiscovery.data : null;
+    const choice = data && Array.isArray(data.models)
+        ? data.models.find(function (item) { return item.id === config.model; }) : null;
+    button.hidden = !(data && data.download_supported && choice && !choice.downloaded && !choice.configuredOnly);
+    const pending = asrModelDownloads.has(JSON.stringify([apiBase, String(config.model || '')]));
+    button.disabled = pending || state.sessionState === 'live';
+    button.textContent = pending ? 'Downloading…' : 'Download';
+}
+
+async function downloadASRModel() {
+    const config = currentConfig.asr || {};
+    const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+    const model = String(config.model || '');
+    const identity = JSON.stringify([apiBase, model]);
+    const button = document.getElementById('asr-model-download');
+    if (!button || button.hidden || button.disabled || asrModelDownloads.has(identity)) return;
+    if (!window.confirm('Download ' + model + ' to the MMAS server? This uses server disk space and network bandwidth.')) return;
+    asrModelDownloads.add(identity);
+    updateASRDownloadButton();
+    const hint = document.getElementById('asr-rest-model-hint');
+    if (hint) hint.textContent = 'Downloading model to the server… First download may take several minutes.';
+    try {
+        const response = await fetch('/api/asr/download-model', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({api_base: apiBase, api_key: config.api_key || '', model: model}),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+        asrModelDownloads.delete(identity);
+        if (window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) {
+            await fetchOpenAIASRModels();
+        }
+    } catch (error) {
+        if (window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) {
+            const currentHint = document.getElementById('asr-rest-model-hint');
+            if (currentHint) currentHint.textContent = 'Download failed: ' + (error.message || String(error));
+        }
+    } finally {
+        asrModelDownloads.delete(identity);
+        updateASRDownloadButton();
     }
 }
 
@@ -3370,7 +3439,7 @@ async function fetchOpenAITTSMetadata() {
     if (modelHint) {
         if (data.registry_available) {
             modelHint.textContent = modelChoices.length + ' compatible models reported; ' +
-                (data.downloaded_count || 0) + ' downloaded locally. Undownloaded models are fetched on first use.';
+                (data.downloaded_count || 0) + ' downloaded to the server. Other models may require installation through the provider. Downloaded does not mean loaded into GPU memory.';
         } else if (modelChoices.length) {
             modelHint.textContent = modelChoices.length + ' locally available models reported by this provider.';
         } else {
