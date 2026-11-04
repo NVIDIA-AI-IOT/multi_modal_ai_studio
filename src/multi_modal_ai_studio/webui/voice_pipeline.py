@@ -237,7 +237,7 @@ async def _record_cancelled_tts_events(
         "timestamp": timestamp,
     })
 
-    complete_data = {"cancelled": True, "reason": "barge_in"}
+    complete_data = {"cancelled": True, "reason": "barge_in", "turn_id": turn_id}
     session.timeline.add_event(
         "tts_complete",
         Lane.TTS,
@@ -279,6 +279,16 @@ def _asr_result_error_message(result: ASRResult) -> Optional[str]:
     if message.lower().startswith("asr request failed"):
         return message
     return f"ASR request failed: {message}"
+
+
+def _empty_llm_response_message(reasoning: str) -> str:
+    """Explain missing speech without treating reasoning as an answer."""
+    if reasoning.strip():
+        return (
+            "The LLM returned reasoning but no answer, so no speech was generated. "
+            "Increase Max Tokens or disable reasoning on the LLM server."
+        )
+    return "The LLM returned an empty answer, so no speech was generated. Please try again."
 
 
 def _is_punctuation_or_empty(text: str) -> bool:
@@ -2649,6 +2659,7 @@ async def _run_voice_pipeline(
 
                 reasoning_text = ""
                 reasoning_start_logged = False
+                llm_finish_reason = None
                 try:
                     if not barge_in_aborted:
                         async for token in llm.generate_stream(
@@ -2673,6 +2684,7 @@ async def _run_voice_pipeline(
                                 await send_event({"event_type": "reasoning_start", "lane": "llm", "data": {}, "timestamp": ts_rs})
                             if token.is_final and token.metadata:
                                 reasoning_text = token.metadata.get("reasoning", "")
+                                llm_finish_reason = token.metadata.get("finish_reason")
                             if token.token:
                                 full_response += token.token
                                 if not llm_first_token_sent:
@@ -2697,6 +2709,8 @@ async def _run_voice_pipeline(
 
                     if not barge_in_aborted:
                         llm_complete_data: dict = {"text": full_response}
+                        if llm_finish_reason:
+                            llm_complete_data["finish_reason"] = llm_finish_reason
                         if reasoning_text:
                             llm_complete_data["reasoning"] = reasoning_text
                             logger.info("[reasoning] %d chars: %.200s%s",
@@ -2758,6 +2772,12 @@ async def _run_voice_pipeline(
                 await send_event(chat_event)
 
                 if not full_response.strip():
+                    message = _empty_llm_response_message(reasoning_text)
+                    logger.warning("[LLM] %s", message)
+                    skipped_data = {"reason": "empty_llm_response", "message": message, "turn_id": turn_index}
+                    session.timeline.add_event("tts_skipped", Lane.TTS, data=skipped_data)
+                    await send_event({"event_type": "tts_skipped", "lane": "tts", "data": skipped_data, "timestamp": ts_llm_complete})
+                    await send_event({"event_type": "error", "lane": "llm", "data": {"message": message}, "timestamp": ts_llm_complete})
                     session.end_turn()
                     continue
 

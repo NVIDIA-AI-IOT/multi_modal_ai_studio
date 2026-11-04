@@ -645,6 +645,25 @@
         });
         return stops.map(function (stopEvent) {
             const start = Number(stopEvent.timestamp);
+            const data = stopEvent.data || {};
+            const sameTurn = function (event) {
+                const id = event.data && event.data.turn_id;
+                return data.turn_id == null || id == null || String(id) === String(data.turn_id);
+            };
+            const previousStarts = ordered.filter(function (event) {
+                return event.event_type === 'tts_start' && Number(event.timestamp) <= start;
+            });
+            const previousStart = previousStarts.length
+                ? Number(previousStarts[previousStarts.length - 1].timestamp) : -Infinity;
+            // Backend cancellation can finish before the browser reports its
+            // playback stop. Match from the request, not only after the stop.
+            const requests = ordered.filter(function (event) {
+                const t = Number(event.timestamp);
+                return event.event_type === 'tts_cancel_requested'
+                    && t >= previousStart && t <= start && sameTurn(event);
+            });
+            const requestedAt = requests.length
+                ? Number(requests[requests.length - 1].timestamp) : start;
             const nextStart = ordered.find(function (event) {
                 return event.event_type === 'tts_start'
                     && Number(event.timestamp) > start;
@@ -652,17 +671,16 @@
             const limit = nextStart ? Number(nextStart.timestamp) : Infinity;
             const cancelEvent = ordered.find(function (event) {
                 const timestamp = Number(event.timestamp);
-                if (!(timestamp >= start && timestamp < limit)) return false;
+                if (!(timestamp >= requestedAt && timestamp < limit) || !sameTurn(event)) return false;
                 if (event.event_type === 'tts_cancelled') return true;
                 return event.event_type === 'tts_complete'
                     && event.data && event.data.cancelled === true;
             }) || null;
-            const data = stopEvent.data || {};
             const discardedEnd = Number(data.discarded_audio_end);
             return {
                 stopEvent: stopEvent,
                 start: start,
-                cancelEnd: cancelEvent ? Number(cancelEvent.timestamp) : null,
+                cancelEnd: cancelEvent ? Math.max(start, Number(cancelEvent.timestamp)) : null,
                 cancelEvent: cancelEvent,
                 nextTtsStart: Number.isFinite(limit) ? limit : null,
                 discardedEnd: Number.isFinite(discardedEnd) && discardedEnd > start

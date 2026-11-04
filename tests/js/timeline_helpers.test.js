@@ -402,6 +402,36 @@ test('barge-in windows stop at cancellation and never borrow the next turn', () 
     assert.equal(windows[1].discardedEnd, 10);
 });
 
+test('backend cancellation before browser stop is complete, not pending forever', () => {
+    // Event order from ad023656: cancellation completed 22 ms before browser ack.
+    const events = [
+        {event_type: 'tts_start', timestamp: 26.600},
+        {event_type: 'tts_cancel_requested', timestamp: 28.694, data: {turn_id: 3}},
+        {event_type: 'tts_cancelled', timestamp: 28.696, data: {turn_id: 3}},
+        {event_type: 'tts_complete', timestamp: 28.696, data: {cancelled: true}},
+        {event_type: 'tts_playback_stopped', timestamp: 28.718, data: {turn_id: 3, reason: 'barge_in', discarded_audio_end: 37.174}},
+    ];
+    let windows = buildBargeInWindows(events);
+    assert.equal(windows[0].cancelEnd, 28.718);
+    assert.equal(windows[0].cancelEvent.timestamp, 28.696);
+    events.push({event_type: 'tts_start', timestamp: 30.884});
+    events.push({event_type: 'tts_complete', timestamp: 31.095});
+    windows = buildBargeInWindows(events);
+    assert.equal(windows[0].cancelEnd, 28.718);
+    assert.equal(windows[0].discardedEnd, 30.884);
+});
+
+test('cancellation completion from another turn cannot close a window', () => {
+    const windows = buildBargeInWindows([
+        {event_type: 'tts_start', timestamp: 2},
+        {event_type: 'tts_cancel_requested', timestamp: 4, data: {turn_id: 4}},
+        {event_type: 'tts_cancelled', timestamp: 4.01, data: {turn_id: 3}},
+        {event_type: 'tts_playback_stopped', timestamp: 4.02, data: {turn_id: 4}},
+        {event_type: 'tts_cancelled', timestamp: 4.05, data: {turn_id: 4}},
+    ]);
+    assert.equal(windows[0].cancelEnd, 4.05);
+});
+
 test('old TTS audio cannot close the new user turn TTL band', () => {
     const state = {
         liveTtlBands: [],

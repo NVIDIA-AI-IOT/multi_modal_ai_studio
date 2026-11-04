@@ -212,6 +212,7 @@ def test_cancelled_streaming_tts_records_both_terminal_events():
         assert terminal[1].data == {
             "cancelled": True,
             "reason": "barge_in",
+            "turn_id": 1,
         }
         assert [event["event_type"] for event in emitted] == [
             "tts_cancelled",
