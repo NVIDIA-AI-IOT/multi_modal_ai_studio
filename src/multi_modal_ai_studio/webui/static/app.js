@@ -589,6 +589,12 @@ function updateRecordedReviewLayout() {
     );
 }
 
+function renderSessionFilenameControls(sessionId, filename) {
+    return '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(filename) + '</span></span> ' +
+        '<button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(filename) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button> ' +
+        '<a class="session-filename-download" href="/api/sessions/' + encodeURIComponent(sessionId) + '/download" download="' + escapeHtml(filename) + '" aria-label="Download session JSON" title="Download session JSON (may include transcripts and configuration)"><i data-lucide="download" class="lucide-inline" aria-hidden="true"></i></a>';
+}
+
 /** Set session-meta right block (Session recorded + filename). Two-line layout: left = title only; right = this when available. */
 function setSessionMetaRight(recordedText, filenameHtml) {
     const container = document.getElementById('session-meta');
@@ -6976,7 +6982,7 @@ function updateLiveSessionUI() {
             var stoppedSessionId = state.lastSavedSessionId || state.liveSessionId;
             if (stoppedSessionId) {
                 var sessionFileName = stoppedSessionId + '.json';
-                filenameHtml = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
+                filenameHtml = renderSessionFilenameControls(stoppedSessionId, sessionFileName);
             }
             setSessionMetaRight(recordedLine, filenameHtml);
             document.getElementById('new-session-btn')?.classList.remove('new-session-btn--highlight');
@@ -7047,7 +7053,7 @@ function updateHistoricalSessionPreview() {
         var filenameHtml = '';
         const sessionFileName = session.session_id ? (session.session_id + '.json') : '';
         if (sessionFileName) {
-            filenameHtml = '<span class="session-filename-label">Session filename: <span class="session-filename-text">' + escapeHtml(sessionFileName) + '</span></span> <button type="button" class="session-filename-copy" aria-label="Copy filename" data-filename="' + escapeHtml(sessionFileName) + '"><i data-lucide="copy" class="lucide-inline" aria-hidden="true"></i></button>';
+            filenameHtml = renderSessionFilenameControls(session.session_id, sessionFileName);
         }
         setSessionMetaRight(recordedLine, filenameHtml);
 

@@ -21,7 +21,7 @@ import sys
 import wave
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from dotenv import load_dotenv
 
@@ -576,6 +576,7 @@ class WebUIServer:
         """Setup HTTP routes."""
         self.app.router.add_get('/api/sessions', self.handle_list_sessions)
         self.app.router.add_get('/api/sessions/{session_id}/thumbnail', self.handle_get_session_thumbnail)
+        self.app.router.add_get('/api/sessions/{session_id}/download', self.handle_download_session)
         self.app.router.add_get('/api/sessions/{session_id}', self.handle_get_session)
         self.app.router.add_patch('/api/sessions/{session_id}', self.handle_patch_session)
         self.app.router.add_delete('/api/sessions/{session_id}', self.handle_delete_session)
@@ -689,6 +690,17 @@ class WebUIServer:
                 {"error": str(e)},
                 status=500
             )
+
+    async def handle_download_session(self, request: web.Request) -> web.StreamResponse:
+        """Download the original saved JSON, including legacy filenames."""
+        path = self._session_file_path(request.match_info["session_id"])
+        if path is None or not path.is_file():
+            return web.json_response({"error": "Session not found"}, status=404)
+        return web.FileResponse(path, headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(path.name, safe=""),
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+        })
 
     async def handle_get_session_thumbnail(self, request: web.Request) -> web.Response:
         """Return the optional embedded session preview as a JPEG."""
