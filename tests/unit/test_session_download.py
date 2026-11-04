@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from aiohttp import ClientSession, web
 import pytest
+from aiohttp import ClientSession, web
 
 from multi_modal_ai_studio.webui.server import WebUIServer
 
@@ -23,16 +23,16 @@ async def test_download_returns_original_file_bytes_and_attachment(tmp_path, fil
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
     try:
-        async with ClientSession() as client:
-            async with client.get(
-                f"http://127.0.0.1:{port}/api/sessions/test-session/download"
-            ) as response:
-                assert response.status == 200
-                assert await response.read() == payload.encode()
-                assert response.headers["Content-Disposition"].startswith("attachment;")
-                assert response.content_type == "application/json"
-                assert response.headers["Cache-Control"] == "no-store"
-                assert json.loads(payload)["session_id"] == "test-session"
+        async with (
+            ClientSession() as client,
+            client.get(f"http://127.0.0.1:{port}/api/sessions/test-session/download") as response,
+        ):
+            assert response.status == 200
+            assert await response.read() == payload.encode()
+            assert response.headers["Content-Disposition"].startswith("attachment;")
+            assert response.content_type == "application/json"
+            assert response.headers["Cache-Control"] == "no-store"
+            assert json.loads(payload)["session_id"] == "test-session"
     finally:
         await runner.cleanup()
 

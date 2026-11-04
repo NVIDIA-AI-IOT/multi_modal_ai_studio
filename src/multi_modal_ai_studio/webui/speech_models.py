@@ -47,14 +47,16 @@ async def discover_speaches_download(api_base: str, api_key: str = "") -> bool:
     try:
         base = _endpoint(api_base)
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        async with ClientSession(timeout=ClientTimeout(total=5)) as client:
-            async with client.get(
+        async with (
+            ClientSession(timeout=ClientTimeout(total=5)) as client,
+            client.get(
                 urljoin(base + "/", "../openapi.json"),
                 headers=headers,
-            ) as response:
-                if response.status != 200:
-                    return False
-                schema = await response.json()
+            ) as response,
+        ):
+            if response.status != 200:
+                return False
+            schema = await response.json()
         return supports_speaches_download(schema)
     except (ClientError, TimeoutError, ValueError):
         return False
@@ -68,12 +70,14 @@ async def download_speaches_model(api_base: str, api_key: str, model: str) -> No
     if not await discover_speaches_download(base, api_key):
         raise ModelDownloadError("This provider does not advertise Speaches model downloads")
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    async with ClientSession(timeout=ClientTimeout(total=600)) as client:
-        async with client.post(
+    async with (
+        ClientSession(timeout=ClientTimeout(total=600)) as client,
+        client.post(
             f"{base}/models/{quote(model, safe='')}",
             headers=headers,
             allow_redirects=False,
-        ) as response:
-            if response.status not in {200, 201}:
-                detail = (await response.text())[:300]
-                raise ModelDownloadError(f"Model download failed ({response.status}): {detail}")
+        ) as response,
+    ):
+        if response.status not in {200, 201}:
+            detail = (await response.text())[:300]
+            raise ModelDownloadError(f"Model download failed ({response.status}): {detail}")

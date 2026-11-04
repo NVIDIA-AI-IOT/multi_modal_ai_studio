@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-License-Identifier: Apache-2.0
 
-from contextlib import asynccontextmanager
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from aiohttp import web
 import pytest
+from aiohttp import web
 
 from multi_modal_ai_studio.webui import server
 from multi_modal_ai_studio.webui.speech_models import (

@@ -4,9 +4,9 @@ MMAS is distributed as a Python wheel and source distribution (sdist). Speech an
 
 ## Versions and release gate
 
-Use `0.2.0rc1` in `pyproject.toml` and `src/multi_modal_ai_studio/__init__.py`, and `v0.2.0-rc.1` for the GitHub tag and release title. These identify the same Python version.
+Use `0.2.0rc2` in `pyproject.toml` and `src/multi_modal_ai_studio/__init__.py`, and `v0.2.0-rc.2` for the GitHub tag and release title. These identify the same Python version. rc2 supersedes rc1 as the candidate being prepared; keep rc1 records as historical evidence rather than rewriting them as rc2 results.
 
-Before publishing, complete the [release checklist](release-checklist.md) and the [rc1 qualification record](../releases/v0.2.0-rc.1-qualification.md). CI success is not evidence that microphone playback, GPU inference, or barge-in passed on hardware. Record exact commits, container tags/digests, presets, session filenames, screenshots, and any explicitly accepted limitations.
+Before publishing, complete the [release checklist](release-checklist.md) and the [rc2 qualification record](../releases/v0.2.0-rc.2-qualification.md). CI success is not evidence that microphone playback, GPU inference, or barge-in passed on hardware. Record exact commits, container tags/digests, presets, session filenames, screenshots, and any explicitly accepted limitations.
 
 Resolve or disposition current nSpect findings against the exact release dependencies. A successful scan with zero packages is not a clean security result. This workflow does not grant a security exception or release approval.
 
@@ -49,8 +49,8 @@ TestPyPI and PyPI are independent indexes. Reusing an uploaded filename/version 
 For a TestPyPI installation, avoid mixing TestPyPI and PyPI as competing dependency indexes. Download only MMAS from TestPyPI and install that wheel with dependencies resolved from PyPI:
 
 ```bash
-python -m pip download --no-deps --index-url https://test.pypi.org/simple/ multi-modal-ai-studio==0.2.0rc1
-python -m pip install ./multi_modal_ai_studio-0.2.0rc1-py3-none-any.whl
+python -m pip download --no-deps --index-url https://test.pypi.org/simple/ multi-modal-ai-studio==0.2.0rc2
+python -m pip install ./multi_modal_ai_studio-0.2.0rc2-py3-none-any.whl
 ```
 
 For local validation:
@@ -69,7 +69,7 @@ Use a clean `dist/` directory containing only the intended version.
 After the security and hardware gates are satisfied:
 
 1. Finalize the changelog date, release notes, and qualification evidence. Any code/dependency change after qualification needs proportionate revalidation.
-2. Create tag **v0.2.0-rc.1** at the exact approved commit, not at a moving main. Update the existing Draft Release to that tag and mark it as a **Pre-release**.
+2. Create tag **v0.2.0-rc.2** at the exact approved commit, not at a moving main. Review any existing rc1 Draft Release and prepare an rc2 Draft Release without altering published rc1 assets or tags. Mark the approved release as a **Pre-release**.
 3. Publish the Draft Release. The release-triggered build verifies tag/package version agreement, reruns tests, and attaches the wheel, sdist, lock/constraints files, and SHA256SUMS.
 4. Confirm the release workflow completed and attachments exist. GitHub publication precedes artifact attachment; a failed build does not automatically unpublish the release.
 5. Download the release artifacts and run `sha256sum -c SHA256SUMS` with all listed files in the same directory. Install the downloaded wheel outside the repository and confirm version, presets, and Web UI.
@@ -79,13 +79,13 @@ Avoid publishing an unqualified release solely to trigger a build; use the manua
 ## Production PyPI
 
 1. Open **Actions → Build and Test → Run workflow** on workflow branch **main**.
-2. Set **ref** to the published **v0.2.0-rc.1** tag and **publish_to** to **pypi**.
+2. Set **ref** to the published **v0.2.0-rc.2** tag and **publish_to** to **pypi**.
 3. CI requires a published, non-draft GitHub Release for that tag, matching Python version, and checkout of the actual tag commit.
 4. Review the build and approve the **pypi** environment. The publishing job uploads its tested wheel/sdist via Trusted Publishing.
 5. Confirm the version on PyPI, then install in a fresh environment:
 
 ```bash
-python -m pip install multi-modal-ai-studio==0.2.0rc1
+python -m pip install multi-modal-ai-studio==0.2.0rc2
 multi-modal-ai-studio --version
 multi-modal-ai-studio --preset speaches-jetson --port 8092
 ```

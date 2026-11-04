@@ -60,6 +60,13 @@ jobs:
       - name: Run unit tests
         run: pytest tests/unit -v -m "not slow"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run timeline and configuration regressions
+        run: node --test tests/js/*.test.js
+
       - name: Run speech service contract tests
         run: |
           pip install -e "./services/openai_speech[dev]"

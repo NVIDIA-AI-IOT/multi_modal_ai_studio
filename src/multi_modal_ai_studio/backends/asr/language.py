@@ -2,10 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Language codes for file transcription and Realtime transcription APIs."""
 
-from typing import Optional
 
-
-def transcription_language(value: Optional[str]) -> Optional[str]:
+def transcription_language(value: str | None) -> str | None:
     """Map UI locale tags to language codes; omit automatic detection.
 
     Riva still receives the original locale (for example ``ja-JP``). Only
