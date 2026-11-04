@@ -345,6 +345,52 @@ test('ASR final preserves the last partial as the TTL start when available', () 
     assert.equal(state.liveTtlBandStartTime, 4.25);
 });
 
+for (const [startEvent, endEvent] of [
+    ['vad_start', 'vad_end'],
+    ['user_speech_start', 'user_speech_end'],
+]) {
+    test(`${startEvent} abandons an unheard response TTL before the next reply`, () => {
+        // Nano rc2 smoke: the first reply was cancelled before any playback.
+        // Its speech end must not become the next answer's TTL origin.
+        const state = {liveTtlBands: [], liveTtlBandStartTime: null};
+        applySpeechTimingEvent(state, {event_type: startEvent, timestamp: 1.407});
+        applySpeechTimingEvent(state, {event_type: endEvent, timestamp: 2.814});
+        applySpeechTimingEvent(state, {event_type: 'asr_final', timestamp: 4.688});
+        state.ttsEligibleForCurrentTtl = true;
+
+        applySpeechTimingEvent(state, {event_type: startEvent, timestamp: 5.888});
+        assert.equal(state.liveTtlBandStartTime, null);
+        assert.equal(closeTtlBandAt(state, 6), false);
+        assert.deepEqual(state.liveTtlBands, []);
+        applySpeechTimingEvent(state, {event_type: endEvent, timestamp: 7.047});
+
+        // A delayed acknowledgement for the old TTS must not erase the new origin.
+        applySpeechTimingEvent(state, {event_type: 'tts_cancelled', timestamp: 8});
+        assert.equal(state.liveTtlBandStartTime, 7.047);
+        assert.equal(closeTtlBandAt(state, 8.1), false);
+        applySpeechTimingEvent(state, {event_type: 'asr_final', timestamp: 8.503});
+        state.ttsEligibleForCurrentTtl = true;
+        assert.equal(closeTtlBandAt(state, 9.151), true);
+        assert.deepEqual(state.liveTtlBands, [
+            {start: 7.047, end: 9.151, ttlMs: 2104},
+        ]);
+    });
+}
+
+test('new speech preserves completed TTL bands but clears an old partial fallback', () => {
+    const completed = {start: 1, end: 2, ttlMs: 1000};
+    const state = {
+        liveTtlBands: [completed],
+        liveTtlBandStartTime: 3,
+        lastAsrPartialTime: 2.8,
+    };
+    applySpeechTimingEvent(state, {event_type: 'vad_start', timestamp: 4});
+    assert.equal(state.lastAsrPartialTime, null);
+    applySpeechTimingEvent(state, {event_type: 'asr_final', timestamp: 5});
+    assert.equal(state.liveTtlBandStartTime, 4.8);
+    assert.deepEqual(state.liveTtlBands, [completed]);
+});
+
 test('barge-in truncates scheduled AI audio at the actual stop time', () => {
     const segments = truncateAudioSegmentsAt([
         { startTime: 4, endTime: 5, amplitude: 10 },

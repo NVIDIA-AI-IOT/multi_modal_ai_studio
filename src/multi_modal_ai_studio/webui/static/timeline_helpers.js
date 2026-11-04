@@ -500,6 +500,13 @@
         if (!state || !evt) return false;
         if (evt.event_type === 'vad_start' || evt.event_type === 'user_speech_start') {
             state.voiceTurnActive = true;
+            // An interrupted response may never have played any audio, leaving
+            // its TTL open. Abandon that measurement at the new speech boundary
+            // rather than closing it with the following response's audio. Do not
+            // reset on a delayed TTS cancellation: the new turn may already have
+            // established its own speech-end timestamp by then.
+            state.liveTtlBandStartTime = null;
+            state.lastAsrPartialTime = null;
             // Any TTS response already in progress belongs to the previous
             // turn and must not close the new turn's TTL band.
             state.ttsEligibleForCurrentTtl = false;
