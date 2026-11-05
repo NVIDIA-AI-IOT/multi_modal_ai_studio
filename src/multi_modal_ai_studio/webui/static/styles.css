@@ -794,6 +794,7 @@ code, pre {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: var(--space-md);
     padding: var(--space-md) var(--space-lg);
     flex-shrink: 0;
@@ -801,13 +802,16 @@ code, pre {
 
 .config-header h3 {
     margin: 0;
+    flex-shrink: 0;
 }
 
 .config-header-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: var(--space-sm);
-    flex-shrink: 0;
+    flex: 1 1 260px;
+    min-width: 0;
 }
 
 .config-auto-hide-btn {
@@ -855,7 +859,8 @@ code, pre {
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    flex-shrink: 1;
+    /* Use spare header space, but leave room for the adjacent buttons. */
+    flex: 0 1 24rem;
     min-width: 0;
 }
 .preset-select {
@@ -865,8 +870,9 @@ code, pre {
     border-radius: var(--radius-sm);
     background: var(--bg-secondary, #1e1e1e);
     color: var(--text-primary);
-    max-width: 160px;
-    min-width: 60px;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
     text-overflow: ellipsis;
     cursor: pointer;
 }
@@ -3397,7 +3403,8 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
     align-items: center;
     gap: 0.35rem;
     min-width: 0;
-    flex: 1 1 auto;
+    /* Auto margin aligns the content, not a full-width empty wrapper. */
+    flex: 0 1 auto;
     margin-left: auto;
     color: var(--text-tertiary);
     font-family: var(--font-mono);
