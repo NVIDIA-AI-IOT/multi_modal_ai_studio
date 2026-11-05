@@ -5,8 +5,8 @@
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional
 
 import numpy as np
 
@@ -16,8 +16,8 @@ from multi_modal_ai_studio.backends.asr.language import (
 from multi_modal_ai_studio.backends.base import ASRBackend, ASRResult, ConfigError
 from multi_modal_ai_studio.backends.realtime.client import (
     DISABLE_TURN_DETECTION,
-    OpenAIRealtimeClient,
     REALTIME_SAMPLE_RATE,
+    OpenAIRealtimeClient,
 )
 from multi_modal_ai_studio.config.schema import ASRConfig
 from multi_modal_ai_studio.core.timeline import Timeline
@@ -30,8 +30,8 @@ _MAX_TRACKED_ITEMS = 256
 
 @dataclass
 class _TranscriptionItem:
-    start: Optional[float] = None
-    end: Optional[float] = None
+    start: float | None = None
+    end: float | None = None
     partial: str = ""
     completed: bool = False
 
@@ -44,7 +44,7 @@ def _resample_pcm16(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
     if from_rate == to_rate:
         return pcm
     samples = np.frombuffer(pcm, dtype="<i2")
-    output_count = int(round(len(samples) * to_rate / from_rate))
+    output_count = round(len(samples) * to_rate / from_rate)
     if output_count <= 0:
         return b""
     output = np.interp(
@@ -58,27 +58,23 @@ def _resample_pcm16(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
 class OpenAIRealtimeASRBackend(ASRBackend):
     """Use a Realtime transcription session as an MMAS streaming ASR backend."""
 
-    def __init__(self, config: ASRConfig, timeline: Optional[Timeline] = None):
+    def __init__(self, config: ASRConfig, timeline: Timeline | None = None):
         super().__init__(config)
         if config.scheme != "openai-realtime":
-            raise ConfigError(
-                f"Expected scheme 'openai-realtime', got '{config.scheme}'"
-            )
+            raise ConfigError(f"Expected scheme 'openai-realtime', got '{config.scheme}'")
         if config.realtime_transport != "websocket":
             raise ConfigError("Realtime transcription currently requires WebSocket")
         if config.realtime_session_type != "transcription":
-            raise ConfigError(
-                "Realtime ASR adapter requires realtime_session_type='transcription'"
-            )
+            raise ConfigError("Realtime ASR adapter requires realtime_session_type='transcription'")
         if not (config.realtime_url or config.api_base):
             raise ConfigError("Realtime transcription URL is required")
 
         self.timeline = timeline
-        self._client: Optional[OpenAIRealtimeClient] = None
+        self._client: OpenAIRealtimeClient | None = None
         # Retain completed item IDs briefly so repeated/late server events
         # cannot reopen VAD ribbons or execute the same conversation turn twice.
         self._items: OrderedDict[str, _TranscriptionItem] = OrderedDict()
-        self._active_item_id: Optional[str] = None
+        self._active_item_id: str | None = None
 
     def _item(self, item_id: str) -> _TranscriptionItem:
         if item_id not in self._items:
@@ -171,8 +167,11 @@ class OpenAIRealtimeASRBackend(ASRBackend):
             if event.kind == "session_ready":
                 continue
             if event.kind not in {
-                "speech_started", "speech_stopped", "transcript_delta",
-                "transcript_completed", "error",
+                "speech_started",
+                "speech_stopped",
+                "transcript_delta",
+                "transcript_completed",
+                "error",
             }:
                 continue
             if event.kind == "error":
