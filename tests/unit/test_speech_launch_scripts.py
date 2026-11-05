@@ -41,7 +41,7 @@ def test_speaches_quick_start_keeps_llm_independent() -> None:
     readme = _text("README.md")
     launcher = _text("scripts/gemma4_llm.sh")
 
-    assert "Recommended quick start (release candidate)" in readme
+    assert "Recommended quick start on Jetson" in readme
     assert preset["llm"]["api_base"] == "http://localhost:8080/v1"
     assert preset["llm"]["model"] == "gemma-4-e2b"
     assert realtime_preset["llm"] == preset["llm"]
@@ -57,6 +57,20 @@ def test_speaches_quick_start_keeps_llm_independent() -> None:
     assert "latest-jetson-orin" in launcher
     assert "latest-jetson-thor" in launcher
     assert "./scripts/gemma4_llm.sh start" in readme
+
+
+def test_speaches_preset_names_distinguish_transport_from_backend_release() -> None:
+    rest = yaml.safe_load(_text("presets/speaches-jetson.yaml"))
+    realtime = yaml.safe_load(_text("presets/speaches-realtime-asr-jetson.yaml"))
+
+    assert rest["name"] == "Speaches on Jetson — REST"
+    assert realtime["name"] == "Speaches on Jetson — Realtime ASR"
+    assert rest["asr"]["scheme"] == "openai-rest"
+    assert realtime["asr"]["scheme"] == "openai-realtime"
+    for preset in (rest, realtime):
+        assert "(RC)" not in preset["name"]
+        assert "0.9.0-rc.3 (release candidate)" in preset["description"]
+        assert preset["tts"]["scheme"] == "openai-rest"
 
 
 def test_nvidia_open_models_launcher_owns_only_asr_and_tts() -> None:

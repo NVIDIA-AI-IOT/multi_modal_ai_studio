@@ -10,12 +10,15 @@ to OpenAI, Speaches, or a future NVIDIA Open Speech service.
 | MMAS mode | Input | Output | Use |
 | --- | --- | --- | --- |
 | Realtime transcription | streaming PCM over WebSocket | partial/final transcripts and speech boundaries | ASR stage in the classic cascade |
+| Realtime exact-text TTS | LLM text over WebSocket | PCM audio deltas | TTS stage with a provider that supports exact-text synthesis, such as the bundled Magpie adapter |
 | Full Realtime voice | streaming PCM/text over WebSocket | streaming response audio and transcripts | provider-hosted speech-to-speech |
 | REST speech | WAV/text HTTP requests | final transcript or synthesized audio | file-style ASR and exact-text TTS |
 
-The Realtime client also exposes generic text-item, response-audio, and cancel
-operations. Realtime response audio is not the same contract as exact-text
-TTS. The latter continues to use `POST /v1/audio/speech`.
+The Realtime client exposes text-item, response-audio, and cancel operations.
+Full Realtime voice can generate a new answer; it is not automatically an
+exact-text TTS contract. The bundled Magpie adapter explicitly synthesizes the
+provided LLM text over WebSocket. The Speaches presets instead keep Kokoro on
+REST `POST /v1/audio/speech`, including when ASR uses Realtime.
 
 Two wire formats are selectable:
 

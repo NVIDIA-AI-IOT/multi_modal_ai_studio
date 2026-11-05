@@ -18,7 +18,7 @@ Formerly **Multi-modal AI Studio (MMAS)**. Starting with 0.2.0, the distribution
 
 ### Multi-backend Architecture
 - Speech
-  - **Speaches**: recommended public Jetson quick start with Faster-Whisper and Kokoro (release candidate)
+  - **Speaches**: recommended public Jetson quick start with Faster-Whisper and Kokoro; the pinned speech backend is Speaches 0.9.0-rc.3
   - **NVIDIA Open Speech Models**: Nemotron ASR and Magpie TTS reference services
   - **NVIDIA Riva**: gRPC streaming ASR/TTS (Jetson/ARM64)
   - **OpenAI-compatible REST**: independent transcription and speech services
@@ -104,14 +104,14 @@ python -m multi_modal_ai_studio --port 8092
 
 Open **https://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
 
-### Recommended quick start (release candidate)
+### Recommended quick start on Jetson
 
 The recommended Jetson voice path uses one Speaches service for
 Faster-Whisper ASR and Kokoro TTS, plus a text-only Gemma 4 E2B llama.cpp
 service. Both are pulled from GHCR by the bundled launchers, so no separate
 Ollama installation, Riva setup, or NGC access is required. The pinned
-Speaches image is a release candidate while its Jetson packaging is being
-qualified.
+Speaches 0.9.0-rc.3 image is a backend release candidate, independently of
+the Voice AI Workbench application version.
 
 ```bash
 # Start the speech service and download the small English starter models.
@@ -180,7 +180,7 @@ python -m multi_modal_ai_studio --mode headless \
 | Doc | Description |
 |-----|-------------|
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
-| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended RC quick start: Faster-Whisper + Gemma 4 E2B + Kokoro |
+| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended quick start: Faster-Whisper + Gemma 4 E2B + Kokoro; pinned Speaches RC backend |
 | [NVIDIA Open Speech Models](docs/setup_open_models_jetson.md) | Nemotron ASR + Magpie TTS reference services |
 | [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
 | [Realtime Speech](docs/realtime_speech.md) | Realtime transcription, response audio, and Speaches reference setup |
