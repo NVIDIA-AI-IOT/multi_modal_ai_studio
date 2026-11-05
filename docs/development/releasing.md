@@ -16,8 +16,8 @@ Resolve or disposition current nSpect findings against the exact release depende
 |---|---|---|
 | GitHub Actions artifacts | Wheel, sdist; separate release-assets bundle with SHA256SUMS, requirements.txt, and uv.lock | Successful CI or manual build |
 | GitHub Release or Pre-release | The verified release-assets bundle | Publishing a GitHub Release starts CI; attachment follows successful tests |
-| TestPyPI | Wheel and sdist | Explicit manual dispatch, repository opt-in, and testpypi environment approval |
-| PyPI | The same wheel and sdist as the GitHub assets | Stable release publication, repository opt-in, successful asset attachment, and pypi environment approval; explicit manual promotion is also available |
+| TestPyPI | Wheel and sdist | Explicit manual dispatch, repository opt-in, and the configured testpypi environment protections |
+| PyPI | The same wheel and sdist as the GitHub assets | Stable release publication, repository opt-in, successful asset attachment, and the configured pypi environment protections; explicit manual promotion is also available |
 | GHCR | Existing independent Speaches / llama.cpp images | Outside the MMAS package-release workflow |
 
 The wheel includes the Web UI and bundled presets. It does not include the repository launch scripts, deployment files, model weights, or generated session/audio data. Use a checkout of the same release tag when building/starting the optional backend services.
@@ -28,7 +28,7 @@ Repository `presets/*.yaml` are the canonical preset sources. The setuptools bui
 
 ## One-time maintainer setup
 
-1. Create the GitHub environment **pypi**. Configure required reviewers and the appropriate self-review policy for your maintainer team. Allow branch `main` for manual promotion and release tags `v*` for release-triggered publishing. In **Deployment branches and tags**, add `main` with type **Branch** and `v*` with type **Tag**; a `v*` branch rule does not authorize release tags. Check your GitHub plan supports the intended protections before enabling publishing. Merely naming the environment `pypi` does not create an approval step: without required reviewers, an allowed publishing job can proceed automatically.
+1. Create the GitHub environment **pypi**. If your maintainer team requires a separate approval before uploading, configure required reviewers and the appropriate self-review policy. Allow branch `main` for manual promotion and release tags `v*` for release-triggered publishing. In **Deployment branches and tags**, add `main` with type **Branch** and `v*` with type **Tag**; a `v*` branch rule does not authorize release tags. Check your GitHub plan supports the intended protections before enabling publishing. Merely naming the environment `pypi` does not create an approval step: without required reviewers, an allowed publishing job can proceed automatically.
 2. Configure a pending Trusted Publisher on [PyPI](https://pypi.org/manage/account/publishing/). Use project **voice-ai-workbench**, owner **NVIDIA-AI-IOT**, repository **multi_modal_ai_studio**, workflow filename **build-wheel.yml**, and environment **pypi**. Ensure the appropriate team maintainers have project access. PyPI permits an unspecified environment, displayed as `(Any)`, but explicitly naming `pypi` restricts trust to that environment; see [PyPI's environment guidance](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
 3. Only after those protections and the publisher are configured, set the repository Actions variable `PYPI_PUBLISH_ENABLED=true`. Leave it unset to build GitHub assets without uploading to PyPI.
 
@@ -36,7 +36,7 @@ Repository `presets/*.yaml` are the canonical preset sources. The setuptools bui
 
 No PyPI API token is required. Only the isolated publishing jobs receive `id-token: write`; they download tested artifacts and do not check out or execute project code. Builds and pull requests have read-only repository permission. The GitHub asset-attachment job alone receives `contents: write`.
 
-Merging a PR or pushing to main never publishes to a package index. A stable GitHub Release automatically enters the **pypi** approval job when `PYPI_PUBLISH_ENABLED=true`; it promotes the exact artifacts attached by that same workflow run. Both the GitHub prerelease flag and the Python package version are checked, so an RC/dev version does not auto-publish even if the release is accidentally marked stable. With PyPI disabled, the GitHub release artifacts can still be built and attached. An explicitly dispatched but disabled index destination fails before building.
+Merging a PR or pushing to main never publishes to a package index. A stable GitHub Release automatically starts the **pypi** publishing job after the build and asset attachment succeed when `PYPI_PUBLISH_ENABLED=true`; it promotes the exact artifacts attached by that same workflow run. That job waits for human approval only if the environment has required reviewers. Without that protection, publishing the stable GitHub Release is the action that authorizes the automated PyPI upload; do not rely on a later confirmation prompt. Both the GitHub prerelease flag and the Python package version are checked, so an RC/dev version does not auto-publish even if the release is accidentally marked stable. With PyPI disabled, the GitHub release artifacts can still be built and attached. An explicitly dispatched but disabled index destination fails before building.
 
 This follows [Live VLM WebUI's release-triggered Trusted Publishing pattern](https://github.com/NVIDIA-AI-IOT/live-vlm-webui/blob/main/.github/workflows/build-wheel.yml), with additional artifact verification, isolated publishing jobs, and opt-in/environment gates. Its PyPI publisher registration does not grant access to the MMAS project. A missing public PyPI project does not prove that no account-private pending publisher exists; check the intended maintainer's PyPI account before registering another one.
 
@@ -48,7 +48,7 @@ This follows [Live VLM WebUI's release-triggered Trusted Publishing pattern](htt
 4. Download the **release-assets** artifact and verify `SHA256SUMS`. Validate its wheel in a clean environment and qualify the final commit on Orin Nano and Thor.
 5. Preserve the run URL, hashes, and device evidence in the qualification record.
 
-For an optional TestPyPI rehearsal, repeat the manual dispatch with **publish_to=testpypi** after configuring that destination. Review the build, approve the **testpypi** environment, and verify installation from that index.
+For an optional TestPyPI rehearsal, repeat the manual dispatch with **publish_to=testpypi** after configuring that destination. Review the build, complete any configured **testpypi** environment approval, and verify installation from that index. Without required reviewers, the upload proceeds automatically after the build succeeds.
 
 TestPyPI and PyPI are independent indexes. Reusing an uploaded filename/version on the same index is not supported; do not silently skip existing files. If another candidate must be uploaded to that index, increment the RC version and update both version fields. Local wheel artifacts can be rebuilt without consuming an index version.
 
@@ -77,7 +77,7 @@ After the security and hardware gates are satisfied:
 1. Finalize the changelog date, release notes, and qualification evidence. Any code/dependency change after qualification needs proportionate revalidation.
 2. Create tag **v0.2.0** at the exact approved commit, not at a moving main. Prepare a new Draft Release with the finalized 0.2.0 notes; preserve earlier RC records. For this stable version, leave **Pre-release** unchecked. Future RC tags must be marked as pre-releases.
 3. Publish the Draft Release. The release-triggered build verifies tag/package version agreement, reruns tests, and attaches the wheel, sdist, lock/constraints files, and SHA256SUMS.
-4. Confirm the build and asset-attachment jobs succeeded. If enabled, review and approve the **pypi** job in the same run. GitHub publication precedes artifact attachment and PyPI approval; a failed job does not automatically unpublish the GitHub release.
+4. Confirm the build and asset-attachment jobs succeeded. If PyPI publishing is enabled, complete any configured environment approval and verify the **pypi** job in the same run. Without required reviewers, it uploads automatically after successful asset attachment. GitHub publication precedes artifact attachment and PyPI upload; a failed job does not automatically unpublish the GitHub release.
 5. Download the release artifacts and run `sha256sum -c SHA256SUMS` with all listed files in the same directory. Install the downloaded wheel outside the repository and confirm version, presets, and Web UI.
 
 Avoid publishing an unqualified release solely to trigger a build; use the manual **none** build first.
@@ -91,7 +91,7 @@ If PyPI was not enabled at GitHub publication, or an RC is intentionally being p
 1. Open **Actions → Build and Test → Run workflow** on workflow branch **main**.
 2. Set **ref** to an already published release tag, such as **v0.2.0**, and **publish_to** to **pypi**.
 3. CI requires a published, non-draft GitHub Release for that tag, matching Python version, and checkout of the actual tag commit. The tag must contain the release-policy script and workflow-compatible build files.
-4. Review the new build and approve the **pypi** environment. This fallback rebuilds from the tag; it does not reuse a previous run's files. Do not assume byte-for-byte identity with existing GitHub assets. Record and verify both sets of hashes and provenance, and clearly identify any difference.
+4. Review the new build and complete any configured **pypi** environment approval. Without required reviewers, dispatching this workflow authorizes an upload after the build succeeds. This fallback rebuilds from the tag; it does not reuse a previous run's files. Do not assume byte-for-byte identity with existing GitHub assets. Record and verify both sets of hashes and provenance, and clearly identify any difference.
 
 After either path succeeds, confirm the version on PyPI, then install in a fresh environment:
 

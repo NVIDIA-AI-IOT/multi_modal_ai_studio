@@ -18,6 +18,7 @@ See [releasing.md](releasing.md) for exact setup, approval, build, and publicati
 
 - [ ] PyPI project ownership/pending Trusted Publisher configured for `build-wheel.yml` and environment `pypi`.
 - [ ] The `pypi` environment has the intended approval policy and permits branch `main` plus release tags `v*`.
+- [ ] Maintainer understands whether required reviewers are configured: without them, stable GitHub Release publication triggers automatic PyPI upload after successful CI and asset attachment, with no later human confirmation.
 - [ ] `PYPI_PUBLISH_ENABLED=true` enabled only after the above protections exist.
 - [ ] Candidate CI artifact installation verified; run URL and hashes recorded. TestPyPI is not required for this check.
 - [ ] Optional TestPyPI rehearsal completed or marked N/A. If used, configure its separate publisher, `testpypi` environment restricted to `main`, and `TESTPYPI_PUBLISH_ENABLED` opt-in before upload.
@@ -28,7 +29,7 @@ See [releasing.md](releasing.md) for exact setup, approval, build, and publicati
 - [ ] New 0.2.0 Draft Release reviewed and published as a stable GitHub Release; earlier RC records preserved.
 - [ ] Release CI succeeds and wheel, sdist, requirements.txt, uv.lock, and SHA256SUMS are attached.
 - [ ] Downloaded artifacts pass checksum and isolated-install checks.
-- [ ] Opted-in stable-release PyPI job approved and successful; GitHub/PyPI artifact hashes match. If a manual rebuild was needed instead, its separate provenance/hashes are documented.
+- [ ] Opted-in stable-release PyPI job successful, with any configured environment approval completed; GitHub/PyPI artifact hashes match. If a manual rebuild was needed instead, its separate provenance/hashes are documented.
 - [ ] `pip install voice-ai-workbench==0.2.0` verified from PyPI in a fresh environment.
 
 ## After publication
