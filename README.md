@@ -56,7 +56,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 Python 3.11 or newer is required. Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
 
-Published release candidates provide a wheel and source distribution on [GitHub Releases](https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/releases). The candidate being prepared is `0.2.0rc2`; this does not mean it has been published. Once the candidate is also published to PyPI, install it with `pip install multi-modal-ai-studio==0.2.0rc2`. Do not assume the PyPI version exists until the Release notes confirm publication.
+The `0.2.0` release is being prepared. Check [GitHub Releases](https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/releases) for publication status and the verified wheel, source distribution, and checksums. After the release notes confirm PyPI publication, install it with `pip install multi-modal-ai-studio==0.2.0`. Until then, use the source checkout below or a verified candidate wheel; a version in this README is not a claim that it is already available on PyPI.
 
 The installed package includes the Web UI and built-in presets, so `multi-modal-ai-studio --preset speaches-jetson --port 8092` works outside a source checkout when the backend services are already running. The backend launch scripts below are repository tools, not part of the wheel: use a checkout of the matching release tag to start Speaches/Gemma or NVIDIA open-model services. See the [package release/install guide](docs/development/releasing.md#what-is-shipped) for the distinction.
 
@@ -70,7 +70,7 @@ The installed package includes the Web UI and built-in presets, so `multi-modal-
 git clone https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio.git
 cd multi_modal_ai_studio
 # For a published release, check out its exact tag instead of moving main:
-# git checkout v0.2.0-rc.2
+# git checkout v0.2.0
 
 # Create and activate virtual environment
 python3 -m venv .venv

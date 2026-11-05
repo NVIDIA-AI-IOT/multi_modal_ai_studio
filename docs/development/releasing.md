@@ -1,12 +1,12 @@
 # Release process
 
-MMAS is distributed as a Python wheel and source distribution (sdist). Speech and LLM services remain independent containers. A new MMAS container is not required for the release candidate.
+MMAS is distributed as a Python wheel and source distribution (sdist). Speech and LLM services remain independent containers. A new MMAS container is not required for the 0.2.0 release.
 
 ## Versions and release gate
 
-Use `0.2.0rc2` in `pyproject.toml` and `src/multi_modal_ai_studio/__init__.py`, and `v0.2.0-rc.2` for the GitHub tag and release title. These identify the same Python version. rc2 supersedes rc1 as the candidate being prepared; keep rc1 records as historical evidence rather than rewriting them as rc2 results.
+Use `0.2.0` in `pyproject.toml` and `src/multi_modal_ai_studio/__init__.py`, and `v0.2.0` for the stable GitHub tag. For future release candidates, Python version `0.2.1rc1` corresponds to GitHub tag `v0.2.1-rc.1`. Keep rc1 and rc2 qualification records as historical evidence rather than relabeling their artifacts as 0.2.0.
 
-Before publishing, complete the [release checklist](release-checklist.md) and the [rc2 qualification record](../releases/v0.2.0-rc.2-qualification.md). CI success is not evidence that microphone playback, GPU inference, or barge-in passed on hardware. Record exact commits, container tags/digests, presets, session filenames, screenshots, and any explicitly accepted limitations.
+Before publishing, complete the [release checklist](release-checklist.md) and review the [rc2 qualification record](../releases/v0.2.0-rc.2-qualification.md) and [0.2.0 release notes](../releases/v0.2.0.md). CI success is not evidence that microphone playback, GPU inference, or barge-in passed on hardware. Record exact commits, container tags/digests, presets, session filenames, screenshots, and any explicitly accepted limitations. Revalidate changes between the tested candidate and the final artifact in proportion to their scope.
 
 Resolve or disposition current nSpect findings against the exact release dependencies. A successful scan with zero packages is not a clean security result. This workflow does not grant a security exception or release approval.
 
@@ -15,9 +15,9 @@ Resolve or disposition current nSpect findings against the exact release depende
 | Destination | Contents | Trigger |
 |---|---|---|
 | GitHub Actions artifacts | Wheel, sdist; separate release-assets bundle with SHA256SUMS, requirements.txt, and uv.lock | Successful CI or manual build |
-| GitHub Pre-release | The verified release-assets bundle | Publishing a GitHub Release starts CI; attachment follows successful tests |
+| GitHub Release or Pre-release | The verified release-assets bundle | Publishing a GitHub Release starts CI; attachment follows successful tests |
 | TestPyPI | Wheel and sdist | Explicit manual dispatch, repository opt-in, and testpypi environment approval |
-| PyPI | Wheel and sdist | Explicit manual dispatch for an already published release tag, repository opt-in, and pypi environment approval |
+| PyPI | The same wheel and sdist as the GitHub assets | Stable release publication, repository opt-in, successful asset attachment, and pypi environment approval; explicit manual promotion is also available |
 | GHCR | Existing independent Speaches / llama.cpp images | Outside the MMAS package-release workflow |
 
 The wheel includes the Web UI and bundled presets. It does not include the repository launch scripts, deployment files, model weights, or generated session/audio data. Use a checkout of the same release tag when building/starting the optional backend services.
@@ -28,13 +28,15 @@ Repository `presets/*.yaml` are the canonical preset sources. The setuptools bui
 
 ## One-time maintainer setup
 
-1. Create GitHub environments named **testpypi** and **pypi**. Configure required reviewers, prevent self-review where available, and restrict deployment to the `main` branch (the branch containing the manually dispatched workflow). Check your GitHub plan supports the intended protections before enabling publishing.
+1. Create GitHub environments named **testpypi** and **pypi**. Configure required reviewers and the appropriate self-review policy for your maintainer team. Restrict **testpypi** to branch `main`; allow **pypi** on branch `main` for manual promotion and on release tags `v*` for release-triggered publishing. Branch and tag rules are separate: a main-only environment would block the stable-release job. Check your GitHub plan supports the intended protections before enabling publishing.
 2. Configure a pending Trusted Publisher separately on [TestPyPI](https://test.pypi.org/manage/account/publishing/) and [PyPI](https://pypi.org/manage/account/publishing/). Use project **multi-modal-ai-studio**, owner **NVIDIA-AI-IOT**, repository **multi_modal_ai_studio**, workflow filename **build-wheel.yml**, and the matching environment **testpypi** or **pypi**. Ensure the appropriate team maintainers have project access.
 3. Only after those protections and publishers are configured, set repository Actions variables `TESTPYPI_PUBLISH_ENABLED=true` and `PYPI_PUBLISH_ENABLED=true` for the destinations you intend to enable. Leave them unset otherwise.
 
 No PyPI API token is required. Only the isolated publishing jobs receive `id-token: write`; they download tested artifacts and do not check out or execute project code. Builds and pull requests have read-only repository permission. The GitHub asset-attachment job alone receives `contents: write`.
 
-Publishing is **not** triggered by merging a PR, pushing to main, or publishing a GitHub Release. An explicit Actions dispatch is still required for either package index. A disabled destination fails with an explanatory message before building.
+Merging a PR or pushing to main never publishes to a package index. A stable GitHub Release automatically enters the **pypi** approval job when `PYPI_PUBLISH_ENABLED=true`; it promotes the exact artifacts attached by that same workflow run. Both the GitHub prerelease flag and the Python package version are checked, so an RC/dev version does not auto-publish even if the release is accidentally marked stable. With PyPI disabled, the GitHub release artifacts can still be built and attached. An explicitly dispatched but disabled index destination fails before building.
+
+This follows [Live VLM WebUI's release-triggered Trusted Publishing pattern](https://github.com/NVIDIA-AI-IOT/live-vlm-webui/blob/main/.github/workflows/build-wheel.yml), with additional artifact verification, isolated publishing jobs, and opt-in/environment gates. Its PyPI publisher registration does not grant access to the MMAS project. A missing public PyPI project does not prove that no account-private pending publisher exists; check the intended maintainer's PyPI account before registering another one.
 
 ## Candidate build and TestPyPI
 
@@ -64,33 +66,38 @@ python scripts/check_distribution.py dist/*.whl
 
 Use a clean `dist/` directory containing only the intended version.
 
-## GitHub Pre-release
+## GitHub Release
 
 After the security and hardware gates are satisfied:
 
 1. Finalize the changelog date, release notes, and qualification evidence. Any code/dependency change after qualification needs proportionate revalidation.
-2. Create tag **v0.2.0-rc.2** at the exact approved commit, not at a moving main. Review any existing rc1 Draft Release and prepare an rc2 Draft Release without altering published rc1 assets or tags. Mark the approved release as a **Pre-release**.
+2. Create tag **v0.2.0** at the exact approved commit, not at a moving main. Prepare a new Draft Release with the finalized 0.2.0 notes; preserve earlier RC records. For this stable version, leave **Pre-release** unchecked. Future RC tags must be marked as pre-releases.
 3. Publish the Draft Release. The release-triggered build verifies tag/package version agreement, reruns tests, and attaches the wheel, sdist, lock/constraints files, and SHA256SUMS.
-4. Confirm the release workflow completed and attachments exist. GitHub publication precedes artifact attachment; a failed build does not automatically unpublish the release.
+4. Confirm the build and asset-attachment jobs succeeded. If enabled, review and approve the **pypi** job in the same run. GitHub publication precedes artifact attachment and PyPI approval; a failed job does not automatically unpublish the GitHub release.
 5. Download the release artifacts and run `sha256sum -c SHA256SUMS` with all listed files in the same directory. Install the downloaded wheel outside the repository and confirm version, presets, and Web UI.
 
 Avoid publishing an unqualified release solely to trigger a build; use the manual **none** build first.
 
-## Production PyPI
+## Production PyPI verification and manual fallback
+
+The preferred stable path is the **pypi** job in the release-triggered run. It waits for successful GitHub asset attachment and uploads that run's tested wheel/sdist through Trusted Publishing. Compare the SHA256 hashes on PyPI with the GitHub `SHA256SUMS` before announcing availability.
+
+If PyPI was not enabled at GitHub publication, or an RC is intentionally being published to PyPI, an explicit fallback is available:
 
 1. Open **Actions → Build and Test → Run workflow** on workflow branch **main**.
-2. Set **ref** to the published **v0.2.0-rc.2** tag and **publish_to** to **pypi**.
-3. CI requires a published, non-draft GitHub Release for that tag, matching Python version, and checkout of the actual tag commit.
-4. Review the build and approve the **pypi** environment. The publishing job uploads its tested wheel/sdist via Trusted Publishing.
-5. Confirm the version on PyPI, then install in a fresh environment:
+2. Set **ref** to an already published release tag, such as **v0.2.0**, and **publish_to** to **pypi**.
+3. CI requires a published, non-draft GitHub Release for that tag, matching Python version, and checkout of the actual tag commit. The tag must contain the release-policy script and workflow-compatible build files.
+4. Review the new build and approve the **pypi** environment. This fallback rebuilds from the tag; it does not reuse a previous run's files. Do not assume byte-for-byte identity with existing GitHub assets. Record and verify both sets of hashes and provenance, and clearly identify any difference.
+
+After either path succeeds, confirm the version on PyPI, then install in a fresh environment:
 
 ```bash
-python -m pip install multi-modal-ai-studio==0.2.0rc2
+python -m pip install multi-modal-ai-studio==0.2.0
 multi-modal-ai-studio --version
 multi-modal-ai-studio --preset speaches-jetson --port 8092
 ```
 
-The last command expects separately running speech/LLM endpoints for conversation. Opening the UI and selecting presets does not prove that inference services are installed. Wheel/sdist builds in different runs are not assumed byte-for-byte identical; record each run's checksums and compare provenance/version.
+The last command expects separately running speech/LLM endpoints for conversation. Opening the UI and selecting presets does not prove that inference services are installed. Do not rerun a successful upload or enable silent skipping of existing versions; an index does not permit replacing a published artifact.
 
 ## Documentation and announcement
 
