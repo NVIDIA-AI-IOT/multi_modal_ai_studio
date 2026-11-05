@@ -21,7 +21,7 @@ import sys
 import wave
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from dotenv import load_dotenv
 
@@ -47,6 +47,9 @@ from multi_modal_ai_studio.devices.local import (
 from multi_modal_ai_studio.webui.voice_pipeline import handle_voice_ws, handle_mic_preview_ws
 from multi_modal_ai_studio.webui.camera_webrtc import handle_camera_webrtc_ws
 from multi_modal_ai_studio.webui.system_stats import gather_system_info
+from multi_modal_ai_studio.webui.speech_models import (
+    ModelDownloadError, discover_speaches_download, download_speaches_model,
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -573,6 +576,7 @@ class WebUIServer:
         """Setup HTTP routes."""
         self.app.router.add_get('/api/sessions', self.handle_list_sessions)
         self.app.router.add_get('/api/sessions/{session_id}/thumbnail', self.handle_get_session_thumbnail)
+        self.app.router.add_get('/api/sessions/{session_id}/download', self.handle_download_session)
         self.app.router.add_get('/api/sessions/{session_id}', self.handle_get_session)
         self.app.router.add_patch('/api/sessions/{session_id}', self.handle_patch_session)
         self.app.router.add_delete('/api/sessions/{session_id}', self.handle_delete_session)
@@ -580,6 +584,7 @@ class WebUIServer:
         self.app.router.add_post('/api/llm/warmup', self.handle_llm_warmup)
         self.app.router.add_get('/api/asr/models', self.handle_asr_models)
         self.app.router.add_post('/api/asr/openai-models', self.handle_openai_asr_models)
+        self.app.router.add_post('/api/asr/download-model', self.handle_download_asr_model)
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
         self.app.router.add_post('/api/tts/openai-metadata', self.handle_openai_tts_metadata)
         self.app.router.add_post('/api/tts/preview', self.handle_tts_preview)
@@ -685,6 +690,17 @@ class WebUIServer:
                 {"error": str(e)},
                 status=500
             )
+
+    async def handle_download_session(self, request: web.Request) -> web.StreamResponse:
+        """Download the original saved JSON, including legacy filenames."""
+        path = self._session_file_path(request.match_info["session_id"])
+        if path is None or not path.is_file():
+            return web.json_response({"error": "Session not found"}, status=404)
+        return web.FileResponse(path, headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(path.name, safe=""),
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+        })
 
     async def handle_get_session_thumbnail(self, request: web.Request) -> web.Response:
         """Return the optional embedded session preview as a JPEG."""
@@ -1066,14 +1082,46 @@ class WebUIServer:
                         registry_available = True
 
             models = _parse_openai_asr_models(local_payload, registry_payload)
+            download_supported = await discover_speaches_download(api_base, api_key)
             return web.json_response({
                 "models": models,
                 "registry_available": registry_available,
+                "download_supported": download_supported,
                 "downloaded_count": sum(1 for model in models if model["downloaded"]),
             })
         except (asyncio.TimeoutError, ClientError, json.JSONDecodeError, OSError) as e:
             logger.warning("OpenAI REST ASR model discovery failed for %s: %s", api_base, e)
             return web.json_response({"error": str(e), "models": []}, status=502)
+
+    async def handle_download_asr_model(self, request: web.Request) -> web.Response:
+        """Explicit Speaches download, never automatic on selection/inference."""
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Request body must be an object")
+            api_base = str(body.get("api_base") or "").strip().rstrip("/")
+            model = str(body.get("model") or "").strip()
+            api_key = str(body.get("api_key") or "")
+        except (ValueError, TypeError):
+            return web.json_response({"error": "Invalid model download request"}, status=400)
+        pending = getattr(self, "_pending_asr_downloads", None)
+        if pending is None:
+            pending = self._pending_asr_downloads = set()
+        identity = (api_base, model)
+        if identity in pending:
+            return web.json_response({"error": "This model download is already running"}, status=409)
+        pending.add(identity)
+        try:
+            await download_speaches_model(api_base, api_key, model)
+            return web.json_response({"model": model, "downloaded": True})
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except ModelDownloadError as e:
+            return web.json_response({"error": str(e)}, status=502)
+        except (ClientError, asyncio.TimeoutError):
+            return web.json_response({"error": "Model download connection failed or timed out; reload the model list to check its status"}, status=502)
+        finally:
+            pending.discard(identity)
 
     async def handle_tts_voices(self, request: web.Request) -> web.Response:
         """List available TTS voices and model name(s) from Riva (query: server=host:port, optional language=en-US)."""

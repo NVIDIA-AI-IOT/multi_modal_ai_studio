@@ -1,6 +1,6 @@
 # Release checklist
 
-See [releasing.md](releasing.md) for exact setup, approval, build, and publication instructions. Record rc1 evidence in the [qualification record](../releases/v0.2.0-rc.1-qualification.md).
+See [releasing.md](releasing.md) for exact setup, approval, build, and publication instructions. Record rc2 evidence in the [qualification record](../releases/v0.2.0-rc.2-qualification.md).
 
 ## Before publishing
 
@@ -23,12 +23,12 @@ See [releasing.md](releasing.md) for exact setup, approval, build, and publicati
 
 ## Release
 
-- [ ] Tag `v0.2.0-rc.1` points to the exact approved commit.
+- [ ] Tag `v0.2.0-rc.2` points to the exact approved commit.
 - [ ] Existing Draft Release reviewed and published as a GitHub Pre-release.
 - [ ] Release CI succeeds and wheel, sdist, requirements.txt, uv.lock, and SHA256SUMS are attached.
 - [ ] Downloaded artifacts pass checksum and isolated-install checks.
 - [ ] Production PyPI workflow explicitly dispatched with the published tag; environment approval granted.
-- [ ] `pip install multi-modal-ai-studio==0.2.0rc1` verified from PyPI in a fresh environment.
+- [ ] `pip install multi-modal-ai-studio==0.2.0rc2` verified from PyPI in a fresh environment.
 
 ## After publication
 

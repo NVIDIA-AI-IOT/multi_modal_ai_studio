@@ -542,6 +542,7 @@ class OpenAILLMBackend(LLMBackend):
         token_count = 0
         reasoning_started = False
         in_think_block = False  # fallback tracker if server lacks reasoning parser
+        finish_reason = None
         _router_model = None  # track which model actually served the request (useful for routers)
 
         try:
@@ -595,6 +596,8 @@ class OpenAILLMBackend(LLMBackend):
                                 final_meta["router_model"] = _router_model
                             if reasoning_response:
                                 final_meta["reasoning"] = reasoning_response
+                            if finish_reason:
+                                final_meta["finish_reason"] = finish_reason
                             yield LLMToken(
                                 token="",
                                 is_final=True,
@@ -610,6 +613,7 @@ class OpenAILLMBackend(LLMBackend):
                                 self.logger.info("[LLM] Router model: %s", _router_model)
 
                             if "choices" in chunk and len(chunk["choices"]) > 0:
+                                finish_reason = chunk["choices"][0].get("finish_reason") or finish_reason
                                 delta = chunk["choices"][0].get("delta") or {}
 
                                 # vLLM/cosmos-reason: thinking in reasoning_content or reasoning;
@@ -628,7 +632,10 @@ class OpenAILLMBackend(LLMBackend):
                                             metadata={"reasoning_start": True},
                                         )
                                     reasoning_response += rc
-                                    continue
+
+                                # Some providers include both reasoning and
+                                # answer content in the same SSE delta. Keep
+                                # the answer instead of dropping the delta.
 
                                 content = delta.get("content", "")
                                 if not content:

@@ -7,6 +7,7 @@ from collections import deque
 import io
 import logging
 import math
+import os
 import struct
 import time
 from typing import AsyncIterator, Deque, Optional
@@ -15,6 +16,8 @@ import wave
 
 import aiohttp
 
+from multi_modal_ai_studio.backends.asr.language import transcription_language
+from multi_modal_ai_studio.backends.asr.diagnostics import capture_request, finish_capture
 from multi_modal_ai_studio.backends.base import (
     ASRBackend,
     ASRResult,
@@ -153,9 +156,11 @@ class OpenAIRestASRBackend(ASRBackend):
                     # last-partial -> final semantics.
                     speech_end_ms = max(
                         self._speech_start_ms or 0.0,
-                        self._silence_start_ms
-                        if self._silence_start_ms is not None
-                        else chunk_end_ms - self._silence_ms,
+                        (
+                            self._silence_start_ms
+                            if self._silence_start_ms is not None
+                            else chunk_end_ms - self._silence_ms
+                        ),
                     )
                     utterance_ms = len(self._utterance) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0
                     logger.info(
@@ -198,8 +203,7 @@ class OpenAIRestASRBackend(ASRBackend):
             )
             end_time = (
                 max(0.0, time.time() - self.timeline.start_time)
-                if self.timeline is not None
-                and self.timeline.start_time is not None
+                if self.timeline is not None and self.timeline.start_time is not None
                 else self._audio_position_ms / 1000.0
             )
             self._queue_control_result("vad_end", end_time)
@@ -311,15 +315,33 @@ class OpenAIRestASRBackend(ASRBackend):
         results = self._results
         if session is None or results is None:
             return
+        wav = self._wav_bytes(pcm)
+        language = transcription_language(self.config.language)
+        capture = None
+        if os.environ.get("MMAS_ASR_CAPTURE_DIR", "").strip():
+            capture = await asyncio.to_thread(
+                capture_request,
+                wav,
+                {
+                    "model": self.config.model,
+                    "language": language,
+                    "sample_rate": _SAMPLE_RATE,
+                    "audio_duration_ms": len(pcm) / (_SAMPLE_RATE * _SAMPLE_WIDTH) * 1000.0,
+                    "speech_start_time": start_time,
+                    "speech_end_time": end_time,
+                    "session_start_epoch": self.timeline.start_time if self.timeline else None,
+                },
+            )
         form = aiohttp.FormData()
         form.add_field(
             "file",
-            self._wav_bytes(pcm),
+            wav,
             filename="utterance.wav",
             content_type="audio/wav",
         )
         form.add_field("model", self.config.model)
-        form.add_field("language", self.config.language or "auto")
+        if language:
+            form.add_field("language", language)
         form.add_field("response_format", "json")
         headers = {}
         if self.config.api_key:
@@ -329,8 +351,7 @@ class OpenAIRestASRBackend(ASRBackend):
         request_started_monotonic = time.monotonic()
         inference_start_time = (
             max(0.0, time.time() - self.timeline.start_time)
-            if self.timeline is not None
-            and self.timeline.start_time is not None
+            if self.timeline is not None and self.timeline.start_time is not None
             else None
         )
         logger.info(
@@ -338,21 +359,20 @@ class OpenAIRestASRBackend(ASRBackend):
             url,
             audio_ms,
         )
+        outcome = {"status": "cancelled"}
         try:
             async with session.post(url, data=form, headers=headers) as response:
+                outcome["http_status"] = response.status
                 body = await response.text()
                 if response.status >= 400:
                     raise ConnectionError(f"ASR request failed ({response.status}): {body[:300]}")
                 payload = await response.json()
             inference_end_time = (
                 max(0.0, time.time() - self.timeline.start_time)
-                if self.timeline is not None
-                and self.timeline.start_time is not None
+                if self.timeline is not None and self.timeline.start_time is not None
                 else None
             )
-            inference_duration_ms = (
-                time.monotonic() - request_started_monotonic
-            ) * 1000.0
+            inference_duration_ms = (time.monotonic() - request_started_monotonic) * 1000.0
             result_metadata = {
                 "backend": "openai-rest",
                 "model": self.config.model,
@@ -363,6 +383,7 @@ class OpenAIRestASRBackend(ASRBackend):
                 "audio_duration_ms": audio_ms,
             }
             text = str(payload.get("text", "")).strip()
+            outcome.update(status="success", transcript=text)
             if text:
                 logger.info("[OpenAI REST ASR] Transcript: %r", text[:120])
                 await results.put(
@@ -389,10 +410,12 @@ class OpenAIRestASRBackend(ASRBackend):
                     )
                 )
         except Exception as exc:
+            # Do not persist arbitrary exception messages: URLs can contain
+            # credentials. The regular diagnostic log retains the error.
+            outcome.update(status="error", error_type=type(exc).__name__)
             inference_end_time = (
                 max(0.0, time.time() - self.timeline.start_time)
-                if self.timeline is not None
-                and self.timeline.start_time is not None
+                if self.timeline is not None and self.timeline.start_time is not None
                 else None
             )
             logger.exception("OpenAI-compatible ASR request failed")
@@ -409,13 +432,17 @@ class OpenAIRestASRBackend(ASRBackend):
                         "model": self.config.model,
                         "inference_start_time": inference_start_time,
                         "inference_end_time": inference_end_time,
-                        "inference_duration_ms": (
-                            time.monotonic() - request_started_monotonic
-                        ) * 1000.0,
+                        "inference_duration_ms": (time.monotonic() - request_started_monotonic)
+                        * 1000.0,
                         "audio_duration_ms": audio_ms,
                     },
                 )
             )
+        finally:
+            outcome["request_duration_ms"] = (time.monotonic() - request_started_monotonic) * 1000.0
+            outcome["request_start_time"] = inference_start_time
+            if capture is not None:
+                await asyncio.to_thread(finish_capture, capture, outcome)
 
     def _append_pre_roll(self, chunk: bytes) -> None:
         self._pre_roll.append(chunk)

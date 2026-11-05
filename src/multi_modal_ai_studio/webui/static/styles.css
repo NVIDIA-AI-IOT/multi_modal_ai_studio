@@ -2322,7 +2322,8 @@ body[data-configuration-layout="compact"] .tts-quality-setting--rest {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.session-filename-copy {
+.session-filename-copy,
+.session-filename-download {
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
@@ -2335,11 +2336,13 @@ body[data-configuration-layout="compact"] .tts-quality-setting--rest {
     cursor: pointer;
     transition: color var(--transition-fast), background-color var(--transition-fast);
 }
-.session-filename-copy:hover {
+.session-filename-copy:hover,
+.session-filename-download:hover {
     color: var(--accent-primary, var(--text-secondary));
     background: var(--bg-tertiary);
 }
-.session-filename-copy .lucide-inline {
+.session-filename-copy .lucide-inline,
+.session-filename-download .lucide-inline {
     width: 14px;
     height: 14px;
 }

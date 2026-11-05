@@ -11,6 +11,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Verify clean wheel installation, preset APIs, and static UI assets in CI; attach wheel, sdist, dependency manifests, and checksums to GitHub Releases.
 - Add explicitly opted-in, approval-gated TestPyPI/PyPI Trusted Publishing and an rc1 security/hardware qualification record.
 
+## [0.2.0-rc.2] - Unreleased
+
+### Fixed
+- Normalize UI locale tags such as `ja-JP` to `ja` for REST transcription, without changing Riva locales. Automatic language detection omits the language parameter.
+- Pair TTS cancellation completion with its turn even when the server completes cancellation before the browser reports playback stopped.
+- Preserve answer content when a streamed LLM delta also contains reasoning. Report reasoning-only or empty answers instead of silently skipping speech.
+- Remove the unsupported promise that uninstalled speech models will always download on first use.
+
+### Added
+- REST ASR model-list Reload and explicit, confirmed Download for providers advertising the Speaches model-management API.
+- Session JSON download next to the filename copy control, including after Stop and during recorded review.
+- Disabled-by-default, private, bounded REST ASR WAV diagnostics and an identical-input replay script for ASR-only/TTS-overlap/post-TTS comparisons.
+- Regression coverage for language normalization, provider-specific downloads, cancellation event ordering, mixed reasoning/answer deltas, and original JSON downloads.
+
 ## [0.2.0-rc.1] - 2026-10-09
 
 ### Added
