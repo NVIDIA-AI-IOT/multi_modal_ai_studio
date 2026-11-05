@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """
-Main CLI entry point for Multi-modal AI Studio.
+Main CLI entry point for Voice AI Workbench.
 
 This module handles command-line argument parsing and dispatches to
 either WebUI mode (default) or headless mode.
@@ -39,24 +39,24 @@ def main():
     from multi_modal_ai_studio import __version__
 
     parser = argparse.ArgumentParser(
-        description="Multi-modal AI Studio - Voice/Text/Video AI Interface",
+        description="Voice AI Workbench - Voice/Text/Video AI Interface",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # WebUI mode (view sessions / timeline)
-  multi-modal-ai-studio --port 8092
+  voice-ai-workbench --port 8092
 
   # WebUI with Riva (use --asr-server and --tts-server)
-  multi-modal-ai-studio --port 8092 --asr-server localhost:50051 --tts-server localhost:50051 --llm-api-base http://localhost:11434/v1 --llm-model llama3.2:3b
+  voice-ai-workbench --port 8092 --asr-server localhost:50051 --tts-server localhost:50051 --llm-api-base http://localhost:11434/v1 --llm-model llama3.2:3b
 
   # WebUI with preset
-  multi-modal-ai-studio --preset speaches-jetson
+  voice-ai-workbench --preset speaches-jetson
 
   # Headless mode with config file
-  multi-modal-ai-studio --mode headless --config my-preset.yaml
+  voice-ai-workbench --mode headless --config my-preset.yaml
 
   # Text-only mode
-  multi-modal-ai-studio --audio-input none --audio-output none
+  voice-ai-workbench --audio-input none --audio-output none
 
 For more information, visit: https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio
         """
@@ -180,7 +180,7 @@ For more information, visit: https://github.com/NVIDIA-AI-IOT/multi_modal_ai_stu
     logging.basicConfig(level=getattr(logging, args.log_level), handlers=[_handler])
 
     logger = logging.getLogger(__name__)
-    logger.info("Multi-modal AI Studio starting...")
+    logger.info("Voice AI Workbench starting...")
 
     if args.mode == "webui":
         import os

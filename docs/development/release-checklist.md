@@ -28,7 +28,7 @@ See [releasing.md](releasing.md) for exact setup, approval, build, and publicati
 - [ ] Release CI succeeds and wheel, sdist, requirements.txt, uv.lock, and SHA256SUMS are attached.
 - [ ] Downloaded artifacts pass checksum and isolated-install checks.
 - [ ] Opted-in stable-release PyPI job approved and successful; GitHub/PyPI artifact hashes match. If a manual rebuild was needed instead, its separate provenance/hashes are documented.
-- [ ] `pip install multi-modal-ai-studio==0.2.0` verified from PyPI in a fresh environment.
+- [ ] `pip install voice-ai-workbench==0.2.0` verified from PyPI in a fresh environment.
 
 ## After publication
 

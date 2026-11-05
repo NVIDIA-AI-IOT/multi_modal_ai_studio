@@ -1258,77 +1258,6 @@ wheels = [
 ]
 
 [[package]]
-name = "multi-modal-ai-studio"
-version = "0.2.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "grpcio" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "nvidia-riva-client" },
-    { name = "openai" },
-    { name = "psutil" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-audio = [
-    { name = "pyaudio" },
-]
-camera = [
-    { name = "opencv-python-headless" },
-]
-dev = [
-    { name = "black" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "uv" },
-]
-video-input = [
-    { name = "av" },
-    { name = "pillow" },
-]
-webrtc-camera = [
-    { name = "aiortc" },
-    { name = "av" },
-    { name = "opencv-python-headless" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = ">=3.14.5" },
-    { name = "aiortc", marker = "extra == 'webrtc-camera'", specifier = ">=1.6.0" },
-    { name = "av", marker = "extra == 'video-input'", specifier = ">=10.0.0" },
-    { name = "av", marker = "extra == 'webrtc-camera'", specifier = ">=10.0.0" },
-    { name = "black", marker = "extra == 'dev'", specifier = ">=26.10.1" },
-    { name = "grpcio", specifier = ">=1.56.2" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.4.0" },
-    { name = "numpy", specifier = ">=1.23.2" },
-    { name = "nvidia-riva-client", specifier = ">=2.14.0" },
-    { name = "openai", specifier = ">=1.0.0" },
-    { name = "opencv-python-headless", marker = "extra == 'camera'", specifier = ">=4.8.1.78" },
-    { name = "opencv-python-headless", marker = "extra == 'webrtc-camera'", specifier = ">=4.8.1.78" },
-    { name = "pillow", marker = "extra == 'video-input'", specifier = ">=13.0.0" },
-    { name = "psutil", specifier = ">=5.9.0" },
-    { name = "pyaudio", marker = "extra == 'audio'", specifier = ">=0.2.13" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.3.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.17.2" },
-    { name = "uv", marker = "extra == 'dev'", specifier = ">=0.13.5" },
-    { name = "websockets", specifier = ">=11.0" },
-]
-provides-extras = ["dev", "audio", "camera", "video-input", "webrtc-camera"]
-
-[[package]]
 name = "multidict"
 version = "7.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2547,6 +2476,77 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/9d/714523188aea3054644d8e69ae8089aac70325a3cee2d3d05509d4f23398/uv-0.13.6-py3-none-win_amd64.whl", hash = "sha256:7c9bc35ccb65932d8dc10a0669f9c805eaa3c9827ce18ecbecb1bd67944b2cdf", size = 15334118, upload-time = "2026-10-27T00:45:52.086Z" },
     { url = "https://files.pythonhosted.org/packages/6a/7d/5ebb4cccbb11ae9e10f6cda704ce382722ab9dc68c9280a5b810378aee3e/uv-0.13.6-py3-none-win_arm64.whl", hash = "sha256:722c7f96803f115e53918b8ee8858d1680ea6077c614b6db750747d709ab8d9a", size = 15533875, upload-time = "2026-10-27T00:45:55.013Z" },
 ]
+
+[[package]]
+name = "voice-ai-workbench"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "grpcio" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "nvidia-riva-client" },
+    { name = "openai" },
+    { name = "psutil" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+audio = [
+    { name = "pyaudio" },
+]
+camera = [
+    { name = "opencv-python-headless" },
+]
+dev = [
+    { name = "black" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "uv" },
+]
+video-input = [
+    { name = "av" },
+    { name = "pillow" },
+]
+webrtc-camera = [
+    { name = "aiortc" },
+    { name = "av" },
+    { name = "opencv-python-headless" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.14.5" },
+    { name = "aiortc", marker = "extra == 'webrtc-camera'", specifier = ">=1.6.0" },
+    { name = "av", marker = "extra == 'video-input'", specifier = ">=10.0.0" },
+    { name = "av", marker = "extra == 'webrtc-camera'", specifier = ">=10.0.0" },
+    { name = "black", marker = "extra == 'dev'", specifier = ">=26.10.1" },
+    { name = "grpcio", specifier = ">=1.56.2" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.4.0" },
+    { name = "numpy", specifier = ">=1.23.2" },
+    { name = "nvidia-riva-client", specifier = ">=2.14.0" },
+    { name = "openai", specifier = ">=1.0.0" },
+    { name = "opencv-python-headless", marker = "extra == 'camera'", specifier = ">=4.8.1.78" },
+    { name = "opencv-python-headless", marker = "extra == 'webrtc-camera'", specifier = ">=4.8.1.78" },
+    { name = "pillow", marker = "extra == 'video-input'", specifier = ">=13.0.0" },
+    { name = "psutil", specifier = ">=5.9.0" },
+    { name = "pyaudio", marker = "extra == 'audio'", specifier = ">=0.2.13" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.3.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.17.2" },
+    { name = "uv", marker = "extra == 'dev'", specifier = ">=0.13.5" },
+    { name = "websockets", specifier = ">=11.0" },
+]
+provides-extras = ["dev", "audio", "camera", "video-input", "webrtc-camera"]
 
 [[package]]
 name = "websockets"

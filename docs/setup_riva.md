@@ -1,6 +1,6 @@
 # NVIDIA Riva Setup Guide
 
-This guide walks through setting up NVIDIA Riva locally for voice (ASR/TTS). It is shared by **Multi-modal AI Studio** and **Live RIVA WebUI**.
+This guide walks through setting up NVIDIA Riva locally for voice (ASR/TTS). It is shared by **Voice AI Workbench** and **Live RIVA WebUI**.
 
 ## ⚠️ IMPORTANT CHANGE (January 2025)
 
@@ -288,7 +288,7 @@ tts_language_code=("multi")           # TTS language
 - Only available when `asr_acoustic_model` is `"parakeet_1.1b"`
 - After changing this setting, re-run `riva_init.sh` and `riva_start.sh`
 
-**For Multi-modal AI Studio and Live RIVA WebUI**, recommended settings:
+**For Voice AI Workbench and Live RIVA WebUI**, recommended settings:
 - Enable ASR + TTS only (NLP/NMT not needed)
 - Use default `parakeet_1.1b` for ASR (best quality/latency balance)
 - Set `asr_accessory_model="silero_diarizer"` for Silero VAD support
@@ -391,7 +391,7 @@ riva_streaming_asr_client --list_models
 # 'en-US': 'parakeet-1.1b-en-us-asr-streaming'
 ```
 
-**Note**: Riva 2.24.0 on Jetson defaults to **Parakeet 1.1b**, which is optimized for low-latency streaming ASR. This is the recommended model for real-time voice applications (e.g. Multi-modal AI Studio, Live RIVA WebUI).
+**Note**: Riva 2.24.0 on Jetson defaults to **Parakeet 1.1b**, which is optimized for low-latency streaming ASR. This is the recommended model for real-time voice applications (e.g. Voice AI Workbench, Live RIVA WebUI).
 
 ### Test Streaming ASR (Primary mode for Parakeet 1.1b)
 
@@ -435,7 +435,7 @@ Throughput: 8.3569e+00 RTFX
 **Streaming ASR is the primary mode for Riva 2.24.0 on Jetson**:
 - Low latency (~100-200ms)
 - Real-time interim results
-- Optimized for conversational AI applications (e.g. Multi-modal AI Studio, Live RIVA WebUI)
+- Optimized for conversational AI applications (e.g. Voice AI Workbench, Live RIVA WebUI)
 
 ### Test with Opus file (WebRTC codec)
 
@@ -507,7 +507,7 @@ This stops and removes containers while preserving downloaded models in the `riv
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│       Voice apps (Multi-modal AI Studio / Live RIVA WebUI)  │
+│       Voice apps (Voice AI Workbench / Live RIVA WebUI)  │
 │  ┌──────────────┐         ┌──────────────┐                  │
 │  │   Browser    │◄───────►│  WebUI       │                  │
 │  │  (WebRTC)    │  WS/RTC │  Server      │                  │
@@ -539,7 +539,7 @@ This stops and removes containers while preserving downloaded models in the `riv
 
 **Opus is WebRTC's standard audio codec** — all modern browsers encode microphone audio as Opus by default. Riva's inclusion of Opus sample files (`/opt/riva/wav/en-US_sample.opus`) confirms it can handle this codec natively.
 
-For Multi-modal AI Studio and Live RIVA WebUI, the audio flow is:
+For Voice AI Workbench and Live RIVA WebUI, the audio flow is:
 ```
 Browser (WebRTC) → Opus audio → WebSocket → Bridge → PCM → Riva gRPC → Transcripts
 ```
@@ -557,11 +557,11 @@ NVIDIA provides an **open-source WebSocket ↔ Riva bridge**: [nvidia-riva/webso
 
 **Implementation**: JavaScript/Node.js
 
-For Multi-modal AI Studio and Live RIVA WebUI, options include:
+For Voice AI Workbench and Live RIVA WebUI, options include:
 1. Use the nvidia-riva/websocket-bridge as-is
 2. Build a Python version integrated into the existing async server (e.g. reusing Live VLM WebUI's WebRTC scaffolding)
 
-## Next Steps (Multi-modal AI Studio / Live RIVA WebUI)
+## Next Steps (Voice AI Workbench / Live RIVA WebUI)
 
 1. **Audio Bridge**: WebSocket/WebRTC → gRPC adapter
    - Accept Opus audio from browser

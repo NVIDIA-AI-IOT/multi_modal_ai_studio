@@ -1,6 +1,6 @@
 # VLM (Vision-Language Model) Guide
 
-This guide covers how Vision-Language Models work within Multi-modal AI Studio — from backend setup and frame capture to video/image input modes, conversation history, performance tuning, and the API formats used under the hood.
+This guide covers how Vision-Language Models work within Voice AI Workbench — from backend setup and frame capture to video/image input modes, conversation history, performance tuning, and the API formats used under the hood.
 
 The examples use **Cosmos-Reason2-8B** as the reference model, but the application works with any OpenAI-compatible VLM backend (vLLM, Ollama, OpenAI, etc.).
 
@@ -17,7 +17,7 @@ The examples use **Cosmos-Reason2-8B** as the reference model, but the applicati
         │ WebSocket   │                    │
         ▼             ▼                    │
 ┌───────────────────────────────────────────┐
-│        Multi-modal AI Studio              │
+│        Voice AI Workbench              │
 │  ┌────────┐  ┌────────┐  ┌────────┐      │
 │  │  ASR   │→│  VLM   │→│  TTS   │──────┘│
 │  │ (Riva) │  │(vLLM)  │  │(Riva) │       │
@@ -43,7 +43,7 @@ The examples use **Cosmos-Reason2-8B** as the reference model, but the applicati
 
 ## Step 1: Start a VLM Backend
 
-Multi-modal AI Studio works with any backend that exposes an OpenAI-compatible `/v1/chat/completions` endpoint with image or video support.
+Voice AI Workbench works with any backend that exposes an OpenAI-compatible `/v1/chat/completions` endpoint with image or video support.
 
 ### Option A: vLLM with Cosmos-Reason2 (Recommended)
 
@@ -137,7 +137,7 @@ docker ps | grep riva
 
 ---
 
-## Step 3: Run Multi-modal AI Studio
+## Step 3: Run Voice AI Workbench
 
 ### Install (first time only):
 

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Multi-modal AI Studio will be documented in this file.
+All notable changes to Voice AI Workbench will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
@@ -17,6 +17,7 @@ This release consolidates the changes developed in rc1 and rc2 below. Publicatio
 - Install a self-contained UI/preset wheel; launch GPU model services independently using the matching release's repository scripts.
 
 ### Release preparation
+- Rename the product to **Voice AI Workbench** and its Python distribution to `voice-ai-workbench` before the first PyPI release. Add the `voice-ai-workbench` CLI while retaining `multi-modal-ai-studio`, the Python import, existing configuration locations, and session formats for compatibility. The GitHub repository is unchanged.
 - Include canonical presets in wheel/sdist builds and expose them in the CLI and Web UI outside a source checkout, with writable local overrides kept out of site-packages.
 - Verify clean wheel installation, preset APIs, and static UI assets in CI; attach wheel, sdist, dependency manifests, and checksums to GitHub Releases.
 - Publish the same verified wheel/sdist to GitHub and, when explicitly enabled, PyPI for stable releases via approval-gated Trusted Publishing. RC releases do not automatically publish to PyPI; TestPyPI and manual promotion remain explicit operations.

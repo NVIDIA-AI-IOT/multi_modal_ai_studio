@@ -1,6 +1,6 @@
-# Multi-modal AI Studio — Internal Logic & Architecture
+# Voice AI Workbench — Internal Logic & Architecture
 
-This document dissects the internal logic and architecture of Multi-modal AI Studio (RIVA ASR/TTS + optional local USB devices). It is intended to support understanding, refactoring, and creating diagrams (e.g. for PPT or Lucidchart) for workshops such as GTC.
+This document dissects the internal logic and architecture of Voice AI Workbench (RIVA ASR/TTS + optional local USB devices). It is intended to support understanding, refactoring, and creating diagrams (e.g. for PPT or Lucidchart) for workshops such as GTC.
 
 **Scope**: Main application flow with ASR and TTS on RIVA, WebUI, and support for browser vs server-side (USB/ALSA) audio devices. Realtime API path is noted where it diverges.
 
@@ -27,7 +27,7 @@ This document dissects the internal logic and architecture of Multi-modal AI Stu
 | `devices/capture.py` | Server-side mic capture (ALSA/pyaudio → queue) |
 | `devices/playback.py` | Server-side speaker playback (aplay subprocess) |
 | `devices/local.py` | List local cameras and audio devices (USB/ALSA) |
-| `cli/main.py` | CLI entry (e.g. `multi-modal-ai-studio --port 8092`) |
+| `cli/main.py` | CLI entry (e.g. `voice-ai-workbench --port 8092`) |
 | `__main__.py` | Entry point for `python -m multi_modal_ai_studio` |
 
 ### 1.1 Directory tree (source)
@@ -126,7 +126,7 @@ There are two commonly accepted diagram types for this kind of architecture; use
 
 | Purpose | Diagram type | What to show |
 |--------|---------------|--------------|
-| **Structure** (what talks to what) | **Context/container diagram** (e.g. [C4 model](https://c4model.com/)) | One box per "system": *User* → *Browser* (or "Web client") ↔ *Web server* (e.g. "server.py" / "Multi-modal AI Studio") ↔ *Riva*, *LLM API*, etc. Label each link with the **protocol**: `HTTPS`, `WebSocket /ws/voice`, `gRPC`, `HTTP`. For WebSocket, a single bidirectional link labeled "WebSocket" is standard. |
+| **Structure** (what talks to what) | **Context/container diagram** (e.g. [C4 model](https://c4model.com/)) | One box per "system": *User* → *Browser* (or "Web client") ↔ *Web server* (e.g. "server.py" / "Voice AI Workbench") ↔ *Riva*, *LLM API*, etc. Label each link with the **protocol**: `HTTPS`, `WebSocket /ws/voice`, `gRPC`, `HTTP`. For WebSocket, a single bidirectional link labeled "WebSocket" is standard. |
 | **Behavior** (message order over time) | **Sequence diagram** (UML or [Mermaid](https://mermaid.js.org/syntax/sequenceDiagram.html)) | **Lifelines**: Browser (client), Server. **Messages**: (1) HTTP GET for page/static; (2) WebSocket handshake (HTTP Upgrade → 101 Switching Protocols); (3) first message (e.g. `config`); (4) bidirectional messages (async: use dashed arrow or open arrowhead in UML). This makes it clear the WebSocket is a persistent, full-duplex channel after the handshake. |
 
 **Conventions that are widely used:**

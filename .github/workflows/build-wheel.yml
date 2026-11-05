@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/multi-modal-ai-studio
+      url: https://test.pypi.org/p/voice-ai-workbench
     permissions:
       id-token: write
     steps:
@@ -172,7 +172,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/multi-modal-ai-studio
+      url: https://pypi.org/p/voice-ai-workbench
     permissions:
       id-token: write
     steps:

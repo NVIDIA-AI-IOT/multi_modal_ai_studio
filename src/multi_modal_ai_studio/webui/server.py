@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Simple web server for Multi-modal AI Studio WebUI.
+Simple web server for Voice AI Workbench WebUI.
 
 Serves static HTML/CSS/JS and provides API endpoints for session data.
 Supports HTTPS via self-signed certificates (same logic as Live RIVA WebUI).
@@ -472,7 +472,7 @@ class _QuietAccessLogger(AbstractAccessLogger):
             pass
 
 def get_app_config_dir() -> Path:
-    """Get the application config directory following OS conventions (same as Live RIVA WebUI)."""
+    """Retain the MMAS config directory so the public rename preserves user settings."""
     if os.name == "posix":
         if "darwin" in sys.platform.lower():
             config_dir = Path.home() / "Library" / "Application Support" / "multi-modal-ai-studio"
@@ -534,7 +534,7 @@ def generate_self_signed_cert(cert_path: str = "cert.pem", key_path: str = "key.
 
 
 class WebUIServer:
-    """Web server for Multi-modal AI Studio UI."""
+    """Web server for Voice AI Workbench UI."""
 
     def __init__(
         self,
@@ -1630,7 +1630,7 @@ class WebUIServer:
 
         protocol = "https" if self.ssl_context else "http"
         port = self.port
-        logger.info("🚀 Multi-modal AI Studio WebUI")
+        logger.info("🚀 Voice AI Workbench WebUI")
         logger.info("────────────────────────────────────────")
         logger.info("Access the server at:")
         logger.info("  🏠 %s://localhost:%s", protocol, port)
@@ -1663,7 +1663,7 @@ def main():
     default_cert = str(config_dir / "cert.pem")
     default_key = str(config_dir / "key.pem")
 
-    parser = argparse.ArgumentParser(description="Multi-modal AI Studio WebUI Server")
+    parser = argparse.ArgumentParser(description="Voice AI Workbench WebUI Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host address")
     parser.add_argument("--port", type=int, default=8080, help="Port number")
     parser.add_argument(

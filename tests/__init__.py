@@ -1,1 +1,1 @@
-# Tests for Multi-modal AI Studio
+# Tests for Voice AI Workbench

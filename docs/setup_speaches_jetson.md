@@ -151,7 +151,7 @@ Jetson AI Lab path and the pipeline used for this project's Orin Nano tests.
 ## 4. Start MMAS
 
 ```bash
-multi-modal-ai-studio --preset speaches-jetson --port 8092
+voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 Open `https://localhost:8092`, or `https://JETSON_IP:8092` from another machine,
@@ -161,7 +161,7 @@ The recommended preset uses the portable REST ASR and REST TTS path.
 To exercise Realtime transcription instead, use:
 
 ```bash
-multi-modal-ai-studio --preset speaches-realtime-asr-jetson --port 8092
+voice-ai-workbench --preset speaches-realtime-asr-jetson --port 8092
 ```
 
 Speaches currently performs VAD and sends completed speech chunks to

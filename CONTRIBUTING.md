@@ -1,4 +1,4 @@
-# Contributing to multi-modal-ai-studio
+# Contributing to Voice AI Workbench
 
 Thank you for your interest in contributing. This project follows the Developer Certificate of Origin (DCO) for third-party contributions.
 

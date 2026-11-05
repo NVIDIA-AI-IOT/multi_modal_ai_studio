@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Speech API backends
 
-Multi-modal AI Studio can mix speech providers independently. The classic voice
+Voice AI Workbench can mix speech providers independently. The classic voice
 pipeline is:
 
 ```text

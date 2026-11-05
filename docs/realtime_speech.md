@@ -1,6 +1,6 @@
 # Realtime speech backends
 
-Multi-modal AI Studio (MMAS) separates the Realtime wire protocol from the
+Voice AI Workbench (formerly MMAS) separates the Realtime wire protocol from the
 speech model provider. A Realtime transcription session can therefore replace
 the ASR stage in the classic `ASR -> LLM -> TTS` cascade without coupling MMAS
 to OpenAI, Speaches, or a future NVIDIA Open Speech service.

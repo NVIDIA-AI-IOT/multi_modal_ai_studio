@@ -26,6 +26,8 @@ def test_publishing_requires_opt_in_and_isolated_environment():
             "build" if destination == "testpypi" else ["build", "github-release"]
         )
         assert job["environment"]["name"] == destination
+        host = "test.pypi.org" if destination == "testpypi" else "pypi.org"
+        assert job["environment"]["url"] == f"https://{host}/p/voice-ai-workbench"
         assert job["permissions"] == {"id-token": "write"}
         assert all("run" not in step for step in job["steps"])
         assert all("checkout" not in step["uses"] for step in job["steps"])

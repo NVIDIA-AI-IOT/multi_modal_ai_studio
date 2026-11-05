@@ -18,7 +18,7 @@ if ! python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
 fi
 
 echo "========================================="
-echo "Multi-modal AI Studio - Dev Setup"
+echo "Voice AI Workbench - Dev Setup"
 echo "========================================="
 echo
 
@@ -43,7 +43,7 @@ pip install --upgrade pip setuptools wheel
 echo
 
 # Install package in development mode first (no portaudio required for ALSA-only use)
-echo "→ Installing multi-modal-ai-studio in development mode..."
+echo "→ Installing voice-ai-workbench in development mode..."
 pip install -e .
 
 # Optionally install audio support (PyAudio for pyaudio:N devices; ALSA devices like EMEET use arecord and don't need this)

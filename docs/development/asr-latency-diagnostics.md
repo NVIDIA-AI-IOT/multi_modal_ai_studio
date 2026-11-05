@@ -8,7 +8,7 @@ Set `MMAS_ASR_CAPTURE_DIR` in the MMAS server process environment before startin
 
 ```bash
 MMAS_ASR_CAPTURE_DIR=/absolute/private/asr-capture \
-  multi-modal-ai-studio --preset speaches-jetson --port 8092
+  voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 Each REST ASR request saves the exact mono 16 kHz PCM16 WAV sent to the provider plus a JSON sidecar. The sidecar includes the model, normalized language, audio duration, session clock anchor, speech/request times, HTTP status, transcript, elapsed request time, and WAV SHA256. It excludes API keys, headers, full configuration, and endpoint URLs. Request latency excludes capture disk I/O; writes run outside the asyncio event loop. Errors or full capture storage do not stop ASR.

@@ -1,6 +1,6 @@
 # Release process
 
-MMAS is distributed as a Python wheel and source distribution (sdist). Speech and LLM services remain independent containers. A new MMAS container is not required for the 0.2.0 release.
+Voice AI Workbench (formerly Multi-modal AI Studio / MMAS) is distributed as the `voice-ai-workbench` Python wheel and source distribution (sdist). Speech and LLM services remain independent containers. A new application container is not required for the 0.2.0 release. The repository and Python import remain `multi_modal_ai_studio`; the new `voice-ai-workbench` CLI and legacy `multi-modal-ai-studio` alias invoke the same application.
 
 ## Versions and release gate
 
@@ -29,7 +29,7 @@ Repository `presets/*.yaml` are the canonical preset sources. The setuptools bui
 ## One-time maintainer setup
 
 1. Create GitHub environments named **testpypi** and **pypi**. Configure required reviewers and the appropriate self-review policy for your maintainer team. Restrict **testpypi** to branch `main`; allow **pypi** on branch `main` for manual promotion and on release tags `v*` for release-triggered publishing. Branch and tag rules are separate: a main-only environment would block the stable-release job. Check your GitHub plan supports the intended protections before enabling publishing.
-2. Configure a pending Trusted Publisher separately on [TestPyPI](https://test.pypi.org/manage/account/publishing/) and [PyPI](https://pypi.org/manage/account/publishing/). Use project **multi-modal-ai-studio**, owner **NVIDIA-AI-IOT**, repository **multi_modal_ai_studio**, workflow filename **build-wheel.yml**, and the matching environment **testpypi** or **pypi**. Ensure the appropriate team maintainers have project access.
+2. Configure a pending Trusted Publisher separately on [TestPyPI](https://test.pypi.org/manage/account/publishing/) and [PyPI](https://pypi.org/manage/account/publishing/). Use project **voice-ai-workbench**, owner **NVIDIA-AI-IOT**, repository **multi_modal_ai_studio**, workflow filename **build-wheel.yml**, and the matching environment **testpypi** or **pypi**. Ensure the appropriate team maintainers have project access.
 3. Only after those protections and publishers are configured, set repository Actions variables `TESTPYPI_PUBLISH_ENABLED=true` and `PYPI_PUBLISH_ENABLED=true` for the destinations you intend to enable. Leave them unset otherwise.
 
 No PyPI API token is required. Only the isolated publishing jobs receive `id-token: write`; they download tested artifacts and do not check out or execute project code. Builds and pull requests have read-only repository permission. The GitHub asset-attachment job alone receives `contents: write`.
@@ -48,11 +48,11 @@ This follows [Live VLM WebUI's release-triggered Trusted Publishing pattern](htt
 
 TestPyPI and PyPI are independent indexes. Reusing an uploaded filename/version is not supported; do not silently skip existing files. If another candidate must be uploaded after a package has been published, increment the RC version and update both version fields. Local wheel artifacts can be rebuilt without consuming an index version.
 
-For a TestPyPI installation, avoid mixing TestPyPI and PyPI as competing dependency indexes. Download only MMAS from TestPyPI and install that wheel with dependencies resolved from PyPI:
+For a TestPyPI installation, avoid mixing TestPyPI and PyPI as competing dependency indexes. After uploading the 0.2.0 candidate there, download only Voice AI Workbench from TestPyPI and install that wheel with dependencies resolved from PyPI:
 
 ```bash
-python -m pip download --no-deps --index-url https://test.pypi.org/simple/ multi-modal-ai-studio==0.2.0rc2
-python -m pip install ./multi_modal_ai_studio-0.2.0rc2-py3-none-any.whl
+python -m pip download --no-deps --index-url https://test.pypi.org/simple/ voice-ai-workbench==0.2.0
+python -m pip install ./voice_ai_workbench-0.2.0-py3-none-any.whl
 ```
 
 For local validation:
@@ -92,12 +92,29 @@ If PyPI was not enabled at GitHub publication, or an RC is intentionally being p
 After either path succeeds, confirm the version on PyPI, then install in a fresh environment:
 
 ```bash
-python -m pip install multi-modal-ai-studio==0.2.0
-multi-modal-ai-studio --version
-multi-modal-ai-studio --preset speaches-jetson --port 8092
+python -m pip install voice-ai-workbench==0.2.0
+voice-ai-workbench --version
+voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 The last command expects separately running speech/LLM endpoints for conversation. Opening the UI and selecting presets does not prove that inference services are installed. Do not rerun a successful upload or enable silent skipping of existing versions; an index does not permit replacing a published artifact.
+
+## Upgrading an earlier MMAS installation
+
+Prefer a fresh virtual environment when testing the renamed distribution. If reusing an environment with an earlier `multi-modal-ai-studio` wheel or editable install, uninstall that distribution **before** installing `voice-ai-workbench`: both distributions provide the same Python package, so leaving both installed can cause a later uninstall to remove shared files.
+
+After publication, in the activated environment:
+
+```bash
+python -m pip uninstall multi-modal-ai-studio
+python -m pip install voice-ai-workbench==0.2.0
+voice-ai-workbench --version
+multi-modal-ai-studio --version  # retained compatibility alias
+```
+
+For pre-publication validation, replace the install argument with the verified local `voice_ai_workbench-0.2.0-py3-none-any.whl`. Uninstalling the Python distribution does not delete externally stored sessions, user presets, or model caches. Keep the same session-directory argument/working directory when switching launchers. The OS-specific `multi-modal-ai-studio` configuration directory is intentionally unchanged, as are `multi_modal_ai_studio` imports and the GitHub repository name. Earlier rc1/rc2 artifacts and qualification records retain their original names; they are not retroactively renamed or republished.
+
+If a pending Trusted Publisher was registered under `multi-modal-ai-studio`, configure one for **voice-ai-workbench** before publication; the old project name does not authorize upload to the new project. The owner, repository, workflow filename, and environment remain as listed above.
 
 ## Documentation and announcement
 

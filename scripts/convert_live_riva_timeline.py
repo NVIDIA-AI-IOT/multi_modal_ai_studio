@@ -4,7 +4,7 @@
 
 """
 Convert Live RIVA WebUI timeline export (JSON array of events) into a
-Multi-Modal AI Studio session JSON file.
+Voice AI Workbench session JSON file.
 
 Usage:
   # Export from Live RIVA WebUI console (exportTimelineForMultiModalStudio()),

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Verify Multi-modal AI Studio setup is complete.
+Verify Voice AI Workbench setup is complete.
 
 Run this script to check that all components are in place and working.
 """
@@ -182,7 +182,7 @@ def check_cli():
 def main():
     """Run all checks."""
     print("=" * 60)
-    print("Multi-modal AI Studio - Setup Verification")
+    print("Voice AI Workbench - Setup Verification")
     print("=" * 60)
     
     checks = [
@@ -200,7 +200,7 @@ def main():
         print("✅ All checks passed! Setup is complete.")
         print("\nNext steps:")
         print("  1. Start the recommended services: see README.md")
-        print("  2. Run: multi-modal-ai-studio --preset speaches-jetson --port 8092")
+        print("  2. Run: voice-ai-workbench --preset speaches-jetson --port 8092")
         print("  3. Open https://localhost:8092")
         return 0
     else:
