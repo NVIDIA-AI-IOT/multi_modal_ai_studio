@@ -16,10 +16,11 @@ See [releasing.md](releasing.md) for exact setup, approval, build, and publicati
 
 ## Publishing setup
 
-- [ ] TestPyPI and PyPI project ownership/pending Trusted Publishers configured for `build-wheel.yml`.
-- [ ] Publishing environments have the intended approval policy; `testpypi` permits branch `main`, and `pypi` permits branch `main` plus release tags `v*`.
-- [ ] Destination repository opt-in variables enabled only after the above protections exist.
-- [ ] Candidate build/TestPyPI installation verified; artifact run URL and hashes recorded.
+- [ ] PyPI project ownership/pending Trusted Publisher configured for `build-wheel.yml` and environment `pypi`.
+- [ ] The `pypi` environment has the intended approval policy and permits branch `main` plus release tags `v*`.
+- [ ] `PYPI_PUBLISH_ENABLED=true` enabled only after the above protections exist.
+- [ ] Candidate CI artifact installation verified; run URL and hashes recorded. TestPyPI is not required for this check.
+- [ ] Optional TestPyPI rehearsal completed or marked N/A. If used, configure its separate publisher, `testpypi` environment restricted to `main`, and `TESTPYPI_PUBLISH_ENABLED` opt-in before upload.
 
 ## Release
 

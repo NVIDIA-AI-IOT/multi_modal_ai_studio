@@ -28,9 +28,11 @@ Repository `presets/*.yaml` are the canonical preset sources. The setuptools bui
 
 ## One-time maintainer setup
 
-1. Create GitHub environments named **testpypi** and **pypi**. Configure required reviewers and the appropriate self-review policy for your maintainer team. Restrict **testpypi** to branch `main`; allow **pypi** on branch `main` for manual promotion and on release tags `v*` for release-triggered publishing. Branch and tag rules are separate: a main-only environment would block the stable-release job. Check your GitHub plan supports the intended protections before enabling publishing.
-2. Configure a pending Trusted Publisher separately on [TestPyPI](https://test.pypi.org/manage/account/publishing/) and [PyPI](https://pypi.org/manage/account/publishing/). Use project **voice-ai-workbench**, owner **NVIDIA-AI-IOT**, repository **multi_modal_ai_studio**, workflow filename **build-wheel.yml**, and the matching environment **testpypi** or **pypi**. Ensure the appropriate team maintainers have project access.
-3. Only after those protections and publishers are configured, set repository Actions variables `TESTPYPI_PUBLISH_ENABLED=true` and `PYPI_PUBLISH_ENABLED=true` for the destinations you intend to enable. Leave them unset otherwise.
+1. Create the GitHub environment **pypi**. Configure required reviewers and the appropriate self-review policy for your maintainer team. Allow branch `main` for manual promotion and release tags `v*` for release-triggered publishing. Branch and tag rules are separate: a main-only environment would block the stable-release job. Check your GitHub plan supports the intended protections before enabling publishing.
+2. Configure a pending Trusted Publisher on [PyPI](https://pypi.org/manage/account/publishing/). Use project **voice-ai-workbench**, owner **NVIDIA-AI-IOT**, repository **multi_modal_ai_studio**, workflow filename **build-wheel.yml**, and environment **pypi**. Ensure the appropriate team maintainers have project access. PyPI permits an unspecified environment, displayed as `(Any)`, but explicitly naming `pypi` restricts trust to that environment; see [PyPI's environment guidance](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
+3. Only after those protections and the publisher are configured, set the repository Actions variable `PYPI_PUBLISH_ENABLED=true`. Leave it unset to build GitHub assets without uploading to PyPI.
+
+**TestPyPI is optional.** To rehearse index publishing there, separately create a **testpypi** GitHub environment restricted to branch `main`, configure a matching pending publisher on [TestPyPI](https://test.pypi.org/manage/account/publishing/), and then set `TESTPYPI_PUBLISH_ENABLED=true`. This is not required for a candidate build or production PyPI publication.
 
 No PyPI API token is required. Only the isolated publishing jobs receive `id-token: write`; they download tested artifacts and do not check out or execute project code. Builds and pull requests have read-only repository permission. The GitHub asset-attachment job alone receives `contents: write`.
 
@@ -38,15 +40,17 @@ Merging a PR or pushing to main never publishes to a package index. A stable Git
 
 This follows [Live VLM WebUI's release-triggered Trusted Publishing pattern](https://github.com/NVIDIA-AI-IOT/live-vlm-webui/blob/main/.github/workflows/build-wheel.yml), with additional artifact verification, isolated publishing jobs, and opt-in/environment gates. Its PyPI publisher registration does not grant access to the MMAS project. A missing public PyPI project does not prove that no account-private pending publisher exists; check the intended maintainer's PyPI account before registering another one.
 
-## Candidate build and TestPyPI
+## Candidate build
 
 1. Merge the release preparation PR.
-2. Open **Actions → Build and Test → Run workflow**. Select workflow branch **main**, set **ref** to the candidate's full commit SHA, and **publish_to** to **testpypi**. For a build without any index upload, select **none**.
+2. Open **Actions → Build and Test → Run workflow**. Select workflow branch **main**, set **ref** to the candidate's full commit SHA, and **publish_to** to **none**. No PyPI or TestPyPI account setup is needed for this build.
 3. CI runs the unit and speech-service contract tests, builds an sdist and a wheel from it, checks package metadata, and installs the wheel in a fresh virtual environment outside the checkout. It exercises CLI version/help, the Speaches CLI preset, preset HTTP endpoints, and UI static files without contacting GPU backends.
-4. Approve the **testpypi** environment only after reviewing the build. Validate the downloaded TestPyPI wheel on a clean environment and qualify the final commit on Orin Nano and Thor.
+4. Download the **release-assets** artifact and verify `SHA256SUMS`. Validate its wheel in a clean environment and qualify the final commit on Orin Nano and Thor.
 5. Preserve the run URL, hashes, and device evidence in the qualification record.
 
-TestPyPI and PyPI are independent indexes. Reusing an uploaded filename/version is not supported; do not silently skip existing files. If another candidate must be uploaded after a package has been published, increment the RC version and update both version fields. Local wheel artifacts can be rebuilt without consuming an index version.
+For an optional TestPyPI rehearsal, repeat the manual dispatch with **publish_to=testpypi** after configuring that destination. Review the build, approve the **testpypi** environment, and verify installation from that index.
+
+TestPyPI and PyPI are independent indexes. Reusing an uploaded filename/version on the same index is not supported; do not silently skip existing files. If another candidate must be uploaded to that index, increment the RC version and update both version fields. Local wheel artifacts can be rebuilt without consuming an index version.
 
 For a TestPyPI installation, avoid mixing TestPyPI and PyPI as competing dependency indexes. After uploading the 0.2.0 candidate there, download only Voice AI Workbench from TestPyPI and install that wheel with dependencies resolved from PyPI:
 
