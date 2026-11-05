@@ -286,6 +286,132 @@ async def test_realtime_asr_accumulates_deltas_and_preserves_vad_boundaries():
     assert results[-1].end_time >= results[-1].start_time
 
 
+def _asr_with_events(events):
+    backend = OpenAIRealtimeASRBackend(ASRConfig(
+        scheme="openai-realtime", realtime_url="ws://localhost/realtime",
+        realtime_session_type="transcription",
+    ))
+    backend._client = _FakeRealtimeClient(events)
+    timestamps = iter(float(index) for index in range(len(events)))
+    backend._timestamp = lambda: next(timestamps)
+    return backend
+
+
+@pytest.mark.asyncio
+async def test_realtime_asr_duplicate_boundaries_and_finals_do_not_repeat_turn():
+    backend = _asr_with_events([
+        RealtimeEvent(kind="speech_started", item_id="a"),
+        RealtimeEvent(kind="speech_started", item_id="a"),
+        RealtimeEvent(kind="speech_stopped", item_id="a"),
+        RealtimeEvent(kind="speech_stopped", item_id="a"),
+        RealtimeEvent(kind="transcript_completed", item_id="a", text="Stop"),
+        RealtimeEvent(kind="transcript_completed", item_id="a", text="Stop"),
+        RealtimeEvent(kind="transcript_delta", item_id="a", text="Stop"),
+        RealtimeEvent(kind="speech_stopped", item_id="a"),
+        RealtimeEvent(kind="speech_started", item_id="a"),
+        RealtimeEvent(kind="error", item_id="a", message="duplicate commit"),
+    ])
+    results = [result async for result in backend.receive_results()]
+
+    assert len(results) == 4
+    assert [r.metadata.get("control_event") for r in results[:2]] == ["vad_start", "vad_end"]
+    assert results[2].text == "Stop" and results[2].is_final
+    assert (results[2].start_time, results[2].end_time) == (0.0, 2.0)
+    assert results[2].metadata["speech_end_observed"] is True
+    assert results[3].metadata["error"] == "duplicate commit"
+
+
+@pytest.mark.asyncio
+async def test_realtime_asr_overlapping_items_keep_their_own_boundaries():
+    backend = _asr_with_events([
+        RealtimeEvent(kind="speech_started", item_id="a"),
+        RealtimeEvent(kind="speech_stopped", item_id="a"),
+        RealtimeEvent(kind="speech_started", item_id="b"),
+        RealtimeEvent(kind="speech_stopped", item_id="b"),
+        RealtimeEvent(kind="transcript_completed", item_id="b", text="Second"),
+        RealtimeEvent(kind="transcript_completed", item_id="a", text="First"),
+    ])
+    results = [result async for result in backend.receive_results()]
+    finals = [r for r in results if r.is_final]
+
+    assert [(r.text, r.start_time, r.end_time) for r in finals] == [
+        ("Second", 2.0, 3.0), ("First", 0.0, 1.0),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_realtime_asr_final_before_endpoint_does_not_borrow_previous_end():
+    backend = _asr_with_events([
+        RealtimeEvent(kind="speech_started", item_id="a"),
+        RealtimeEvent(kind="speech_stopped", item_id="a"),
+        RealtimeEvent(kind="transcript_completed", item_id="a", text="First"),
+        RealtimeEvent(kind="speech_started", item_id="b"),
+        RealtimeEvent(kind="transcript_completed", item_id="b", text="Second"),
+        RealtimeEvent(kind="speech_stopped", item_id="b"),
+        RealtimeEvent(kind="transcript_completed", item_id="unknown", text="Third"),
+    ])
+    results = [result async for result in backend.receive_results()]
+    finals = [r for r in results if r.is_final]
+
+    assert [(r.text, r.start_time, r.end_time) for r in finals] == [
+        ("First", 0.0, 1.0), ("Second", 3.0, 4.0), ("Third", None, 6.0),
+    ]
+    assert [r.metadata["speech_end_observed"] for r in finals] == [True, False, False]
+    assert sum(r.metadata.get("control_event") == "vad_end" for r in results) == 1
+
+
+@pytest.mark.asyncio
+async def test_realtime_asr_empty_final_is_terminal_but_anonymous_turns_can_repeat():
+    backend = _asr_with_events([
+        RealtimeEvent(kind="speech_started", item_id="a"),
+        RealtimeEvent(kind="transcript_completed", item_id="a", text=""),
+        RealtimeEvent(kind="transcript_delta", item_id="a", text="stale"),
+        RealtimeEvent(kind="speech_stopped", item_id="a"),
+        RealtimeEvent(kind="speech_started"),
+        RealtimeEvent(kind="speech_stopped"),
+        RealtimeEvent(kind="transcript_completed", text="Hello"),
+        RealtimeEvent(kind="speech_started"),
+        RealtimeEvent(kind="speech_stopped"),
+        RealtimeEvent(kind="transcript_completed", text="Again"),
+    ])
+    results = [result async for result in backend.receive_results()]
+
+    assert [(r.text, r.start_time, r.end_time) for r in results if r.is_final] == [
+        ("Hello", 4.0, 5.0), ("Again", 7.0, 8.0),
+    ]
+    assert not any(r.text == "stale" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_realtime_asr_item_history_is_bounded_and_reset_on_reconnect(monkeypatch):
+    from multi_modal_ai_studio.backends.asr.openai_realtime import _MAX_TRACKED_ITEMS
+
+    backend = _asr_with_events([
+        RealtimeEvent(kind="transcript_completed", item_id=str(index), text="Hello")
+        for index in range(_MAX_TRACKED_ITEMS + 1)
+    ])
+    results = [result async for result in backend.receive_results()]
+    assert len(results) == _MAX_TRACKED_ITEMS + 1
+    assert len(backend._items) == _MAX_TRACKED_ITEMS
+
+    class ReconnectedClient(_FakeRealtimeClient):
+        async def connect(self):
+            pass
+
+    client = ReconnectedClient([
+        RealtimeEvent(kind="transcript_completed", item_id="1", text="New connection"),
+    ])
+    backend._client = None
+    backend._active_item_id = "stale"
+    monkeypatch.setattr(backend, "_make_client", lambda: client)
+    monkeypatch.setattr(backend, "_timestamp", lambda: 1.0)
+    await backend.start_stream()
+    assert not backend._items
+    assert backend._active_item_id is None
+    results = [result async for result in backend.receive_results()]
+    assert len(results) == 1 and results[0].text == "New connection"
+
+
 def test_realtime_asr_config_round_trip_and_resampling():
     config = SessionConfig.from_dict({
         "asr": {

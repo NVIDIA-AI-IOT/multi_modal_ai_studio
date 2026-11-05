@@ -4,7 +4,9 @@
 
 import logging
 import time
-from typing import AsyncIterator, Dict, Optional
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import AsyncIterator, Optional
 
 import numpy as np
 
@@ -23,6 +25,15 @@ from multi_modal_ai_studio.core.timeline import Timeline
 logger = logging.getLogger(__name__)
 
 _PIPELINE_SAMPLE_RATE = 16000
+_MAX_TRACKED_ITEMS = 256
+
+
+@dataclass
+class _TranscriptionItem:
+    start: Optional[float] = None
+    end: Optional[float] = None
+    partial: str = ""
+    completed: bool = False
 
 
 def _resample_pcm16(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
@@ -64,10 +75,17 @@ class OpenAIRealtimeASRBackend(ASRBackend):
 
         self.timeline = timeline
         self._client: Optional[OpenAIRealtimeClient] = None
-        self._partials: Dict[str, str] = {}
-        self._speech_starts: Dict[str, float] = {}
-        self._active_start: Optional[float] = None
-        self._last_speech_end: Optional[float] = None
+        # Retain completed item IDs briefly so repeated/late server events
+        # cannot reopen VAD ribbons or execute the same conversation turn twice.
+        self._items: OrderedDict[str, _TranscriptionItem] = OrderedDict()
+        self._active_item_id: Optional[str] = None
+
+    def _item(self, item_id: str) -> _TranscriptionItem:
+        if item_id not in self._items:
+            self._items[item_id] = _TranscriptionItem()
+            while len(self._items) > _MAX_TRACKED_ITEMS:
+                self._items.popitem(last=False)
+        return self._items[item_id]
 
     def _timestamp(self) -> float:
         if self.timeline is not None and self.timeline.start_time is not None:
@@ -106,10 +124,8 @@ class OpenAIRealtimeASRBackend(ASRBackend):
     async def start_stream(self) -> None:
         if self._client is not None:
             raise RuntimeError("Stream already started")
-        self._partials.clear()
-        self._speech_starts.clear()
-        self._active_start = None
-        self._last_speech_end = None
+        self._items.clear()
+        self._active_item_id = None
         client = self._make_client()
         try:
             await client.connect()
@@ -144,7 +160,7 @@ class OpenAIRealtimeASRBackend(ASRBackend):
             if event is None:
                 break
             timestamp = self._timestamp()
-            item_id = event.item_id or "active"
+            item_id = event.item_id or self._active_item_id or "active"
             common = {
                 "backend": "openai-realtime",
                 "model": self.config.model,
@@ -154,9 +170,30 @@ class OpenAIRealtimeASRBackend(ASRBackend):
 
             if event.kind == "session_ready":
                 continue
+            if event.kind not in {
+                "speech_started", "speech_stopped", "transcript_delta",
+                "transcript_completed", "error",
+            }:
+                continue
+            if event.kind == "error":
+                # Do not hide provider failures, including duplicate-commit
+                # errors. Client-side deduplication cannot fix server work.
+                yield ASRResult(
+                    text="",
+                    is_final=True,
+                    confidence=0.0,
+                    metadata={**common, "error": event.message or "Realtime ASR error"},
+                )
+                continue
+
+            item = self._item(item_id)
+            if item.completed:
+                continue
             if event.kind == "speech_started":
-                self._active_start = timestamp
-                self._speech_starts[item_id] = timestamp
+                if item.start is not None or item.end is not None:
+                    continue
+                self._active_item_id = item_id
+                item.start = timestamp
                 yield ASRResult(
                     text="",
                     is_final=False,
@@ -165,19 +202,21 @@ class OpenAIRealtimeASRBackend(ASRBackend):
                 )
                 continue
             if event.kind == "speech_stopped":
-                self._last_speech_end = timestamp
+                if item.end is not None:
+                    continue
+                item.end = timestamp
                 yield ASRResult(
                     text="",
                     is_final=False,
-                    start_time=self._speech_starts.get(item_id, self._active_start),
+                    start_time=item.start,
                     end_time=timestamp,
                     metadata={**common, "control_event": "vad_end"},
                 )
                 continue
             if event.kind == "transcript_delta":
                 delta = event.text or ""
-                cumulative = self._partials.get(item_id, "") + delta
-                self._partials[item_id] = cumulative
+                cumulative = item.partial + delta
+                item.partial = cumulative
                 # Keep whitespace-only deltas in the accumulated text but do
                 # not count them as user-visible partial events (or barge-in
                 # evidence) on their own.
@@ -185,31 +224,32 @@ class OpenAIRealtimeASRBackend(ASRBackend):
                     yield ASRResult(
                         text=cumulative,
                         is_final=False,
-                        start_time=self._speech_starts.get(item_id, self._active_start),
+                        start_time=item.start,
                         metadata=common,
                     )
                 continue
             if event.kind == "transcript_completed":
-                transcript = (event.text or self._partials.get(item_id, "")).strip()
-                self._partials.pop(item_id, None)
+                transcript = (event.text or item.partial).strip()
+                item.partial = ""
+                item.completed = True
+                if self._active_item_id == item_id:
+                    self._active_item_id = None
+                if item_id == "active":
+                    # A provider omitting IDs has no stable identity with
+                    # which to distinguish a duplicate from its next turn.
+                    self._items.pop(item_id, None)
                 if transcript:
                     yield ASRResult(
                         text=transcript,
                         is_final=True,
-                        start_time=self._speech_starts.pop(
-                            item_id, self._active_start
-                        ),
-                        end_time=self._last_speech_end or timestamp,
-                        metadata=common,
+                        start_time=item.start,
+                        # Missing/late endpoints must never borrow another
+                        # item's speech end. Receipt time is only a fallback,
+                        # not a measurement of the physical speech boundary.
+                        end_time=item.end if item.end is not None else timestamp,
+                        metadata={**common, "speech_end_observed": item.end is not None},
                     )
                 continue
-            if event.kind == "error":
-                yield ASRResult(
-                    text="",
-                    is_final=True,
-                    confidence=0.0,
-                    metadata={**common, "error": event.message or "Realtime ASR error"},
-                )
 
     async def stop_stream(self) -> None:
         client = self._client
