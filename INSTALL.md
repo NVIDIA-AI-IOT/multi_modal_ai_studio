@@ -7,24 +7,16 @@ and running the WebUI.
 
 Python 3.11 or newer is required.
 
-The fastest way to get started:
+For the published 0.2.0 application, use a virtual environment and the PyPI package. Check [GitHub Releases](https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/releases) for publication status; before publication, install the verified candidate wheel instead.
 
 ```bash
-cd multi_modal_ai_studio
-
-# Run automated setup
-./scripts/setup_dev.sh
-
-# You'll be asked if you want USB audio support:
-# - Answer Y if you plan to use headless mode or local USB devices
-# - Answer N if you only need WebUI with browser audio (simpler)
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install voice-ai-workbench==0.2.0
+voice-ai-workbench --version
 ```
 
-This script will:
-1. ✅ Create virtual environment (`.venv/`)
-2. ✅ Install Python package in development mode
-3. ✅ Install all core dependencies
-4. ⚙️ Optionally install USB audio support (pyaudio - needs portaudio)
+The package includes the UI and presets, but model services run separately. Backend launcher scripts are repository tools, not wheel contents. Follow the [README quick start](README.md#recommended-quick-start-on-jetson) to obtain the matching release checkout. For source development instead, use `./scripts/setup_dev.sh` from a checkout in a separate environment.
 
 ## Run the app
 
@@ -39,14 +31,14 @@ source .venv/bin/activate
 voice-ai-workbench --port 8092
 ```
 
-Open **https://localhost:8092** (accept the self-signed cert). Sessions in `sessions/` (or `--session-dir mock_sessions`) appear in the sidebar.
+Open **https://localhost:8092**, or `https://JETSON_IP:8092` from another computer. Verify the device before accepting its self-signed certificate. Sessions in `sessions/` appear in the sidebar; sample `mock_sessions/` data is available in the source checkout. Stop the foreground app with Ctrl+C before starting it again with a preset.
 
-### Recommended quick start (release candidate)
+### Recommended quick start on Jetson
 
 On Jetson Orin or Thor, use Speaches for Faster-Whisper ASR and Kokoro TTS,
 plus text-only Gemma 4 E2B served by llama.cpp. Both services run in containers
 pulled from GHCR. No separate Ollama installation, Riva setup, or NGC access
-is required:
+is required. Run the launcher commands below from the matching release checkout, with the application virtual environment already active:
 
 ```bash
 ./scripts/speaches_speech.sh start
@@ -54,12 +46,15 @@ is required:
 ./scripts/gemma4_llm.sh start
 ./scripts/gemma4_llm.sh verify
 
-source .venv/bin/activate
+# Return outside the checkout to use the installed application.
+cd ..
 voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 See [Speaches on Jetson](docs/setup_speaches_jetson.md) for prerequisites,
 Realtime ASR, model overrides, and troubleshooting.
+
+The pinned Speaches `0.9.0-rc.3` image is a backend release candidate, independent of the workbench version. Use the REST preset for the public quick start: the published image's Realtime ASR path has known concurrent-load failures on Nano. A local backend correction is not included in the workbench wheel or the pinned public image.
 
 **NVIDIA Open Speech Models reference:** To compare Nemotron 3.5 ASR and
 Magpie TTS directly, follow
@@ -82,23 +77,23 @@ voice-ai-workbench --port 8092 \
 
 If you prefer manual setup:
 
-### 1. System Dependencies (optional, for PyAudio only)
+### 1. Optional Device System Dependencies
 
-**Server USB microphone (ALSA, e.g. EMEET):** On Linux, the app uses `arecord` for ALSA devices. No extra install needed—just select the device in the UI.
+**Server USB audio (ALSA, e.g. EMEET):** On Linux, the app uses `arecord` and `aplay` from `alsa-utils`. Install that system package if these commands are missing, then select the device in the UI. This path does not require the PyAudio extra.
 
-**PyAudio (for `pyaudio:N` device list / headless):** If you install the `[audio]` extra, install PortAudio first:
+**PyAudio (for `pyaudio:N` devices):** If you install the `[audio]` extra, install PortAudio first:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y portaudio19-dev
-# then: pip install -e ".[audio]"
+# then: python -m pip install 'voice-ai-workbench[audio]==0.2.0'
 ```
 
 ### 2. Virtual Environment
 
 > **Note:** If `python3 -m venv` fails with "No module named venv", install the venv package for your Python version:
 > ```bash
-> sudo apt install python3-venv   # or python3.X-venv, e.g. python3.10-venv, python3.12-venv
+> sudo apt install python3-venv   # or the matching package, e.g. python3.12-venv
 > ```
 
 ```bash
@@ -115,8 +110,8 @@ pip install --upgrade pip setuptools wheel
 ### 3. Install Package
 
 ```bash
-# Install in development mode (editable)
-pip install -e .
+# Install the published release (see the publication-status note above).
+python -m pip install voice-ai-workbench==0.2.0
 
 # This installs:
 # - aiohttp (async HTTP)
@@ -133,11 +128,13 @@ Optional features have separate dependency sets. Install only what the target
 system uses:
 
 ```bash
-pip install -e ".[audio]"       # PyAudio devices
-pip install -e ".[camera]"      # server-side USB camera preview
-pip install -e ".[video-input]" # PyAV + Pillow MP4 input for VLMs
-pip install -e ".[webrtc-camera]"
+python -m pip install 'voice-ai-workbench[audio]==0.2.0'         # PyAudio devices
+python -m pip install 'voice-ai-workbench[camera]==0.2.0'        # server USB camera
+python -m pip install 'voice-ai-workbench[video-input]==0.2.0'   # video files for VLMs
+python -m pip install 'voice-ai-workbench[webrtc-camera]==0.2.0'
 ```
+
+For source development in a separate environment, run `python -m pip install -e .` from the repository root, adding extras such as `-e '.[camera]'` as needed.
 
 ## Verify Installation
 
@@ -148,7 +145,15 @@ source .venv/bin/activate
 # Test imports
 python3 -c "import multi_modal_ai_studio; print('✓ Package installed')"
 
-# Test config system
+# Test the installed CLI
+voice-ai-workbench --version
+voice-ai-workbench --help
+```
+
+Optional developer diagnostics, from a source checkout:
+
+```bash
+# Test config system using repository data
 python3 -c "
 from multi_modal_ai_studio.config import SessionConfig
 cfg = SessionConfig.from_yaml('presets/default.yaml')
@@ -158,9 +163,6 @@ print(f'  Required services: {cfg.get_required_services()}')
 
 # Test backends (initialization only)
 python3 scripts/test_backends.py
-
-# Test CLI
-voice-ai-workbench --help
 ```
 
 ## NVIDIA Riva Setup (for voice ASR/TTS)
