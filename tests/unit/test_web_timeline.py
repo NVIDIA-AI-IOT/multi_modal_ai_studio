@@ -203,3 +203,28 @@ def test_timeline_footer_stays_on_one_line_and_truncates_system_identity():
     assert "flex-wrap: nowrap;" in styles
     assert ".timeline-system-info-text" in styles
     assert "text-overflow: ellipsis;" in styles
+
+    identity_rule = styles.split(".timeline-system-info {", 1)[1].split("}", 1)[0]
+    assert "margin-left: auto;" in identity_rule
+    assert "flex: 0 1 auto;" in identity_rule
+    assert "flex: 1 1 auto;" not in identity_rule
+
+
+def test_preset_picker_uses_available_header_space():
+    repository_root = Path(__file__).resolve().parents[2]
+    styles = (
+        repository_root / "src/multi_modal_ai_studio/webui/static/styles.css"
+    ).read_text()
+
+    def rule(selector):
+        return styles.split(f"{selector} {{", 1)[1].split("}", 1)[0]
+
+    # Only the controls wrap on small panels; wide panels use a single row.
+    assert "flex-wrap: wrap;" in rule(".config-header")
+    assert "flex: 1 1 260px;" in rule(".config-header-actions")
+    assert "justify-content: flex-end;" in rule(".config-header-actions")
+    assert "min-width: 0;" in rule(".config-header-actions")
+    assert "flex: 0 1 24rem;" in rule(".preset-picker")
+    assert "width: 100%;" in rule(".preset-select")
+    assert "min-width: 0;" in rule(".preset-select")
+    assert "max-width: 160px;" not in rule(".preset-select")

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """
-Configuration schema for Multi-modal AI Studio.
+Configuration schema for Voice AI Workbench.
 
 This module defines the complete configuration structure using dataclasses.
 All configuration objects support:
@@ -628,7 +628,7 @@ class SessionConfig:
         Returns:
             Shell command string
         """
-        args = ["multi-modal-ai-studio"]
+        args = ["voice-ai-workbench"]
 
         # ASR args
         if self.asr.scheme != "none":

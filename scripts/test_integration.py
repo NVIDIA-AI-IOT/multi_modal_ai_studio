@@ -49,7 +49,7 @@ async def test_llm():
         
         # Test generation
         print("  → Generating response...")
-        prompt = "Say 'Hello from Multi-modal AI Studio!' in one sentence."
+        prompt = "Say 'Hello from Voice AI Workbench!' in one sentence."
         
         tokens = []
         token_count = 0
@@ -100,7 +100,7 @@ async def test_tts():
         
         # Test synthesis
         print("  → Synthesizing speech...")
-        text = "Hello from Multi-modal AI Studio!"
+        text = "Hello from Voice AI Workbench!"
         
         chunks = []
         chunk_count = 0
@@ -162,7 +162,7 @@ async def test_asr():
 async def main():
     """Run all integration tests"""
     print("=" * 70)
-    print("Multi-modal AI Studio - Integration Tests")
+    print("Voice AI Workbench - Integration Tests")
     print("=" * 70)
     print()
     print("Testing with real services:")

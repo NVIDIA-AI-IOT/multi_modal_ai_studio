@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """
-Timeline event system for Multi-modal AI Studio.
+Timeline event system for Voice AI Workbench.
 
 Records all events in the voice AI pipeline for performance analysis
 and visualization. Enables both live rendering and playback from recorded data.

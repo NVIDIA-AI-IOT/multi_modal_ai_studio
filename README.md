@@ -1,10 +1,12 @@
-# Multi-modal AI Studio
+# Voice AI Workbench
 
 ![](./docs/images/screenshot_example_2.png)
 
 **Voice, text, and video conversational AI with session analysis and latency metrics**
 
-Multi-modal AI Studio is a conversational AI interface for building and tuning voice AI systems. It supports NVIDIA Riva, OpenAI, and other backends; records sessions with full config snapshots; and provides a real-time timeline and latency analysis (TTFA, turn-taking) to compare and optimize setups.
+Voice AI Workbench is a conversational AI interface for building and tuning voice AI systems. It supports NVIDIA Riva, OpenAI, and other backends; records sessions with full config snapshots; and provides a real-time timeline and latency analysis (TTFA, turn-taking) to compare and optimize setups.
+
+Formerly **Multi-modal AI Studio (MMAS)**. Starting with 0.2.0, the distribution and recommended CLI are `voice-ai-workbench`. The GitHub repository, Python import `multi_modal_ai_studio`, existing settings/session formats, and legacy `multi-modal-ai-studio` CLI remain compatible. Optional vision input remains supported despite the shorter name. See [upgrading an earlier MMAS installation](docs/development/releasing.md#upgrading-an-earlier-mmas-installation) before replacing an RC wheel.
 
 ## 🌟 Key Features
 
@@ -16,7 +18,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 ### Multi-backend Architecture
 - Speech
-  - **Speaches**: recommended public Jetson quick start with Faster-Whisper and Kokoro (release candidate)
+  - **Speaches**: recommended public Jetson quick start with Faster-Whisper and Kokoro; the pinned speech backend is Speaches 0.9.0-rc.3
   - **NVIDIA Open Speech Models**: Nemotron ASR and Magpie TTS reference services
   - **NVIDIA Riva**: gRPC streaming ASR/TTS (Jetson/ARM64)
   - **OpenAI-compatible REST**: independent transcription and speech services
@@ -40,7 +42,7 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 ## 🏗️ Architecture
 
-![Multi Modal AI Studio Architecture](./docs/images/MMAS-arch.png)
+![Voice AI Workbench architecture (legacy MMAS diagram)](./docs/images/MMAS-arch.png)
 
 ## 🚀 Quick Start
 
@@ -56,9 +58,9 @@ Multi-modal AI Studio is a conversational AI interface for building and tuning v
 
 Python 3.11 or newer is required. Use a virtual environment (e.g. `.venv`) so dependencies stay isolated. Recommended:
 
-Published release candidates provide a wheel and source distribution on [GitHub Releases](https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/releases). The candidate being prepared is `0.2.0rc2`; this does not mean it has been published. Once the candidate is also published to PyPI, install it with `pip install multi-modal-ai-studio==0.2.0rc2`. Do not assume the PyPI version exists until the Release notes confirm publication.
+The `0.2.0` release is being prepared. Check [GitHub Releases](https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio/releases) for publication status and the verified wheel, source distribution, and checksums. After the release notes confirm PyPI publication, install it with `pip install voice-ai-workbench==0.2.0`. Until then, use the source checkout below or a verified candidate wheel; a version in this README is not a claim that it is already available on PyPI.
 
-The installed package includes the Web UI and built-in presets, so `multi-modal-ai-studio --preset speaches-jetson --port 8092` works outside a source checkout when the backend services are already running. The backend launch scripts below are repository tools, not part of the wheel: use a checkout of the matching release tag to start Speaches/Gemma or NVIDIA open-model services. See the [package release/install guide](docs/development/releasing.md#what-is-shipped) for the distinction.
+The installed package includes the Web UI and built-in presets, so `voice-ai-workbench --preset speaches-jetson --port 8092` works outside a source checkout when the backend services are already running. The backend launch scripts below are repository tools, not part of the wheel: use a checkout of the matching release tag to start Speaches/Gemma or NVIDIA open-model services. See the [package release/install guide](docs/development/releasing.md#what-is-shipped) for the distinction.
 
 > **Note:** If `python3 -m venv` fails with "No module named venv", install the venv package for your Python version:
 > ```bash
@@ -70,7 +72,7 @@ The installed package includes the Web UI and built-in presets, so `multi-modal-
 git clone https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio.git
 cd multi_modal_ai_studio
 # For a published release, check out its exact tag instead of moving main:
-# git checkout v0.2.0-rc.2
+# git checkout v0.2.0
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -102,14 +104,14 @@ python -m multi_modal_ai_studio --port 8092
 
 Open **https://localhost:8092** in your browser. For voice (Riva, OpenAI, etc.) and other options, see [INSTALL.md](INSTALL.md).
 
-### Recommended quick start (release candidate)
+### Recommended quick start on Jetson
 
 The recommended Jetson voice path uses one Speaches service for
 Faster-Whisper ASR and Kokoro TTS, plus a text-only Gemma 4 E2B llama.cpp
 service. Both are pulled from GHCR by the bundled launchers, so no separate
 Ollama installation, Riva setup, or NGC access is required. The pinned
-Speaches image is a release candidate while its Jetson packaging is being
-qualified.
+Speaches 0.9.0-rc.3 image is a backend release candidate, independently of
+the Voice AI Workbench application version.
 
 ```bash
 # Start the speech service and download the small English starter models.
@@ -120,8 +122,8 @@ qualified.
 ./scripts/gemma4_llm.sh start
 ./scripts/gemma4_llm.sh verify
 
-# Start MMAS with browser microphone and speaker defaults.
-multi-modal-ai-studio --preset speaches-jetson --port 8092
+# Start Voice AI Workbench with browser microphone and speaker defaults.
+voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 See [Speaches on Jetson](docs/setup_speaches_jetson.md) for prerequisites,
@@ -178,7 +180,7 @@ python -m multi_modal_ai_studio --mode headless \
 | Doc | Description |
 |-----|-------------|
 | [INSTALL.md](INSTALL.md) | Installation, backends, and troubleshooting |
-| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended RC quick start: Faster-Whisper + Gemma 4 E2B + Kokoro |
+| [Speaches on Jetson](docs/setup_speaches_jetson.md) | Recommended quick start: Faster-Whisper + Gemma 4 E2B + Kokoro; pinned Speaches RC backend |
 | [NVIDIA Open Speech Models](docs/setup_open_models_jetson.md) | Nemotron ASR + Magpie TTS reference services |
 | [Speech API Backends](docs/api_backends.md) | OpenAI REST, Realtime, and Riva contracts |
 | [Realtime Speech](docs/realtime_speech.md) | Realtime transcription, response audio, and Speaches reference setup |

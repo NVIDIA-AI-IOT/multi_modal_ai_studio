@@ -2,7 +2,7 @@
 
 ## Overview
 
-Multi-modal AI Studio uses a tiered testing strategy:
+Voice AI Workbench uses a tiered testing strategy:
 
 - **Tier 1 (CI / quick):** Unit tests in `tests/unit/` – no live Riva or LLM. Fast, suitable for every commit and CI.
 - **Tier 2 (pre-commit):** Format (Black), lint (Ruff), and unit tests – run locally before committing.
@@ -74,6 +74,6 @@ record.
 When CI is configured (e.g. GitHub Actions), run:
 
 1. Unit tests: `pytest tests/unit -v -m "not slow"`
-2. Optionally: build wheel, `twine check`, install wheel and run `multi-modal-ai-studio --version` / `--help`.
+2. Optionally: build wheel, `twine check`, install wheel and run `voice-ai-workbench --version` / `--help`.
 
 See the repository’s CI workflow for the exact commands.

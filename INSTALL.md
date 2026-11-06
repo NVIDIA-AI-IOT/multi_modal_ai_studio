@@ -10,7 +10,7 @@ Python 3.11 or newer is required.
 The fastest way to get started:
 
 ```bash
-cd multi-modal-ai-studio
+cd multi_modal_ai_studio
 
 # Run automated setup
 ./scripts/setup_dev.sh
@@ -36,7 +36,7 @@ can also be selected in the Devices tab.
 
 ```bash
 source .venv/bin/activate
-multi-modal-ai-studio --port 8092
+voice-ai-workbench --port 8092
 ```
 
 Open **https://localhost:8092** (accept the self-signed cert). Sessions in `sessions/` (or `--session-dir mock_sessions`) appear in the sidebar.
@@ -55,7 +55,7 @@ is required:
 ./scripts/gemma4_llm.sh verify
 
 source .venv/bin/activate
-multi-modal-ai-studio --preset speaches-jetson --port 8092
+voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 See [Speaches on Jetson](docs/setup_speaches_jetson.md) for prerequisites,
@@ -71,7 +71,7 @@ launcher owns only ASR and TTS; connect a separately managed LLM.
 
 ```bash
 source .venv/bin/activate
-multi-modal-ai-studio --port 8092 \
+voice-ai-workbench --port 8092 \
   --asr-server localhost:50051 \
   --tts-server localhost:50051 \
   --llm-api-base http://localhost:11434/v1 \
@@ -160,7 +160,7 @@ print(f'  Required services: {cfg.get_required_services()}')
 python3 scripts/test_backends.py
 
 # Test CLI
-multi-modal-ai-studio --help
+voice-ai-workbench --help
 ```
 
 ## NVIDIA Riva Setup (for voice ASR/TTS)
@@ -354,7 +354,7 @@ After Riva is running:
 
 ```bash
 source .venv/bin/activate
-multi-modal-ai-studio --port 8092 \
+voice-ai-workbench --port 8092 \
   --asr-server localhost:50051 \
   --tts-server localhost:50051 \
   --llm-api-base http://localhost:11434/v1 \
@@ -476,7 +476,7 @@ docker ps -a
   # In the vllm serve command, use e.g.:
   --port 8010
 
-  # In Multi-modal AI Studio, set LLM API Base to:
+  # In Voice AI Workbench, set LLM API Base to:
   # http://localhost:8010/v1
   ```
 - **Another Docker container** (e.g. leftover vLLM): Stop and remove it if you don't need it:
@@ -606,7 +606,7 @@ To use camera/video input, your backend must support image or video content. Ena
 Every time you work on the project:
 
 ```bash
-cd /home/jetson/multi-modal-ai-studio
+cd /home/jetson/multi_modal_ai_studio
 source .venv/bin/activate
 ```
 
@@ -714,7 +714,7 @@ sudo pip install -e .  # Don't do this!
 
 ```bash
 # 1. Navigate to project
-cd /home/jetson/multi-modal-ai-studio
+cd /home/jetson/multi_modal_ai_studio
 
 # 2. Activate venv
 source .venv/bin/activate

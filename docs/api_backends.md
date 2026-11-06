@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Speech API backends
 
-Multi-modal AI Studio can mix speech providers independently. The classic voice
+Voice AI Workbench can mix speech providers independently. The classic voice
 pipeline is:
 
 ```text
@@ -24,7 +24,7 @@ speech service first, then connect any suitably sized OpenAI-compatible LLM.
 
 | Path | Positioning | ASR | TTS | Setup |
 | --- | --- | --- | --- | --- |
-| Speaches | Recommended quick start (release candidate) | Faster-Whisper REST or Realtime chunk transcription | Kokoro REST | [Speaches on Jetson](setup_speaches_jetson.md) |
+| Speaches | Recommended quick start; pinned Speaches 0.9.0-rc.3 backend | Faster-Whisper REST or Realtime chunk transcription | Kokoro REST | [Speaches on Jetson](setup_speaches_jetson.md) |
 | NVIDIA Open Speech Models | NVIDIA model reference and performance evaluation | Nemotron 3.5 REST or native Realtime | Magpie REST or Realtime adapter | [NVIDIA open speech models](setup_open_models_jetson.md) |
 | NVIDIA Riva | Existing Riva deployments and gRPC comparison | Native gRPC streaming | Native gRPC streaming | [Riva setup](setup_riva.md) |
 

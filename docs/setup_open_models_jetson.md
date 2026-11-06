@@ -149,7 +149,7 @@ For native Realtime Nemotron ASR and the Magpie Realtime adapter:
 
 ```bash
 source .venv/bin/activate
-multi-modal-ai-studio \
+voice-ai-workbench \
   --preset nvidia-open-models-realtime-speech-jetson \
   --port 8092
 ```
@@ -157,7 +157,7 @@ multi-modal-ai-studio \
 For the portable REST speech baseline:
 
 ```bash
-multi-modal-ai-studio \
+voice-ai-workbench \
   --preset nvidia-open-models-speech-jetson \
   --port 8092
 ```

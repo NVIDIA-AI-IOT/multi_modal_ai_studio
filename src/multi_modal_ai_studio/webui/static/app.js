@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Multi-modal AI Studio - WebUI App
+// Voice AI Workbench - WebUI App
 // Handles session loading, display, and timeline visualization
 // Mic waveform debug: in console set localStorage.setItem('micWaveformDebug','1') and reload to see [MicWaveform] logs
 if (typeof localStorage !== 'undefined' && localStorage.getItem('micWaveformDebug')) window._micWaveformDebug = true;

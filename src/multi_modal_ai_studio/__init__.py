@@ -1,13 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """
-Multi-modal AI Studio
+Voice AI Workbench
 
 A voice/text/video AI interface with advanced performance analysis.
 """
 
-__version__ = "0.2.0rc2"
-__author__ = "Multi-modal AI Studio Contributors"
+__version__ = "0.2.0"
+__author__ = "Voice AI Workbench Contributors"
 __license__ = "Apache-2.0"
 
 from multi_modal_ai_studio.config.schema import (

@@ -1,4 +1,4 @@
-# Build once, test outside the checkout, then explicitly promote distributions.
+# Build once, test outside the checkout, then promote the same distributions.
 name: Build and Test
 
 on:
@@ -27,6 +27,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      publish_pypi: ${{ steps.release-policy.outputs.publish_pypi }}
     steps:
       - name: Validate manual publishing opt-in
         if: github.event_name == 'workflow_dispatch' && inputs.publish_to != 'none'
@@ -73,25 +75,20 @@ jobs:
           pytest services/openai_speech/tests -v
 
       - name: Verify release tag and package version
+        id: release-policy
         if: github.event_name == 'release' || inputs.publish_to == 'pypi'
         env:
+          EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.ref }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
           DESTINATION: ${{ inputs.publish_to }}
+          PYPI_ENABLED: ${{ vars.PYPI_PUBLISH_ENABLED }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          python - <<'PY'
-          import os
-          import tomllib
-          from packaging.version import Version
-          with open('pyproject.toml', 'rb') as source:
-              version = tomllib.load(source)['project']['version']
-          tag = os.environ['RELEASE_TAG']
-          assert tag.startswith('v'), 'Use a v-prefixed release tag, not a branch or SHA'
-          assert Version(tag[1:]) == Version(version), (tag, version)
-          PY
+          python scripts/release_policy.py >> "$GITHUB_OUTPUT"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
           if [ "$DESTINATION" = pypi ]; then
             gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' | grep -qx false
-            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
           fi
 
       - name: Install build tools
@@ -150,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/multi-modal-ai-studio
+      url: https://test.pypi.org/p/voice-ai-workbench
     permissions:
       id-token: write
     steps:
@@ -163,12 +160,19 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
 
   pypi:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'pypi'
-    needs: build
+    # RCs need explicit manual promotion. Stable releases use the exact same
+    # build as GitHub assets, and wait for successful asset attachment first.
+    if: >-
+      always() && !cancelled() && needs.build.result == 'success' &&
+      needs.build.outputs.publish_pypi == 'true' &&
+      (needs.github-release.result == 'success' ||
+       (needs.github-release.result == 'skipped' &&
+        github.event_name == 'workflow_dispatch' && inputs.publish_to == 'pypi'))
+    needs: [build, github-release]
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/multi-modal-ai-studio
+      url: https://pypi.org/p/voice-ai-workbench
     permissions:
       id-token: write
     steps:

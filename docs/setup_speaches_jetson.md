@@ -3,9 +3,9 @@ SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All 
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Speaches on Jetson: recommended quick start (release candidate)
+# Speaches on Jetson: recommended quick start
 
-This is the recommended path for bringing up a local MMAS voice assistant on
+This is the recommended path for bringing up a local Voice AI Workbench assistant on
 Jetson. One Speaches container provides OpenAI-compatible Faster-Whisper ASR
 and Kokoro TTS. The LLM remains an independent OpenAI-compatible Chat
 Completions service, so it can be sized for the device and changed without
@@ -20,8 +20,9 @@ browser microphone
 ```
 
 No Riva installation, NGC entitlement, or hosted API key is required. The
-Jetson Speaches image is currently a release candidate, not a production or GA
-claim.
+Jetson Speaches image is pinned to 0.9.0-rc.3, a backend release candidate.
+This backend version is independent of the Voice AI Workbench application
+version; neither preset name implies production qualification of the backend.
 
 ## Supported images
 
@@ -148,10 +149,19 @@ For a smaller-memory fallback, serve Qwen 2.5 0.5B with any compatible server
 and point the preset at it. Gemma 4 E2B is the default because it matches the
 Jetson AI Lab path and the pipeline used for this project's Orin Nano tests.
 
-## 4. Start MMAS
+## 4. Start Voice AI Workbench
+
+The UI distinguishes the presets by transport rather than by the backend's release status:
+
+| UI preset name | Preset ID | ASR | TTS |
+| --- | --- | --- | --- |
+| Speaches on Jetson — REST | `speaches-jetson` | REST, local energy endpointing | REST Kokoro |
+| Speaches on Jetson — Realtime ASR | `speaches-realtime-asr-jetson` | WebSocket, Speaches server VAD | REST Kokoro |
+
+Both use the same pinned Speaches 0.9.0-rc.3 backend and independent Gemma LLM. Existing preset IDs and saved configurations are unchanged. The Realtime ASR preset does not enable Realtime TTS or a speech-to-speech model.
 
 ```bash
-multi-modal-ai-studio --preset speaches-jetson --port 8092
+voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
 Open `https://localhost:8092`, or `https://JETSON_IP:8092` from another machine,
@@ -161,7 +171,7 @@ The recommended preset uses the portable REST ASR and REST TTS path.
 To exercise Realtime transcription instead, use:
 
 ```bash
-multi-modal-ai-studio --preset speaches-realtime-asr-jetson --port 8092
+voice-ai-workbench --preset speaches-realtime-asr-jetson --port 8092
 ```
 
 Speaches currently performs VAD and sends completed speech chunks to

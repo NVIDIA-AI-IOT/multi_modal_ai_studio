@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """
-Session management for Multi-modal AI Studio.
+Session management for Voice AI Workbench.
 
 A Session represents a complete conversational interaction with:
 - Configuration snapshot (ASR, LLM, TTS, device settings)

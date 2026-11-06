@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-License-Identifier: Apache-2.0
 
-name: "Speaches Realtime ASR on Jetson (RC)"
-description: "Realtime chunked Faster-Whisper ASR + text-only Gemma 4 E2B + REST Kokoro TTS"
+name: "Speaches on Jetson — Realtime ASR"
+description: "Realtime chunked Faster-Whisper ASR + text-only Gemma 4 E2B + REST Kokoro TTS. Speech backend: Speaches 0.9.0-rc.3 (release candidate)."
 app_version: "0.1.0"
 
 asr:
