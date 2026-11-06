@@ -6,9 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-11-06
 
-This release consolidates the changes developed in rc1 and rc2 below. Publication and the final release date remain pending.
+This release consolidates the changes developed in rc1 and rc2 below.
 
 ### Highlights
 - Run a local voice assistant on Jetson Orin Nano, AGX Orin, or Thor with independent ASR, LLM, and TTS services; the recommended path uses Speaches and text-only Gemma 4 E2B.
@@ -20,8 +20,9 @@ This release consolidates the changes developed in rc1 and rc2 below. Publicatio
 - Rename the product to **Voice AI Workbench** and its Python distribution to `voice-ai-workbench` before the first PyPI release. Add the `voice-ai-workbench` CLI while retaining `multi-modal-ai-studio`, the Python import, existing configuration locations, and session formats for compatibility. The GitHub repository is unchanged.
 - Include canonical presets in wheel/sdist builds and expose them in the CLI and Web UI outside a source checkout, with writable local overrides kept out of site-packages.
 - Verify clean wheel installation, preset APIs, and static UI assets in CI; attach wheel, sdist, dependency manifests, and checksums to GitHub Releases.
-- Publish the same verified wheel/sdist to GitHub and, when explicitly enabled, PyPI for stable releases via approval-gated Trusted Publishing. RC releases do not automatically publish to PyPI; TestPyPI and manual promotion remain explicit operations.
+- Publish the same verified wheel/sdist to GitHub and, when explicitly enabled, PyPI for stable releases via environment-scoped Trusted Publishing. Required reviewers are a separate GitHub environment setting. RC releases do not automatically publish to PyPI; TestPyPI and manual promotion remain explicit operations.
 - Record final rc2 wheel qualification on Orin Nano and Thor, including audible interruption recovery and saved-session replay/download checks.
+- Update to the official Riva client 2.28.0 and protobuf 7.36.2, with dependency-floor, serialization, and recursion-limit regression tests plus a real streaming-ASR compatibility check.
 
 ### Fixed
 - Discard a cancelled, unheard response's pending TTL measurement without overwriting a later turn's origin or an already completed band.
