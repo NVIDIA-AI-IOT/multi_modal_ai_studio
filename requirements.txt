@@ -17,7 +17,7 @@ dnspython==2.9.0
 frozenlist==1.8.0
 google-crc32c==1.9.0
 grpcio==1.85.0
-grpcio-tools==1.81.1
+grpcio-tools==1.85.0
 h11==0.16.0 ; sys_platform != 'emscripten'
 httpcore2==2.16.0 ; sys_platform != 'emscripten'
 httpx2==2.16.0
@@ -28,12 +28,12 @@ jiter==0.18.0
 multidict==7.2.1
 numpy==2.4.6 ; python_full_version < '3.12'
 numpy==2.5.4 ; python_full_version >= '3.12'
-nvidia-riva-client==2.27.0
+nvidia-riva-client==2.28.0
 openai==3.37.0
 opencv-python-headless==5.0.0.93
 pillow==13.0.0
 propcache==0.5.4
-protobuf==6.33.5
+protobuf==7.36.2
 psutil==7.2.2
 pyaudio==0.2.14
 pycparser==3.12 ; implementation_name != 'PyPy'
