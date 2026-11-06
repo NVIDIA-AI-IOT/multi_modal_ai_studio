@@ -60,14 +60,17 @@ models are intentionally small:
 | Voice | `af_heart` | English Kokoro voice |
 | LLM | `unsloth/gemma-4-E2B-it-GGUF:Q4_K_S` | Text-only Gemma 4 E2B with optional MTP |
 
-## 1. Install MMAS
+## 1. Install Voice AI Workbench and obtain the launchers
 
-From the repository root:
+Install the published application as described in the [README](../README.md#1-install-the-application). The wheel includes the UI and presets; the launcher scripts are separate repository tools. After 0.2.0 is published, obtain the matching checkout:
 
 ```bash
-./scripts/setup_dev.sh
-source .venv/bin/activate
+git clone --branch v0.2.0 --depth 1 \
+  https://github.com/NVIDIA-AI-IOT/multi_modal_ai_studio.git
+cd multi_modal_ai_studio
 ```
+
+Keep the application's virtual environment active. Before publication, use the verified candidate wheel and its matching source revision instead. For source development, the editable-install alternative is documented in the [README](../README.md#development-installation).
 
 Docker and the NVIDIA container runtime must already be available. Check the
 host before downloading anything:
@@ -160,7 +163,10 @@ The UI distinguishes the presets by transport rather than by the backend's relea
 
 Both use the same pinned Speaches 0.9.0-rc.3 backend and independent Gemma LLM. Existing preset IDs and saved configurations are unchanged. The Realtime ASR preset does not enable Realtime TTS or a speech-to-speech model.
 
+Return outside the source checkout to run the pip-installed application:
+
 ```bash
+cd ..
 voice-ai-workbench --preset speaches-jetson --port 8092
 ```
 
@@ -168,7 +174,9 @@ Open `https://localhost:8092`, or `https://JETSON_IP:8092` from another machine,
 accept the local development certificate, and allow browser microphone access.
 The recommended preset uses the portable REST ASR and REST TTS path.
 
-To exercise Realtime transcription instead, use:
+**Known Realtime limitation:** the pinned public rc3 image failed concurrent Nano conversation testing with ASR errors and disrupted TTS delivery. A corrected local backend passed follow-up tests but has not been published; the application wheel does not contain that backend patch. Use REST for the public quick start. See the [qualification record](releases/v0.2.0-qualification.md#realtime-concurrent-load-follow-up--november-5-2026) for the exact evidence and boundaries.
+
+To evaluate Realtime transcription with that limitation in mind, stop the app and use:
 
 ```bash
 voice-ai-workbench --preset speaches-realtime-asr-jetson --port 8092
@@ -179,7 +187,7 @@ Faster-Whisper. This provides a Realtime WebSocket session and speech-boundary
 events, but it is not model-native token-by-token Faster-Whisper decoding and
 may not provide partial transcript deltas. The REST preset is therefore the
 clearest baseline; use the Realtime preset to evaluate endpointing and
-barge-in.
+barge-in only with the backend limitation above understood.
 
 ## API endpoints
 
@@ -200,7 +208,7 @@ proxy before broader exposure.
 ## Model and port overrides
 
 Override launcher defaults with environment variables. Keep the preset model
-IDs and API port in sync:
+IDs and API port in sync. Run launcher commands from the repository root:
 
 ```bash
 ASR_MODEL=Systran/faster-whisper-small \
