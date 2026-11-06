@@ -2,7 +2,9 @@
 
 **Give your robot a voice. Compare models, shape its character, and measure the conversation.**
 
-![Voice AI Workbench conversation and latency timeline](https://raw.githubusercontent.com/NVIDIA-AI-IOT/multi_modal_ai_studio/main/docs/images/screenshot_example_2.png)
+![Voice AI Workbench showing a recorded NVIDIA Speech conversation and its latency timeline](https://raw.githubusercontent.com/NVIDIA-AI-IOT/multi_modal_ai_studio/main/docs/images/voice-ai-workbench-nvidia-speech.png)
+
+Recorded on Jetson AGX Thor: Nemotron 3.5 ASR → Gemma 4 E2B → Magpie TTS, using the NVIDIA Speech — Realtime preset. The waveforms, partial transcripts, latency bands, and CPU/GPU traces come from a real session; the internal hostname and IP addresses are omitted from this public screenshot. These timings illustrate one conversation, not a controlled benchmark.
 
 Voice AI Workbench is a developer tool for building and tuning conversational AI. Connect independent speech recognition (ASR), language model (LLM), and text-to-speech (TTS) services; adjust the LLM system prompt; and compare recognition, response latency, playback, and interruptions on a shared timeline. Optional camera input lets you evaluate vision-language models too.
 

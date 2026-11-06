@@ -29,7 +29,9 @@ dependencies = [
     "aiohttp>=3.14.5",
     "psutil>=5.9.0",
     "grpcio>=1.56.2",
-    "nvidia-riva-client>=2.14.0",
+    "nvidia-riva-client>=2.28.0",
+    # Keep the patched JSON recursion checks even in already-populated environments.
+    "protobuf>=7.36.2",
     "openai>=1.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.2.2",
