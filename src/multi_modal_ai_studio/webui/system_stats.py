@@ -3,11 +3,11 @@
 """
 CPU/GPU stats for timeline system lane.
 
-The voice pipeline samples at 10 Hz during a live session, sends each sample
-over the voice WebSocket (type=system_stats), and appends it to the session.
-Orin reads the nvgpu sysfs load counter directly; Thor/desktop uses a
-persistent nvidia-smi stream. A one-shot nvidia-smi process is only the final,
-lower-rate fallback.
+The voice pipeline records at a target 50 Hz using Orin's sysfs counter or a
+single persistent nvidia-smi process on Thor/desktop. Live WebSocket delivery
+is aggregated to 10 Hz. GPU driver counters may refresh less often than they
+are polled; this is not a guarantee of 20 ms hardware measurement resolution.
+One-shot nvidia-smi is only the final, lower-rate fallback.
 """
 
 import os
@@ -24,10 +24,11 @@ try:
 except ImportError:
     psutil = None
 
-# Cache updated by the 10 Hz voice-pipeline sampler.
+# Cache updated by the voice-pipeline sampler.
 _cache: Dict[str, Any] = {}
 _cache_time: float = 0.0
 _nvidia_smi_gpu_supported: Optional[bool] = None
+SYSTEM_STATS_RECORD_INTERVAL_MS = 20
 SYSTEM_STATS_INTERVAL_MS = 100
 GPU_SUBPROCESS_FALLBACK_INTERVAL_MS = 250
 STREAM_SAMPLE_MIN_INTERVAL_RATIO = 0.8
@@ -186,6 +187,44 @@ def next_periodic_deadline(deadline: float, now: float, interval: float) -> floa
     return next_deadline
 
 
+class SystemStatsLiveBucket:
+    """Aggregate recorded samples without sending the browser at record rate.
+
+    CPU retains mean-utilization semantics; GPU retains the peak in each live
+    bucket. The timestamp is an actual measurement time, never a fabricated
+    upsampled grid. Call ``flush`` when the source ends to retain its last peak.
+    """
+
+    def __init__(self, interval: float = SYSTEM_STATS_INTERVAL_MS / 1000.0):
+        if interval <= 0:
+            raise ValueError("interval must be positive")
+        self.interval = interval
+        self.deadline = None
+        self.samples = []
+
+    def add(self, timestamp, cpu, gpu, now):
+        self.samples.append((timestamp, cpu, gpu))
+        if self.deadline is None:
+            self.deadline = now + self.interval
+        if now < self.deadline:
+            return None
+        self.deadline = next_periodic_deadline(self.deadline, now, self.interval)
+        return self.flush()
+
+    def flush(self):
+        if not self.samples:
+            return None
+        cpu_values = [float(cpu) for _, cpu, _ in self.samples if cpu is not None]
+        gpu_values = [float(gpu) for _, _, gpu in self.samples if gpu is not None]
+        result = (
+            self.samples[-1][0],
+            round(sum(cpu_values) / len(cpu_values), 1) if cpu_values else None,
+            round(max(gpu_values), 1) if gpu_values else None,
+        )
+        self.samples.clear()
+        return result
+
+
 def read_nvidia_smi_gpu_percent_after_stream_failure() -> Optional[float]:
     """Retry one one-shot nvidia-smi query after its stream has failed."""
     global _nvidia_smi_gpu_supported
@@ -193,7 +232,7 @@ def read_nvidia_smi_gpu_percent_after_stream_failure() -> Optional[float]:
     return _read_nvidia_smi_gpu_percent()
 
 
-def nvidia_smi_loop_command(interval_ms: int = SYSTEM_STATS_INTERVAL_MS) -> list[str]:
+def nvidia_smi_loop_command(interval_ms: int = SYSTEM_STATS_RECORD_INTERVAL_MS) -> list[str]:
     """Build the persistent GPU-utilization stream command."""
     interval = max(20, int(interval_ms))
     return [

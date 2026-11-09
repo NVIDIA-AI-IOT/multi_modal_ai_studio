@@ -40,12 +40,12 @@ def test_nvidia_smi_numeric_utilization_is_used_and_cached(monkeypatch):
     assert calls[0][1]["timeout"] == 2
 
 
-def test_nvidia_smi_loop_uses_100ms_stream_and_parses_samples():
+def test_nvidia_smi_loop_uses_20ms_stream_and_parses_samples():
     assert system_stats.nvidia_smi_loop_command() == [
         "nvidia-smi",
         "--query-gpu=utilization.gpu",
         "--format=csv,noheader,nounits",
-        "--loop-ms=100",
+        "--loop-ms=20",
     ]
     assert system_stats.parse_nvidia_smi_gpu_percent(b"37\n") == 37.0
     assert system_stats.parse_nvidia_smi_gpu_percent("12 %") == 12.0
@@ -83,9 +83,54 @@ def test_periodic_deadline_stays_on_grid_and_skips_missed_slots():
         system_stats.next_periodic_deadline(10.0, 10.0, 0.0)
 
 
-def test_telemetry_intervals_are_10hz_and_4hz_fallback():
+def test_telemetry_intervals_are_50hz_record_10hz_live_and_4hz_fallback():
+    assert system_stats.SYSTEM_STATS_RECORD_INTERVAL_MS == 20
     assert system_stats.SYSTEM_STATS_INTERVAL_MS == 100
     assert system_stats.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS == 250
+
+
+def test_live_bucket_keeps_gpu_peak_and_averages_cpu():
+    bucket = system_stats.SystemStatsLiveBucket()
+    assert bucket.add(1.00, 10, 0, 10.00) is None
+    assert bucket.add(1.02, 20, 80, 10.02) is None
+    assert bucket.add(1.04, 30, 0, 10.04) is None
+    assert bucket.add(1.10, 40, 0, 10.10) == (1.10, 25.0, 80.0)
+    assert bucket.flush() is None
+
+
+def test_live_bucket_50hz_input_does_not_become_50hz_websocket_delivery():
+    bucket = system_stats.SystemStatsLiveBucket()
+    delivered = []
+    for index in range(501):
+        now = index / 50.0
+        result = bucket.add(now, 15, 2, now)
+        if result is not None:
+            delivered.append(result)
+    assert 98 <= len(delivered) <= 100
+    assert all(b[0] - a[0] >= 0.08 for a, b in zip(delivered, delivered[1:]))
+
+
+def test_live_bucket_flush_retains_final_short_peak_and_unknown_gpu():
+    bucket = system_stats.SystemStatsLiveBucket()
+    bucket.add(1.0, None, None, 1.0)
+    assert bucket.flush() == (1.0, None, None)
+    bucket.add(1.02, 20, 90, 1.02)
+    assert bucket.flush() == (1.02, 20.0, 90.0)
+
+
+def test_live_bucket_skips_missed_windows_without_fabricated_samples():
+    bucket = system_stats.SystemStatsLiveBucket()
+    bucket.add(1.0, 20, 10, 10.0)
+    assert bucket.add(2.0, 40, 50, 11.0) == (2.0, 30.0, 50.0)
+    assert bucket.flush() is None
+    assert bucket.add(2.001, 40, 0, 11.001) is None
+    with pytest.raises(ValueError):
+        system_stats.SystemStatsLiveBucket(interval=0)
+
+
+def test_nvidia_smi_custom_cadence_clamps_at_20ms():
+    assert system_stats.nvidia_smi_loop_command(1)[-1] == "--loop-ms=20"
+    assert system_stats.nvidia_smi_loop_command(100)[-1] == "--loop-ms=100"
 
 
 @pytest.mark.parametrize(
