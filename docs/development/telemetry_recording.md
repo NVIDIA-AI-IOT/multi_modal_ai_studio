@@ -80,24 +80,44 @@ work, and that closing the session leaves no nvidia-smi child process behind.
 python scripts/inspect_session_telemetry.py sessions/SESSION_ID.json
 ```
 
-## Screenshots
+## Screenshots under inference load
 
-### Historical Orin Nano experiment
+A new Chromium capture on November 9, 2026 feeds a fixed WAV through the
+browser microphone path into Nemotron Realtime ASR, Cosmos3 Edge, and Magpie
+Realtime TTS on Thor. Model inference and browser audio scheduling are real;
+the microphone is a file-backed Chromium test device, not a physical device.
+This is a telemetry/UI check, not an accuracy, latency, USB, or audibility
+qualification. The VLM was text-only for this run.
 
-The following user-provided screenshot was recovered from the October 14, 2026
-experiment. It shows the live timeline on Orin Nano Super, including a response
-after a long idle interval. This is the aggregated live display, not a
-recorded-session view. The image alone cannot establish the saved sample rate;
-do not use its graph shape as proof of 50 Hz recording or GPU counter resolution.
+The 36.9-second recording contains 1,842 detailed observations (49.73 Hz;
+median 20.07 ms, p95 20.13 ms, maximum gap 66.23 ms). The browser received
+369 live telemetry messages, reopened all saved observations, and reported
+no page errors.
 
-![Historical Orin Nano live timeline](../images/telemetry-50hz/orin-nano-experiment-20261014.png)
+### Actual MMAS recorded-session timeline, zoomed 10×
 
-### Current Thor recorded-session review
+The image is an unmodified canvas screenshot from recorded-session review.
+It focuses on ASR finalization, LLM generation, and the start of TTS. The UI
+smooths the area chart and fits the full 0–100% utilization scale into one
+lane, so individual observations are easier to inspect in the data plot below.
 
-The following Chromium capture reopens the 15-second idle transport test from
-November 9, 2026. Browser-state inspection confirmed that the replay loaded all
-747 saved observations (49.83 Hz). The nearly flat resource lane is expected:
-this was an idle test with no microphone input or model inference. It verifies
-saved-session loading, not conversation quality or ASR GPU visibility.
+![Actual MMAS inference timeline at 10x zoom](../images/telemetry-50hz/thor-inference-review-zoom-20261109.png)
 
-![Thor recorded-session review of the 747-sample idle test](../images/telemetry-50hz/thor-recorded-review-20261109.png)
+### Two-second view of the saved observations
+
+This is a separate diagnostic plot derived from the same session JSON, not
+an additional UI mode. The 6.0–8.0 second window contains 99 actual saved
+observations, with a median interval of 20.07 ms. Dots and bottom-row ticks
+show the observations; no points are upsampled or invented. The dashed trace
+illustrates 100 ms CPU-mean/GPU-peak aggregation of the same data (20 buckets),
+not a separately timed 10 Hz benchmark or the exact phase of live delivery.
+
+CPU variations are visible at the denser cadence. GPU counters often repeat
+across adjacent polls; higher-rate persistence does not make them independent
+20 ms hardware measurements.
+
+![Actual saved telemetry with sample markers and 100 ms aggregation](../images/telemetry-50hz/thor-inference-sample-detail-20261109.png)
+
+The telemetry-only [window data](../images/telemetry-50hz/thor-inference-window-20261109.json)
+is included for inspection. Historical and idle screenshots were removed from
+this PR because they do not visually demonstrate the recording density.
