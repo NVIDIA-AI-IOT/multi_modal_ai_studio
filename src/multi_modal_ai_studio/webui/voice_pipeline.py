@@ -3079,9 +3079,10 @@ async def _run_voice_pipeline(
     system_stats_task: Optional[asyncio.Task] = None
 
     async def _system_stats_loop() -> None:
-        """Send CPU/GPU samples from the cheapest supported 10 Hz source."""
+        """Record at target 50 Hz; aggregate browser delivery to 10 Hz."""
         loop = asyncio.get_event_loop()
         interval = system_stats_module.SYSTEM_STATS_INTERVAL_MS / 1000.0
+        record_interval = system_stats_module.SYSTEM_STATS_RECORD_INTERVAL_MS / 1000.0
         fallback_interval = (
             system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS / 1000.0
         )
@@ -3116,13 +3117,25 @@ async def _run_voice_pipeline(
             await asyncio.sleep(max(0.0, deadline - loop.time()))
 
         async def run_sysfs_sampler(path: Path) -> bool:
-            """Sample Orin in a thread so inference cannot starve telemetry."""
+            """Record Orin in a thread so inference cannot starve telemetry."""
             samples: queue.Queue = queue.Queue(maxsize=3600)
             sampler_stop = threading.Event()
             unreadable = threading.Event()
 
             def collect() -> None:
                 deadline = time.monotonic()
+                live_bucket = system_stats_module.SystemStatsLiveBucket(interval)
+
+                def enqueue(sample) -> None:
+                    if sample is None:
+                        return
+                    try:
+                        samples.put_nowait(sample)
+                    except queue.Full:
+                        logger.warning(
+                            "Dropping live telemetry delivery; persisted samples remain complete"
+                        )
+
                 try:
                     while not sampler_stop.is_set() and not stopped.is_set():
                         gpu = system_stats_module.read_jetson_sysfs_gpu_percent(
@@ -3143,30 +3156,25 @@ async def _run_voice_pipeline(
                         })
                         # Persist from the sampler thread. WebSocket delivery
                         # may lag under unified-memory pressure, but replay data
-                        # must retain the real 10 Hz measurement grid.
+                        # must retain the real 50 Hz measurement grid.
                         session.system_stats.append({
                             "t": timestamp,
                             "cpu": cpu,
                             "gpu": gpu,
                         })
-                        try:
-                            samples.put_nowait((timestamp, cpu, gpu))
-                        except queue.Full:
-                            logger.warning(
-                                "Dropping live telemetry delivery; persisted "
-                                "samples remain complete"
-                            )
+                        enqueue(live_bucket.add(timestamp, cpu, gpu, time.monotonic()))
                         deadline = (
                             system_stats_module.next_periodic_deadline(
                                 deadline,
                                 time.monotonic(),
-                                interval,
+                                record_interval,
                             )
                         )
                         sampler_stop.wait(
                             max(0.0, deadline - time.monotonic())
                         )
                 finally:
+                    enqueue(live_bucket.flush())
                     try:
                         samples.put_nowait(None)
                     except queue.Full:
@@ -3199,8 +3207,9 @@ async def _run_voice_pipeline(
             """Consume one persistent nvidia-smi process; return False on failure."""
             process: Optional[asyncio.subprocess.Process] = None
             stream_failed = False
-            last_stream_emit = 0.0
+            last_record_emit = 0.0
             pending_gpu_peak: Optional[float] = None
+            live_bucket = system_stats_module.SystemStatsLiveBucket(interval)
             try:
                 try:
                     process = await asyncio.create_subprocess_exec(
@@ -3211,7 +3220,7 @@ async def _run_voice_pipeline(
                     while not stopped.is_set():
                         line = await asyncio.wait_for(
                             process.stdout.readline(),
-                            timeout=max(0.5, interval * 4),
+                            timeout=max(0.5, record_interval * 4),
                         )
                         if not line:
                             stream_failed = True
@@ -3230,16 +3239,25 @@ async def _run_voice_pipeline(
                         # Coalesce such bursts while retaining their GPU peak.
                         if not system_stats_module.stream_sample_is_due(
                             now,
-                            last_stream_emit,
-                            interval,
+                            last_record_emit,
+                            record_interval,
                         ):
                             continue
-                        await emit_sample(
-                            system_stats_module.read_cpu_percent_nonblocking(),
-                            pending_gpu_peak,
-                        )
+                        timestamp = time.time() - session.timeline.start_time
+                        cpu = system_stats_module.read_cpu_percent_nonblocking()
+                        system_stats_module.set_system_stats_cache({
+                            "cpu_percent": cpu,
+                            "gpu_percent": pending_gpu_peak,
+                        })
+                        session.system_stats.append({
+                            "t": timestamp, "cpu": cpu, "gpu": pending_gpu_peak,
+                        })
+                        live_sample = live_bucket.add(timestamp, cpu, pending_gpu_peak, now)
+                        if live_sample is not None:
+                            live_t, live_cpu, live_gpu = live_sample
+                            await emit_sample(live_cpu, live_gpu, timestamp=live_t, record=False)
                         pending_gpu_peak = None
-                        last_stream_emit = now
+                        last_record_emit = now
                 except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
                     logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
                     stream_failed = True
@@ -3251,6 +3269,10 @@ async def _run_voice_pipeline(
                     except asyncio.TimeoutError:
                         process.kill()
                         await process.wait()
+                remaining = live_bucket.flush()
+                if remaining is not None:
+                    live_t, live_cpu, live_gpu = remaining
+                    await emit_sample(live_cpu, live_gpu, timestamp=live_t, record=False)
             return not stream_failed
 
         async def run_subprocess_fallback() -> None:
@@ -3283,12 +3305,12 @@ async def _run_voice_pipeline(
 
         sysfs_path = system_stats_module.find_jetson_sysfs_gpu_load_path()
         if sysfs_path is not None:
-            logger.info("GPU telemetry source: sysfs %s at 10 Hz", sysfs_path)
+            logger.info("GPU telemetry source: sysfs %s at 50 Hz record / 10 Hz live", sysfs_path)
             completed = await run_sysfs_sampler(sysfs_path)
             if completed or stopped.is_set():
                 return
 
-        logger.info("GPU telemetry source: persistent nvidia-smi at 10 Hz")
+        logger.info("GPU telemetry source: persistent nvidia-smi at 50 Hz record / 10 Hz live")
         completed = await run_nvidia_smi_stream()
         if completed or stopped.is_set():
             return
