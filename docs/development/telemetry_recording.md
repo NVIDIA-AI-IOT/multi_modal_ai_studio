@@ -79,3 +79,25 @@ work, and that closing the session leaves no nvidia-smi child process behind.
 ```bash
 python scripts/inspect_session_telemetry.py sessions/SESSION_ID.json
 ```
+
+## Screenshots
+
+### Historical Orin Nano experiment
+
+The following user-provided screenshot was recovered from the October 14, 2026
+experiment. It shows the live timeline on Orin Nano Super, including a response
+after a long idle interval. This is the aggregated live display, not a
+recorded-session view. The image alone cannot establish the saved sample rate;
+do not use its graph shape as proof of 50 Hz recording or GPU counter resolution.
+
+![Historical Orin Nano live timeline](../images/telemetry-50hz/orin-nano-experiment-20261014.png)
+
+### Current Thor recorded-session review
+
+The following Chromium capture reopens the 15-second idle transport test from
+November 9, 2026. Browser-state inspection confirmed that the replay loaded all
+747 saved observations (49.83 Hz). The nearly flat resource lane is expected:
+this was an idle test with no microphone input or model inference. It verifies
+saved-session loading, not conversation quality or ASR GPU visibility.
+
+![Thor recorded-session review of the 747-sample idle test](../images/telemetry-50hz/thor-recorded-review-20261109.png)
