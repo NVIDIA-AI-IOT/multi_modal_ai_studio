@@ -61,7 +61,10 @@ from multi_modal_ai_studio.config.schema import (
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.core.session import Session, validate_session_thumbnail
 from multi_modal_ai_studio.core.timeline import Lane
+from multi_modal_ai_studio.core.full_duplex import derive_full_duplex
+from multi_modal_ai_studio.core.speech_timing import browser_timing_event
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
+from multi_modal_ai_studio.webui.telemetry import stream_system_stats
 from multi_modal_ai_studio.backends.base import ASRResult
 from multi_modal_ai_studio.backends.asr.energy_vad import EnergyVADObserver
 from multi_modal_ai_studio.backends.asr.openai_realtime import OpenAIRealtimeASRBackend
@@ -71,6 +74,7 @@ from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend
 from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
 from multi_modal_ai_studio.backends.tts.openai_realtime import OpenAIRealtimeTTSBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend
+from multi_modal_ai_studio.backends.realtime.duplex import AcousticTurn, AudioTextMatcher, ContinuousPCMInput
 from multi_modal_ai_studio.backends.realtime import (
     DISABLE_TURN_DETECTION,
     REALTIME_SAMPLE_RATE,
@@ -593,6 +597,16 @@ async def _run_realtime_loop(
     Same device handling as classic (browser or server mic, browser or server speaker).
     """
     asr_config = config.asr
+    native_duplex = asr_config.realtime_api_style == "nemo-voicechat"
+    native_input = ContinuousPCMInput()
+    native_activity = AcousticTurn()
+    native_transcript_done = False
+    native_user_text = ""
+    native_utterance_id = 0
+    native_audio_matcher = AudioTextMatcher()
+    native_audio_region_id = 0
+    native_input_id = 0
+    native_capture_vad = EnergyVADObserver(replace(asr_config, speech_timeout_ms=240), sample_rate=24000)
     llm_config = config.llm
     tts_config = config.tts
     url = (asr_config.realtime_url or asr_config.api_base or "").strip()
@@ -655,6 +669,12 @@ async def _run_realtime_loop(
     async def send_event(event_dict: Dict[str, Any]) -> None:
         try:
             await ws.send_str(json.dumps({"type": "event", "event": event_dict}))
+            if event_dict.get("event_type") in {
+                "asr_final", "realtime_output_partial", "realtime_output_final", "tts_complete",
+                "duplex_input_start", "duplex_input_end", "duplex_audio_playback", "duplex_audio_link", "session_stop",
+            }:
+                snapshot = derive_full_duplex({"config": config.to_dict(), "timeline": session.timeline.to_dict()})
+                await ws.send_str(json.dumps({"type": "duplex_state", "full_duplex": snapshot}))
         except Exception as e:
             logger.warning("Realtime send event failed: %s", e)
 
@@ -710,20 +730,73 @@ async def _run_realtime_loop(
     # Cursor for TTS amplitude timestamps: anchored to tts_start so saved-session purple spans tts_start..tts_complete
     tts_amplitude_cursor: Optional[float] = None
     realtime_barge_in = BargeInController(
-        enabled=getattr(config.app, "barge_in_enabled", False),
+        enabled=not native_duplex and getattr(config.app, "barge_in_enabled", False),
         trigger=getattr(config.app, "barge_in_trigger", "final"),
         partial_count=getattr(config.app, "barge_in_partial_count", 3),
     )
     realtime_barge_in.begin_turn()
     realtime_tts_cancelled = False
 
+    def output_transcript_data(text: str) -> Dict[str, Any]:
+        data = {"text": text}
+        if native_duplex:
+            data["utterance_id"] = native_utterance_id
+        return data
+
+    async def record_audio_link(match) -> None:
+        if match is None:
+            return
+        uid, rid = match
+        ts = time.time() - session.timeline.start_time
+        data = {"utterance_id": uid, "audio_region_id": rid, "association": "unique_pending_region"}
+        session.timeline.add_event("duplex_audio_link", Lane.TTS, timestamp=ts, data=data)
+        await send_event({"event_type": "duplex_audio_link", "lane": "tts", "timestamp": ts, "data": data})
+
+    async def finish_audio_turn() -> None:
+        nonlocal tts_start_sent, tts_first_audio_sent, tts_amplitude_cursor
+        if not tts_start_sent:
+            return
+        ts = time.time() - session.timeline.start_time
+        data = {"text": last_output_transcript}
+        session.timeline.add_event("tts_complete", Lane.TTS, data=data)
+        await send_event({"event_type": "tts_complete", "lane": "tts", "data": data, "timestamp": ts})
+        tts_start_sent = False
+        tts_first_audio_sent = False
+        tts_amplitude_cursor = None
+
+    async def native_input_pump() -> None:
+        nonlocal native_input_id
+        await pipeline_live.wait()
+        await session_ready.wait()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time()
+        while not stopped.is_set():
+            pcm = native_input.take()
+            frame_end = time.time() - session.timeline.start_time
+            boundaries = []
+            # Keep transport at 80 ms, but observe boundaries at 20 ms resolution.
+            for offset in range(0, len(pcm), 960):
+                chunk = pcm[offset:offset+960]
+                chunk_end = frame_end - (len(pcm)-offset-len(chunk))/48000
+                boundaries.extend(native_capture_vad.observe(chunk, chunk_end_time=chunk_end))
+            for boundary in boundaries:
+                if boundary.event_type == "vad_start":
+                    native_input_id += 1
+                kind = "duplex_input_start" if boundary.event_type == "vad_start" else "duplex_input_end"
+                data = {"input_id": native_input_id, "source": "model_input_energy", "observed_at": boundary.observed_at, "resolution_ms": 20}
+                session.timeline.add_event(kind, Lane.SPEECH, timestamp=boundary.timestamp, data=data)
+                await send_event({"event_type": kind, "lane": "speech", "timestamp": boundary.timestamp, "data": data})
+            await client.send_audio(pcm)
+            deadline = max(deadline + 0.08, loop.time())
+            await asyncio.sleep(max(0, deadline - loop.time()))
+
     async def realtime_event_consumer() -> None:
         nonlocal server_speaker_proc, tts_start_sent, tts_first_audio_sent
         nonlocal last_output_transcript, tts_amplitude_cursor
-        nonlocal realtime_tts_cancelled
+        nonlocal realtime_tts_cancelled, native_transcript_done, native_user_text, native_utterance_id, native_audio_region_id
         try:
             async for ev in client.events():
-                if ev is None or stopped.is_set():
+                if ev is None or (stopped.is_set() and not native_duplex):
                     break
                 if ev.kind == "error":
                     logger.warning("Realtime error: %s", ev.message)
@@ -737,7 +810,16 @@ async def _run_realtime_loop(
                     session.timeline.add_event("realtime_session_ready", Lane.SYSTEM, data={})
                     await send_event({"event_type": "realtime_session_ready", "lane": "system", "data": {}, "timestamp": ts})
                     continue
+                if native_duplex and ev.kind in ("speech_started", "speech_stopped"):
+                    if session.timeline.start_time is not None:
+                        ts = time.time() - session.timeline.start_time
+                        kind = "vad_start" if ev.kind == "speech_started" else "user_speech_end"
+                        session.timeline.add_event(kind, Lane.SPEECH, data={})
+                        await send_event({"event_type": kind, "lane": "speech", "data": {}, "timestamp": ts})
                 if ev.kind == "transcript_delta":
+                    if native_duplex and ev.text:
+                        native_user_text += ev.text
+                        ev.text = native_user_text
                     if ev.text and session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
                         session.timeline.add_event("asr_partial", Lane.SPEECH, data={"text": ev.text, "confidence": 1.0})
@@ -754,6 +836,8 @@ async def _run_realtime_loop(
                                 server_speaker_proc = None
                             logger.info("[barge_in] Realtime Server speaker stopped by partial ASR")
                 if ev.kind == "transcript_completed":
+                    if native_duplex:
+                        native_user_text = ""
                     if ev.text and session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
                         session.timeline.add_event("asr_final", Lane.SPEECH, data={"text": ev.text, "confidence": 1.0})
@@ -770,24 +854,43 @@ async def _run_realtime_loop(
                                 server_speaker_proc = None
                             logger.info("[barge_in] Realtime Server speaker stopped by final ASR")
                 if ev.kind == "output_transcript_delta":
+                    if native_duplex and ev.text:
+                        if native_transcript_done or native_utterance_id == 0:
+                            native_utterance_id += 1
+                            match = native_audio_matcher.text_started(native_utterance_id, audio_active=tts_start_sent)
+                            await record_audio_link(match)
+                            if tts_start_sent and match is None:
+                                session.timeline.add_event("duplex_audio_unaligned", Lane.TTS, data={"utterance_id": native_utterance_id, "reason": "continuous_audio_overlap"})
+                            last_output_transcript = ""
+                            native_transcript_done = False
+                        last_output_transcript += ev.text
                     if ev.text and session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
-                        session.timeline.add_event("realtime_output_partial", Lane.TTS, data={"text": ev.text})
-                        await send_event({"event_type": "realtime_output_partial", "lane": "tts", "data": {"text": ev.text}, "timestamp": ts})
+                        session.timeline.add_event("realtime_output_partial", Lane.TTS, data=output_transcript_data(last_output_transcript if native_duplex else ev.text))
+                        await send_event({"event_type": "realtime_output_partial", "lane": "tts", "data": output_transcript_data(last_output_transcript if native_duplex else ev.text), "timestamp": ts})
                         logger.info("[tts] realtime_output_partial @ %.2fs: %r", ts, (ev.text[:100] + "..." if len(ev.text) > 100 else ev.text))
                 if ev.kind == "output_transcript_completed":
                     if ev.text and session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
                         last_output_transcript = ev.text
-                        session.timeline.add_event("realtime_output_final", Lane.TTS, data={"text": ev.text})
-                        await send_event({"event_type": "realtime_output_final", "lane": "tts", "data": {"text": ev.text}, "timestamp": ts})
+                        native_transcript_done = True
+                        session.timeline.add_event("realtime_output_final", Lane.TTS, data=output_transcript_data(ev.text))
+                        await send_event({"event_type": "realtime_output_final", "lane": "tts", "data": output_transcript_data(ev.text), "timestamp": ts})
                         logger.info("[tts] realtime_output_final @ %.2fs: %r", ts, ev.text)
                 if ev.kind == "audio" and ev.audio:
                     _write_debug_response_audio(ev.audio)
                     amplitude_segments: List[Dict[str, Any]] = []
                     if session.timeline.start_time is not None:
                         ts = time.time() - session.timeline.start_time
-                        if not tts_start_sent:
+                        active, ended = native_activity.observe(ev.audio, time.monotonic()) if native_duplex else (True, False)
+                        if ended:
+                            await finish_audio_turn()
+                        onset_id = None
+                        if not tts_start_sent and active:
+                            if native_duplex:
+                                native_audio_region_id += 1
+                                onset_id = native_audio_region_id
+                                await record_audio_link(native_audio_matcher.audio_started(onset_id))
                             tts_start_sent = True
                             realtime_tts_cancelled = False
                             realtime_barge_in.start_tts()
@@ -798,7 +901,7 @@ async def _run_realtime_loop(
                             # Anchor TTS amplitude to tts_start so saved-session purple spans tts_start..tts_complete
                             tts_amplitude_cursor = ts
                         amp = _pcm_rms_to_amplitude(ev.audio)
-                        if amp > 0 and not tts_first_audio_sent:
+                        if active and tts_start_sent and amp > 0 and not tts_first_audio_sent:
                             tts_first_audio_sent = True
                             session.timeline.add_event("tts_first_audio", Lane.TTS)
                             await send_event({"event_type": "tts_first_audio", "lane": "tts", "data": {}, "timestamp": ts})
@@ -854,10 +957,15 @@ async def _run_realtime_loop(
                         "sample_rate": ev.sample_rate,
                         "is_final": False,
                     }
+                    if native_duplex and session.timeline.start_time is not None and onset_id is not None:
+                        payload["duplex_audio_onset"] = {"audio_region_id": onset_id}
                     if amplitude_segments:
                         payload["amplitude_segments"] = amplitude_segments
                     await ws.send_str(json.dumps(payload))
                 if ev.kind == "response_done":
+                    if native_duplex:
+                        await finish_audio_turn()
+                        continue
                     complete_data: Dict[str, Any] = {"text": last_output_transcript}
                     if realtime_tts_cancelled:
                         complete_data.update({"cancelled": True, "reason": "barge_in"})
@@ -890,9 +998,32 @@ async def _run_realtime_loop(
                 if msg.type == web.WSMsgType.TEXT:
                     try:
                         obj = json.loads(msg.data)
+                        if obj.get("type") == "client_timeline_event" and session.timeline.start_time is not None:
+                            observation = browser_timing_event(obj.get("event"), time.time()-session.timeline.start_time)
+                            if observation:
+                                session.timeline.add_event(observation["event_type"], Lane.AUDIO, timestamp=observation["timestamp"], data=observation["data"])
+                                snapshot = derive_full_duplex({"config":config.to_dict(), "timeline":session.timeline.to_dict()})
+                                await ws.send_str(json.dumps({"type":"duplex_state", "full_duplex":snapshot}))
+                        if obj.get("type") == "duplex_audio_playback" and native_duplex and session.timeline.start_time is not None:
+                            t = obj.get("timestamp")
+                            uid = obj.get("utterance_id")
+                            rid = obj.get("audio_region_id")
+                            elapsed = time.time()-session.timeline.start_time
+                            valid_uid = isinstance(uid, int) and not isinstance(uid, bool) and 0 < uid <= native_utterance_id
+                            valid_rid = isinstance(rid, int) and not isinstance(rid, bool) and 0 < rid <= native_audio_region_id
+                            if isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t) and 0 <= t <= elapsed + 5 and (valid_uid or valid_rid) and obj.get("audible") is True:
+                                data = {"source": "browser_schedule", "audible": True}
+                                if valid_uid:
+                                    data["utterance_id"] = uid
+                                if valid_rid:
+                                    data["audio_region_id"] = rid
+                                session.timeline.add_event("duplex_audio_playback", Lane.TTS, timestamp=t, data=data)
+                                await send_event({"event_type": "duplex_audio_playback", "lane": "tts", "timestamp": t, "data": data})
                         if obj.get("type") == "mic_mute":
                             mic_muted = obj.get("muted", True)
-                            if mic_muted and session.timeline.start_time is not None:
+                            if native_duplex and mic_muted:
+                                native_input.clear()
+                            if not native_duplex and mic_muted and session.timeline.start_time is not None:
                                 # Inject ~0.5s silence so Realtime endpoints any partial (24 kHz)
                                 _silence_05s_24k = int(24000 * 2 * 0.5)
                                 try:
@@ -902,7 +1033,10 @@ async def _run_realtime_loop(
                             logger.debug("PTT Realtime: mic_muted=%s", mic_muted)
                         if obj.get("type") == "start_session":
                             if not pipeline_live.is_set():
+                                if native_duplex:
+                                    await asyncio.wait_for(session_ready.wait(), timeout=30)
                                 session.start()
+                                await ws.send_str(json.dumps({"type": "session_started", "session_id": session.session_id}))
                                 await send_event({"event_type": "session_start", "lane": "system", "data": {}, "timestamp": 0})
                                 pipeline_live.set()
                                 logger.info(
@@ -910,10 +1044,13 @@ async def _run_realtime_loop(
                                     "server" if use_server_mic else "browser",
                                 )
                         if obj.get("type") == "stop":
+                            if session.timeline.start_time is not None:
+                                session.timeline.add_event("session_stop", Lane.SYSTEM)
                             for key, attr in [("system_stats", "system_stats"), ("tts_playback_segments", "tts_playback_segments"), ("audio_amplitude_history", "audio_amplitude_history"), ("ttl_bands", "ttl_bands")]:
                                 val = obj.get(key)
                                 if isinstance(val, list) and hasattr(session, attr):
-                                    setattr(session, attr, val)
+                                    if key != "system_stats" or not session.system_stats:
+                                        setattr(session, attr, val)
                             if getattr(session, "ttl_bands", None):
                                 session.apply_ttl_bands()
                             session.thumbnail = validate_session_thumbnail(obj.get("thumbnail"))
@@ -935,7 +1072,9 @@ async def _run_realtime_loop(
                         if not pcm_24:
                             continue
                         _write_debug_pcm(pcm_24)
-                        if not mic_muted:
+                        if native_duplex:
+                            native_input.feed(bytes(len(pcm_24)) if mic_muted else pcm_24)
+                        elif not mic_muted:
                             await client.send_audio(pcm_24)
                         now = time.time() - session.timeline.start_time
                         if now - last_amplitude_time >= amplitude_interval:
@@ -1033,7 +1172,9 @@ async def _run_realtime_loop(
                 if not pcm_24:
                     continue
                 _write_debug_pcm(pcm_24)
-                if not mic_muted:
+                if native_duplex:
+                    native_input.feed(bytes(len(pcm_24)) if mic_muted else pcm_24)
+                elif not mic_muted:
                     await client.send_audio(pcm_24)
                 if session.timeline.start_time is not None:
                     now = time.time() - session.timeline.start_time
@@ -1061,6 +1202,13 @@ async def _run_realtime_loop(
                     except Exception:
                         pass
 
+    async def start_realtime_telemetry() -> None:
+        await pipeline_live.wait()
+        if not stopped.is_set():
+            await stream_system_stats(ws, session, stopped)
+
+    telemetry_task = asyncio.create_task(start_realtime_telemetry())
+    input_task = asyncio.create_task(native_input_pump()) if native_duplex else None
     event_task = asyncio.create_task(realtime_event_consumer())
     recv_task = asyncio.create_task(receive_loop())
     server_capture_task: Optional[asyncio.Task] = None
@@ -1084,6 +1232,18 @@ async def _run_realtime_loop(
     if server_capture_task is not None:
         server_capture_task.cancel()
     recv_task.cancel()
+    telemetry_task.cancel()
+    await asyncio.gather(telemetry_task, return_exceptions=True)
+    if input_task is not None:
+        input_task.cancel()
+        await asyncio.gather(input_task, return_exceptions=True)
+    if native_duplex:
+        try:
+            await client.finish_session()
+            await asyncio.wait_for(asyncio.shield(event_task), timeout=2)
+        except Exception as e:
+            logger.warning("VoiceChat session drain: %s", e)
+        await finish_audio_turn()
     event_task.cancel()
     try:
         await client.disconnect()
@@ -1102,6 +1262,8 @@ async def _run_realtime_loop(
         await event_task
     except asyncio.CancelledError:
         pass
+    except Exception as e:
+        logger.warning("Realtime event consumer ended: %s", e)
 
     if _debug_pcm_file_holder:
         try:
@@ -1756,6 +1918,10 @@ async def _run_voice_pipeline(
                             return
                         if obj.get("type") == "client_timeline_event":
                             event = obj.get("event")
+                            if session.timeline.start_time is not None:
+                                observation = browser_timing_event(event, time.time()-session.timeline.start_time)
+                                if observation:
+                                    session.timeline.add_event(observation["event_type"], Lane.AUDIO, timestamp=observation["timestamp"], data=observation["data"])
                             if isinstance(event, dict) and event.get("event_type") == "tts_playback_stopped":
                                 try:
                                     event_ts = float(event.get("timestamp"))
@@ -3078,224 +3244,6 @@ async def _run_voice_pipeline(
     turn_task: Optional[asyncio.Task] = None
     system_stats_task: Optional[asyncio.Task] = None
 
-    async def _system_stats_loop() -> None:
-        """Send CPU/GPU samples from the cheapest supported 10 Hz source."""
-        loop = asyncio.get_event_loop()
-        interval = system_stats_module.SYSTEM_STATS_INTERVAL_MS / 1000.0
-        fallback_interval = (
-            system_stats_module.GPU_SUBPROCESS_FALLBACK_INTERVAL_MS / 1000.0
-        )
-
-        async def emit_sample(
-            cpu: Optional[float],
-            gpu: Optional[float],
-            *,
-            timestamp: Optional[float] = None,
-            record: bool = True,
-        ) -> None:
-            t = (
-                time.time() - session.timeline.start_time
-                if timestamp is None
-                else timestamp
-            )
-            stats = {"cpu_percent": cpu, "gpu_percent": gpu}
-            system_stats_module.set_system_stats_cache(stats)
-            if record:
-                session.system_stats.append({"t": t, "cpu": cpu, "gpu": gpu})
-            try:
-                await ws.send_str(json.dumps({
-                    "type": "system_stats",
-                    "timestamp": t,
-                    "cpu_percent": cpu,
-                    "gpu_percent": gpu,
-                }))
-            except Exception as e:
-                logger.debug("Send system_stats failed: %s", e)
-
-        async def sleep_until(deadline: float) -> None:
-            await asyncio.sleep(max(0.0, deadline - loop.time()))
-
-        async def run_sysfs_sampler(path: Path) -> bool:
-            """Sample Orin in a thread so inference cannot starve telemetry."""
-            samples: queue.Queue = queue.Queue(maxsize=3600)
-            sampler_stop = threading.Event()
-            unreadable = threading.Event()
-
-            def collect() -> None:
-                deadline = time.monotonic()
-                try:
-                    while not sampler_stop.is_set() and not stopped.is_set():
-                        gpu = system_stats_module.read_jetson_sysfs_gpu_percent(
-                            path
-                        )
-                        if gpu is None:
-                            unreadable.set()
-                            logger.warning(
-                                "Jetson GPU load counter became unreadable: %s",
-                                path,
-                            )
-                            break
-                        cpu = system_stats_module.read_cpu_percent_nonblocking()
-                        timestamp = time.time() - session.timeline.start_time
-                        system_stats_module.set_system_stats_cache({
-                            "cpu_percent": cpu,
-                            "gpu_percent": gpu,
-                        })
-                        # Persist from the sampler thread. WebSocket delivery
-                        # may lag under unified-memory pressure, but replay data
-                        # must retain the real 10 Hz measurement grid.
-                        session.system_stats.append({
-                            "t": timestamp,
-                            "cpu": cpu,
-                            "gpu": gpu,
-                        })
-                        try:
-                            samples.put_nowait((timestamp, cpu, gpu))
-                        except queue.Full:
-                            logger.warning(
-                                "Dropping live telemetry delivery; persisted "
-                                "samples remain complete"
-                            )
-                        deadline = (
-                            system_stats_module.next_periodic_deadline(
-                                deadline,
-                                time.monotonic(),
-                                interval,
-                            )
-                        )
-                        sampler_stop.wait(
-                            max(0.0, deadline - time.monotonic())
-                        )
-                finally:
-                    try:
-                        samples.put_nowait(None)
-                    except queue.Full:
-                        pass
-
-            sampler = threading.Thread(
-                target=collect,
-                name="mmas-system-stats",
-                daemon=True,
-            )
-            sampler.start()
-            try:
-                while not stopped.is_set():
-                    sample = await loop.run_in_executor(None, samples.get)
-                    if sample is None:
-                        break
-                    timestamp, cpu, gpu = sample
-                    await emit_sample(
-                        cpu,
-                        gpu,
-                        timestamp=timestamp,
-                        record=False,
-                    )
-            finally:
-                sampler_stop.set()
-                sampler.join(timeout=1.0)
-            return not unreadable.is_set()
-
-        async def run_nvidia_smi_stream() -> bool:
-            """Consume one persistent nvidia-smi process; return False on failure."""
-            process: Optional[asyncio.subprocess.Process] = None
-            stream_failed = False
-            last_stream_emit = 0.0
-            pending_gpu_peak: Optional[float] = None
-            try:
-                try:
-                    process = await asyncio.create_subprocess_exec(
-                        *system_stats_module.nvidia_smi_loop_command(),
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.DEVNULL,
-                    )
-                    while not stopped.is_set():
-                        line = await asyncio.wait_for(
-                            process.stdout.readline(),
-                            timeout=max(0.5, interval * 4),
-                        )
-                        if not line:
-                            stream_failed = True
-                            break
-                        gpu = system_stats_module.parse_nvidia_smi_gpu_percent(line)
-                        if gpu is None:
-                            stream_failed = True
-                            break
-                        pending_gpu_peak = (
-                            gpu
-                            if pending_gpu_peak is None
-                            else max(pending_gpu_peak, gpu)
-                        )
-                        now = loop.time()
-                        # Some drivers flush several buffered lines together.
-                        # Coalesce such bursts while retaining their GPU peak.
-                        if not system_stats_module.stream_sample_is_due(
-                            now,
-                            last_stream_emit,
-                            interval,
-                        ):
-                            continue
-                        await emit_sample(
-                            system_stats_module.read_cpu_percent_nonblocking(),
-                            pending_gpu_peak,
-                        )
-                        pending_gpu_peak = None
-                        last_stream_emit = now
-                except (FileNotFoundError, OSError, asyncio.TimeoutError) as e:
-                    logger.debug("Persistent nvidia-smi telemetry unavailable: %s", e)
-                    stream_failed = True
-            finally:
-                if process is not None and process.returncode is None:
-                    process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        process.kill()
-                        await process.wait()
-            return not stream_failed
-
-        async def run_subprocess_fallback() -> None:
-            """Keep CPU at 10 Hz and query GPU at 4 Hz without timer drift."""
-            emit_deadline = loop.time()
-            gpu_deadline = loop.time()
-            while not stopped.is_set():
-                now = loop.time()
-                gpu_sample = None
-                if now >= gpu_deadline:
-                    gpu_sample = await loop.run_in_executor(
-                        None,
-                        system_stats_module.read_nvidia_smi_gpu_percent_after_stream_failure,
-                    )
-                    gpu_deadline = system_stats_module.next_periodic_deadline(
-                        gpu_deadline,
-                        loop.time(),
-                        fallback_interval,
-                    )
-                await emit_sample(
-                    system_stats_module.read_cpu_percent_nonblocking(),
-                    gpu_sample,
-                )
-                emit_deadline = system_stats_module.next_periodic_deadline(
-                    emit_deadline,
-                    loop.time(),
-                    interval,
-                )
-                await sleep_until(emit_deadline)
-
-        sysfs_path = system_stats_module.find_jetson_sysfs_gpu_load_path()
-        if sysfs_path is not None:
-            logger.info("GPU telemetry source: sysfs %s at 10 Hz", sysfs_path)
-            completed = await run_sysfs_sampler(sysfs_path)
-            if completed or stopped.is_set():
-                return
-
-        logger.info("GPU telemetry source: persistent nvidia-smi at 10 Hz")
-        completed = await run_nvidia_smi_stream()
-        if completed or stopped.is_set():
-            return
-
-        logger.warning("GPU telemetry source: one-shot nvidia-smi fallback at 4 Hz")
-        await run_subprocess_fallback()
-
     # Wait for client to send start_session (both mics); then start ASR stream and turn executor
     await asyncio.wait(
         [asyncio.create_task(stopped.wait()), asyncio.create_task(pipeline_live.wait())],
@@ -3310,7 +3258,7 @@ async def _run_voice_pipeline(
             pending_asr_audio.clear()
         asr_task = asyncio.create_task(asr_consumer())
         turn_task = asyncio.create_task(turn_executor())
-        system_stats_task = asyncio.create_task(_system_stats_loop())
+        system_stats_task = asyncio.create_task(stream_system_stats(ws, session, stopped))
         await stopped.wait()
     tts_was_active_at_stop = barge_in.tts_active
     cancel_synthesis = getattr(tts, "cancel_synthesis", None)

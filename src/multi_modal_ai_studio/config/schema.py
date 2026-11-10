@@ -60,7 +60,7 @@ class ASRConfig:
     # OpenAI GA is the default. ``openai-beta`` is an explicit compatibility
     # mode for providers such as Speaches 0.8.x that implement the preview wire
     # schema while retaining the same provider-neutral backend boundary.
-    realtime_api_style: Literal["openai-ga", "openai-beta"] = "openai-ga"
+    realtime_api_style: Literal["openai-ga", "openai-beta", "nemo-voicechat"] = "openai-ga"
 
     def validate(self) -> List[str]:
         """Validate configuration consistency.
@@ -89,7 +89,7 @@ class ASRConfig:
                     warnings.append("Unsupported Realtime transport")
                 if self.realtime_session_type not in ("full", "transcription"):
                     warnings.append("Unsupported Realtime session type")
-                if self.realtime_api_style not in ("openai-ga", "openai-beta"):
+                if self.realtime_api_style not in ("openai-ga", "openai-beta", "nemo-voicechat"):
                     warnings.append("Unsupported Realtime API wire format")
 
         elif self.scheme == "azure":

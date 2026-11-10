@@ -9,6 +9,7 @@ if (typeof localStorage !== 'undefined' && localStorage.getItem('micWaveformDebu
 // ===== State Management =====
 let asrModelDiscovery = null;
 let asrModelDiscoverySequence = 0;
+const asrRealtimeLanguageDiscovery = new Map();
 const asrModelDownloads = new Set();
 const state = {
     sessions: [],
@@ -297,6 +298,7 @@ function renderSessionList() {
 
     container.innerHTML = state.sessions.map((session, index) => {
         const metrics = session.metrics || {};
+        const duplex = session.full_duplex;
         const isActive = state.selectedSession?.session_id === session.session_id;
         const sid = escapeHtml(session.session_id);
         const safeName = escapeHtml(session.name);
@@ -314,10 +316,10 @@ function renderSessionList() {
                             <div class="session-item-meta">
                                 <span>${formatSessionDateOnly(session.created_at)}</span>
                                 <span>${formatDate(session.created_at)}</span>
-                                <span>${metrics.total_turns || 0} turns</span>
+                                <span>${duplex ? duplexSpeechCount(duplex) : (metrics.total_turns || 0) + " turns"}</span>
                             </div>
                             <div class="session-item-metrics">
-                                <span class="metric-badge">TTL: ${formatLatency(metrics.avg_ttl)}</span>
+                                <span class="metric-badge">${duplex ? "Full duplex" : "TTL: " + formatLatency(metrics.avg_ttl)}</span>
                                 <span class="metric-badge">${session.timeline_event_count ?? session.timeline?.length ?? 0} events</span>
                             </div>
                         </div>
@@ -633,6 +635,7 @@ function renderConfig() {
         }
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'asr' && (currentConfig.asr.backend === 'openai-rest' || currentConfig.asr.scheme === 'openai-rest')) setTimeout(() => fetchOpenAIASRModels(), 0);
+        if (tab === 'asr' && (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime')) setTimeout(() => refreshASRLanguageMetadata(), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'openai-rest' || currentConfig.tts.scheme === 'openai-rest')) setTimeout(() => fetchOpenAITTSMetadata(), 0);
         if (tab === 'device') {
@@ -1386,6 +1389,90 @@ function renderOpenAIASRVADSettings(config, readonly = false) {
     `;
 }
 
+function getASRLanguageInfo(config) {
+    const helper = window.MMASAsrLanguages;
+    let models = [];
+    let result;
+    if ((config.backend || config.scheme) === 'openai-realtime') {
+        result = asrRealtimeLanguageDiscovery.get(helper.identity(config));
+        models = result && result.models || [];
+    } else if (asrModelDiscovery && asrModelDiscovery.apiBase === helper.apiBase(config)
+            && asrModelDiscovery.apiKey === (config.api_key || '')) {
+        models = asrModelDiscovery.data.models || [];
+    }
+    const model = models.find(item => item.id === config.model);
+    return {...helper.languageInfo(config, model && model.languages), pending:!!(result && result.pending), failed:!!(result && result.failed)};
+}
+
+function renderASRLanguageSetting(config, readonly = false) {
+    if ((config.backend || config.scheme) === 'riva') return '';
+    const language = config.language || 'en-US';
+    if (readonly) return '<div class="form-group" id="asr-language-field"><label>Language</label>' +
+        '<input type="text" readonly disabled value="' + escapeHtml(language) + '"><div class="input-hint">Recorded session setting</div></div>';
+    const info = getASRLanguageInfo(config);
+    const choice = window.MMASAsrLanguages.choices(info.languages, language);
+    const locked = state.sessionState !== 'setup' ? ' disabled' : '';
+    const label = code => {
+        try { return new Intl.DisplayNames(['en'], {type:'language'}).of(code); }
+        catch (_) { return code; }
+    };
+    let field;
+    let hint;
+    if (info.languages.length) {
+        const placeholder = choice.supported ? '' : '<option value="" selected disabled>Select a supported language (configured: ' + escapeHtml(language) + ')</option>';
+        field = '<select id="asr-language-select"' + locked + ' onchange="updateConfig(\'asr\', \'language\', this.value)">' + placeholder +
+            choice.options.map(option => '<option value="' + escapeHtml(option.value) + '"' + (option.selected ? ' selected' : '') + '>' + escapeHtml(label(option.code)) + '</option>').join('') + '</select>';
+        hint = info.source === 'provider' ? 'Supported languages reported by the selected model.' :
+            'English-only public VoiceChat 11B model profile. The server does not advertise supported languages.';
+        if (!choice.supported) hint += ' The configured language is unsupported; select a supported language before starting.';
+    } else {
+        field = '<input type="text" id="asr-language-code"' + locked + ' value="' + escapeHtml(language) + '" onchange="updateConfig(\'asr\', \'language\', this.value)">';
+        hint = 'Supported languages are not reported by this model. Enter a language code; support is unverified.';
+    }
+    if (info.pending) hint = 'Checking provider language metadata… ' + (info.source === 'model_profile' ? 'Using the public VoiceChat 11B English profile meanwhile.' : '');
+    if (info.failed) hint = 'Could not retrieve language metadata. ' + hint;
+    return '<div class="form-group" id="asr-language-field"><label>Language</label>' + field +
+        '<div class="input-hint">' + escapeHtml(hint) + '</div>' +
+        '<button type="button" class="btn-secondary"' + locked + ' onclick="refreshASRLanguageMetadata(true)">Refresh languages</button></div>';
+}
+
+function refreshASRLanguageSetting() {
+    const field = document.getElementById('asr-language-field');
+    if (field && state.isLiveSession && state.activeConfigTab === 'asr') {
+        field.outerHTML = renderASRLanguageSetting(currentConfig.asr);
+    }
+}
+
+async function refreshASRLanguageMetadata(force = false) {
+    const config = currentConfig.asr || {};
+    if ((config.backend || config.scheme) === 'openai-rest') {
+        if (force) await fetchOpenAIASRModels();
+        refreshASRLanguageSetting();
+        return;
+    }
+    if ((config.backend || config.scheme) !== 'openai-realtime' || !state.isLiveSession) return;
+    const helper = window.MMASAsrLanguages;
+    const identity = helper.identity(config);
+    if (force) asrRealtimeLanguageDiscovery.delete(identity);
+    if (asrRealtimeLanguageDiscovery.has(identity)) { refreshASRLanguageSetting(); return; }
+    const apiBase = helper.apiBase(config);
+    if (!apiBase) return;
+    const pending = {models:[], pending:true};
+    asrRealtimeLanguageDiscovery.set(identity, pending);
+    try {
+        const response = await fetch('/api/asr/openai-models', {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({api_base:apiBase, api_key:config.api_key || '', realtime:true})});
+        const data = await response.json();
+        if (!response.ok) throw new Error('Language metadata unavailable');
+        if (asrRealtimeLanguageDiscovery.get(identity) !== pending) return;
+        asrRealtimeLanguageDiscovery.set(identity, {models:data.models || []});
+    } catch (_) {
+        if (asrRealtimeLanguageDiscovery.get(identity) !== pending) return;
+        asrRealtimeLanguageDiscovery.set(identity, {models:[], failed:true});
+    }
+    if (helper.identity(currentConfig.asr) === identity) refreshASRLanguageSetting();
+}
+
 function renderASRConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
@@ -1601,8 +1688,9 @@ function renderASRConfig(config, readonly = false) {
                     <select ${disabled} onchange="updateConfig('asr', 'realtime_api_style', this.value)">
                         <option value="openai-ga" ${(config.realtime_api_style || 'openai-ga') === 'openai-ga' ? 'selected' : ''}>OpenAI Realtime GA</option>
                         <option value="openai-beta" ${config.realtime_api_style === 'openai-beta' ? 'selected' : ''}>OpenAI Realtime beta compatible</option>
+                        <option value="nemo-voicechat" ${config.realtime_api_style === 'nemo-voicechat' ? 'selected' : ''}>Nemotron VoiceChat (full duplex)</option>
                     </select>
-                    <div class="input-hint">Use GA for current OpenAI-compatible services. Beta compatibility supports Speaches 0.8.x and other preview-schema servers.</div>
+                    <div class="input-hint">${config.realtime_api_style === 'nemo-voicechat' ? 'VoiceChat manages turn taking and interruption. Keep the microphone unmuted to interrupt naturally.' : 'Use GA for current OpenAI-compatible services. Beta compatibility supports Speaches 0.8.x and other preview-schema servers.'}</div>
                 </div>
 
                 <div class="form-group" id="asr-realtime-api-key-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' && (config.realtime_url || '').indexOf('openai.com') !== -1 ? 'block' : 'none'};">
@@ -1613,19 +1701,7 @@ function renderASRConfig(config, readonly = false) {
                 </div>
             </div>
 
-            <!-- Common Settings (for non-Riva backends) -->
-            <div class="form-group" style="display: ${config.backend === 'riva' ? 'none' : 'block'}">
-                <label>Language</label>
-                <select ${disabled} value="${config.language}" onchange="updateConfig('asr', 'language', this.value)">
-                    <option value="en-US" ${config.language === 'en-US' ? 'selected' : ''}>English (US)</option>
-                    <option value="en-GB" ${config.language === 'en-GB' ? 'selected' : ''}>English (UK)</option>
-                    <option value="es-ES" ${config.language === 'es-ES' ? 'selected' : ''}>Spanish</option>
-                    <option value="fr-FR" ${config.language === 'fr-FR' ? 'selected' : ''}>French</option>
-                    <option value="de-DE" ${config.language === 'de-DE' ? 'selected' : ''}>German</option>
-                    <option value="ja-JP" ${config.language === 'ja-JP' ? 'selected' : ''}>Japanese</option>
-                    <option value="zh-CN" ${config.language === 'zh-CN' ? 'selected' : ''}>Chinese (Simplified)</option>
-                </select>
-            </div>
+            ${renderASRLanguageSetting(config, readonly)}
 
             ${renderOpenAIASRVADSettings(config, readonly)}
 
@@ -3021,6 +3097,12 @@ function updateConfig(section, key, value) {
             setTimeout(() => fetchOpenAITTSMetadata(), 0);
         }
     }
+    if (state.activeConfigTab === 'asr') {
+        refreshASRLanguageSetting();
+        if ((currentConfig.asr.backend || currentConfig.asr.scheme) === 'openai-realtime') {
+            setTimeout(() => refreshASRLanguageMetadata(), 0);
+        }
+    }
     if (section === 'devices') {
         updateDeviceIndicators();
         updateChatInputVisibility();
@@ -3168,12 +3250,14 @@ async function fetchOpenAIASRModels() {
     const sequence = ++asrModelDiscoverySequence;
     const config = currentConfig.asr || {};
     const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+    const apiKey = config.api_key || '';
     const select = document.getElementById('asr-rest-model-select');
     const hint = document.getElementById('asr-rest-model-hint');
     if (!apiBase || !select) return;
     const reload = document.getElementById('asr-model-reload');
     if (reload) reload.disabled = true;
     asrModelDiscovery = null;
+    refreshASRLanguageSetting();
     updateASRDownloadButton();
     if (hint) hint.textContent = 'Discovering ASR models from the provider…';
 
@@ -3183,15 +3267,16 @@ async function fetchOpenAIASRModels() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 api_base: apiBase,
-                api_key: config.api_key || '',
+                api_key: apiKey,
             }),
         });
         const data = await response.json().catch(function () { return {}; });
-        if (sequence !== asrModelDiscoverySequence || !window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
+        if (sequence !== asrModelDiscoverySequence || (currentConfig.asr.api_key || '') !== apiKey || !window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
         if (!response.ok) throw new Error(data.error || ('Request failed: ' + response.status));
 
         const models = Array.isArray(data.models) ? data.models : [];
-        asrModelDiscovery = {apiBase: apiBase, data: data};
+        asrModelDiscovery = {apiBase: apiBase, apiKey:apiKey, data: data};
+        refreshASRLanguageSetting();
         const configured = String(currentConfig.asr.model || '');
         if (configured && !models.some(function (model) { return String(model.id) === configured; })) {
             models.unshift({id: configured, downloaded: false, configuredOnly: true, languages: []});
@@ -3551,6 +3636,11 @@ async function checkServersHealth() {
         }
         return { ok: true };
     }
+    if (asr.realtime_api_style === 'nemo-voicechat') {
+        state.serverHealth.asr = await checkOpenAI(apiBase);
+        updateServerHealthUI();
+        return;
+    }
     var results = await Promise.allSettled([
         checkSpeech(asr),
         checkOpenAI(apiBase),
@@ -3577,6 +3667,11 @@ function updateServerHealthUI() {
         if (result === null) parts.push(label + ': …');
         else if (result.ok) parts.push(label + ': ✓');
         else parts.push(label + ': ✗ ' + (result.error || '').slice(0, 40));
+    }
+    if (currentConfig.asr && currentConfig.asr.realtime_api_style === 'nemo-voicechat') {
+        add('VoiceChat', asr);
+        statusEl.textContent = parts.join('  ');
+        return;
     }
     add('ASR', asr);
     add('LLM', llm);
@@ -3790,6 +3885,9 @@ function applyVADPreset(preset) {
 
 /** Build chat list from session.chat and, when present, add AI messages from timeline tts_complete (data.text). Sorted by timestamp. */
 function getMergedChatMessages(session) {
+    if (session.full_duplex) {
+        return session.full_duplex.messages.map(m => ({role: m.role, content: m.text, timestamp: m.timestamp}));
+    }
     const chat = session.chat || [];
     const timeline = session.timeline || [];
     const aiFromTimeline = timeline
@@ -3898,6 +3996,22 @@ function formatTimestamp(seconds) {
     return mm + ':' + ss;
 }
 
+function fullDuplexView() {
+    return state.isLiveSession ? state.liveFullDuplex : (state.selectedSession && state.selectedSession.full_duplex);
+}
+
+function isFullDuplexDisplay(config) {
+    const asr = (config || {}).asr || {};
+    return (asr.scheme || asr.backend) === 'openai-realtime'
+        && (asr.realtime_session_type || 'full') === 'full'
+        && (asr.realtime_transport || 'websocket') === 'websocket';
+}
+
+function duplexSpeechCount(view) {
+    const m = (view && view.metrics) || {};
+    return (m.user_utterances || 0) + ' user · ' + (m.assistant_utterances || 0) + ' AI utterances';
+}
+
 function renderTimelineMetrics() {
     const metricsEl = document.getElementById('timeline-metrics');
     if (!metricsEl) return;
@@ -3908,11 +4022,34 @@ function renderTimelineMetrics() {
         return;
     }
     const session = state.selectedSession || {};
-    const metrics = session.metrics || {};
+    const metrics = {...(session.metrics || {})};
+    if (state.isLiveSession && state.browserSpeechTiming) {
+        const gaps = state.liveTtlBands.map(band=>band.ttlMs/1000);
+        Object.assign(metrics,{avg_ttl:gaps.length ? gaps.reduce((a,b)=>a+b,0)/gaps.length : null,
+            min_ttl:gaps.length ? Math.min(...gaps) : null,max_ttl:gaps.length ? Math.max(...gaps) : null});
+    }
     // Never label an old recording with the machine currently serving the UI.
     // Historical sessions use only the identity captured in their own JSON.
     const systemInfo = state.selectedSession ? session.system_info : state.serverSystemInfo;
 
+    if (isFullDuplexDisplay(state.isLiveSession ? currentConfig : session.config)) {
+        const fd = fullDuplexView();
+        const m = (fd && fd.metrics) || {};
+        const browserMeasured = m.timing_basis === 'browser_capture_to_scheduled_audio';
+        const ms = value => value == null ? (browserMeasured ? 'No samples' : 'Not aligned') : value.toFixed(1) + ' ms';
+        const values = [
+            ['User utterances', m.user_utterances || 0], ['AI utterances', m.assistant_utterances || 0],
+            [browserMeasured ? 'TTL estimate' : 'FD-TTL estimate', ms(m.avg_fd_ttl_ms)], [browserMeasured ? 'First audio estimate' : 'First reply estimate', ms(m.avg_reaction_ms)],
+            [browserMeasured ? 'TTL samples' : 'FD-TTL samples', browserMeasured ? (m.matched_replies || 0) : (m.matched_replies || 0) + '/' + (m.user_utterances || 0)],
+            ...(browserMeasured ? [['Speech regions',m.measurement_inputs || 0]] : []),
+            ...(m.ambiguous_inputs ? [['Uncertain endpoints', m.ambiguous_inputs]] : []),
+            ['Duration', state.isLiveSession && state.sessionState === 'live' ? formatDuration(Math.max(0,Date.now()/1000-state.liveSessionStartTime)) : (m.duration_s == null ? '—' : formatDuration(m.duration_s))],
+        ];
+        metricsEl.innerHTML = values.map(([label, value]) =>
+            '<div class="timeline-metric" title="' + escapeHtml(browserMeasured ? 'Browser acoustic gap: capture energy end to the next scheduled audible region. No transcript or model-turn matching. Input pauses and already-playing audio are recorded separately; microphone/speaker hardware latency is not directly measured.' : 'Legacy server-input energy to browser scheduled audio; transcript association and endpoint estimates may be uncertain.') + '"><span class="timeline-metric-label">' + escapeHtml(label) + '</span><span class="timeline-metric-value">' + escapeHtml(String(value)) + '</span></div>'
+        ).join('') + renderTimelineSystemInfo(systemInfo);
+        return;
+    }
     metricsEl.innerHTML = `
         <div class="timeline-metric">
             <span class="timeline-metric-label">Avg TTL</span>
@@ -4099,6 +4236,7 @@ function initTimeline() {
     state.timelineOffset = 0;
     state.timelineDuration = 0;
     state.timelineBargeInHitRegions = [];
+    state.timelineDuplexHitRegions = [];
     updateAsrTimelineLegend(currentConfig);
     updateBargeInDiagnosticLegend([]);
 
@@ -4138,6 +4276,7 @@ function renderTimeline() {
     updateAsrTimelineLegend(legendConfig);
     updateBargeInDiagnosticLegend(timeline, inLive);
     state.timelineBargeInHitRegions = [];
+    state.timelineDuplexHitRegions = [];
     if (!inLive && !hasStoppedLiveData && !state.selectedSession) return;
 
     const canvas = document.getElementById('timeline-canvas');
@@ -4169,6 +4308,7 @@ function renderTimeline() {
     }
 
     // Timeline rendering constants
+    const fdMode = isFullDuplexDisplay(state.isLiveSession ? currentConfig : (state.selectedSession || {}).config);
     const combineSpeechLanes = uiSettings.combineSpeechLanes; // Use global UI setting
     const lanes = combineSpeechLanes
         ? ['audio', 'speech', 'llm', 'ttl', 'system']
@@ -4195,8 +4335,22 @@ function renderTimeline() {
         speech: 'ASR',      // Changed from 'SPEECH' to 'ASR'
         llm: 'LLM',
         tts: 'TTS',
-        ttl: 'TTL'
+        ttl: fdMode && !(fullDuplexView() && fullDuplexView().metrics.timing_basis === 'browser_capture_to_scheduled_audio') ? 'FD-TTL' : 'TTL'
     };
+    if (fdMode) {
+        laneLabels.speech = 'USER TEXT';
+        laneLabels.tts = 'AI SPEECH';
+        laneLabels.llm = 'LLM —';
+        ['llm-prefill', 'llm-generate'].forEach(key => {
+            const legend = document.querySelector('[data-timeline-legend="' + key + '"]');
+            if (legend) legend.style.opacity = '0.3';
+        });
+    } else {
+        ['llm-prefill', 'llm-generate'].forEach(key => {
+            const legend = document.querySelector('[data-timeline-legend="' + key + '"]');
+            if (legend) legend.style.opacity = '';
+        });
+    }
 
     // Calculate lane dimensions: AUDIO 2x, CPU/GPU (system) 1.5x, others 1x
     const laneAreaHeight = height - PADDING_TOP - TIME_LABEL_HEIGHT;
@@ -4305,6 +4459,18 @@ function renderTimeline() {
         : (rebuiltTtsSegments.length > 0 ? rebuiltTtsSegments : timelineTtsSegments);
     const replayUserAmplitudeForTtl = replayAudioAmplitudeHistory;
     const liveSessionTime = (state.liveSessionStartTime > 0) ? (Date.now() / 1000 - state.liveSessionStartTime) : null;
+    if (fdMode) {
+        const row = lanes.indexOf('llm');
+        const readiness = timeline.some(e => e.event_type === 'realtime_session_ready') ? 'Ready · ' : '';
+        ctx.save();
+        ctx.fillStyle = 'rgba(128,128,128,0.10)';
+        ctx.fillRect(PADDING_LEFT, getLaneY(row), width-PADDING_LEFT-PADDING_RIGHT, getLaneHeight(row));
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(readiness + 'Full duplex · end-to-end model · no separate LLM timing', PADDING_LEFT+12, getLaneY(row)+getLaneHeight(row)/2);
+        ctx.restore();
+    }
     drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP, PADDING_LEFT,
                        PADDING_RIGHT, width, timeScale, state.timelineOffset, laneColors, combineSpeechLanes,
                        inLive, hasStoppedLiveData, liveAmplitude, liveTtsSegments, liveSystemStats, replayTtsSegments, replayAudioAmplitudeHistory, replayUserAmplitudeForTtl, liveSessionTime);
@@ -4601,6 +4767,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     if (hasStoppedLiveData === undefined) hasStoppedLiveData = false;
     if (liveSessionTime === undefined) liveSessionTime = null;
     const drawLiveWaveforms = inLive || hasStoppedLiveData;
+    const fdMode = isFullDuplexDisplay(state.isLiveSession ? currentConfig : (state.selectedSession || {}).config);
     const getLaneY = (i) => PADDING_TOP + laneYOffsets[i];
     const getLaneHeight = (i) => LANE_HEIGHTS[i];
     const bargeInWindows = (
@@ -5122,6 +5289,14 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             }
         }
 
+        // Full-duplex A: Cyan → Purple above; Purple → Magenta below.
+        if (fdMode && (targetLane === 'speech' || targetLane === 'tts')) {
+            const isInput = event.lane === 'speech' || event.lane === 'asr';
+            const gradient = ctx.createLinearGradient(0, barY, 0, barY + barHeight);
+            gradient.addColorStop(0, isInput ? '#2db5e1' : '#8753c2');
+            gradient.addColorStop(1, isInput ? '#8753c2' : '#e74397');
+            fillColor = gradient;
+        }
         // Draw the rectangle
         if (fillPattern === 'diagonal-stripes') {
             // Pre-ASR: diagonal stripes clipped to rectangle
@@ -5535,6 +5710,13 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         return s.slice(0, maxLen) + '\u2026';
     }
 
+    const fdTelemetryRow = lanes.indexOf('system');
+    if (fdMode && fdTelemetryRow >= 0 && (!liveSystemStats || !liveSystemStats.some(s => s.cpu != null || s.gpu != null))) {
+        ctx.save(); ctx.font = '11px sans-serif'; ctx.fillStyle = '#888'; ctx.textAlign = 'left';
+        ctx.fillText(inLive ? 'Waiting for CPU / GPU samples' : 'CPU / GPU samples not recorded', PADDING_LEFT+12, getLaneY(fdTelemetryRow)+getLaneHeight(fdTelemetryRow)/2);
+        ctx.restore();
+    }
+
     // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only; Realtime = system + TTS output transcript
     pointEvents.forEach(event => {
         let targetLane = event.lane;
@@ -5564,6 +5746,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
 
         const et = event.event_type || event.eventType || '';
+        if (fdMode && ['realtime_output_partial', 'realtime_output_final', 'tts_complete', 'realtime_session_ready'].includes(et)) return;
         // System lane: Realtime session_ready (green), error (red)
         if (targetLane === 'system') {
             let dotColor = '#888';
@@ -5683,9 +5866,34 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     });
 
+    if (fdMode) {
+        const row = lanes.indexOf(combineSpeechLanes ? 'speech' : 'tts');
+        const y = getLaneY(row) + getLaneHeight(row) * (combineSpeechLanes ? 0.75 : 0.5);
+        const markers = window.MMASDuplexHelpers.transcriptMarkers(timeline);
+        ctx.save();
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const placed = window.MMASDuplexHelpers.layoutTranscriptLabels(
+            markers.map(marker => ({...marker, x:PADDING_LEFT+(marker.timestamp-timelineOffset)*timeScale})),
+            PADDING_LEFT, width-PADDING_RIGHT, text => ctx.measureText(text).width);
+        placed.forEach(marker => {
+            const {x, label, textX} = marker;
+            ctx.fillStyle = laneColors.tts;
+            ctx.globalAlpha = marker.finalized ? 1 : 0.5;
+            ctx.beginPath();
+            ctx.arc(x, y, marker.finalized ? 4 : 2.5, 0, Math.PI*2);
+            ctx.fill();
+            if (label) ctx.fillText(label, textX, y);
+            state.timelineDuplexHitRegions.push({kind:'duplex', x1:Math.min(x-6,textX), x2:Math.max(x+6,textX+ctx.measureText(label).width), y1:y-10, y2:y+10, text:marker.text, stopTime:marker.timestamp, finalized:marker.finalized});
+        });
+        ctx.restore();
+    }
+
     // 3b. TTL bands: transparent red from browser-observed end-of-speech to
     // first sound out.  Persisted live bands are authoritative during replay;
     // waveform reconstruction is only a fallback for legacy recordings.
+    const acousticTiming = fdMode || !!(state.isLiveSession && state.browserSpeechTiming) || !!(state.selectedSession && state.selectedSession.browser_timing);
     const ttlLaneIndex = lanes.indexOf('ttl');
     const persistedReplayBands = (
         state.selectedSession && Array.isArray(state.selectedSession.ttl_bands)
@@ -5696,7 +5904,10 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     ) ? window.MMASTimelineHelpers.selectReplayTtlBands : function (persisted, fallbackFactory) {
         return persisted.length ? persisted : fallbackFactory();
     };
-    const replayBands = (!inLive && !hasStoppedLiveData && state.selectedSession)
+    const fdBands = fdMode && fullDuplexView() ? fullDuplexView().replies.filter(r => r.fd_ttl_ms != null).map(r => ({start:r.input_end, end:r.audio_onset, ttlMs:r.fd_ttl_ms, endpointMethod:r.endpoint_method, ttlRange:r.fd_ttl_range_ms})) : [];
+    const replayBands = fdMode ? fdBands : (!inLive && state.selectedSession && state.selectedSession.browser_timing)
+        ? state.selectedSession.browser_timing.replies.filter(r=>r.fd_ttl_ms != null).map(r=>({start:r.input_end,end:r.audio_onset,ttlMs:r.fd_ttl_ms}))
+        : (!inLive && !hasStoppedLiveData && state.selectedSession)
         ? selectReplayTtlBands(persistedReplayBands, function () {
             return replayTtsSegments && replayTtsSegments.length
                 ? computeTtlBandsFromReplay(
@@ -5707,7 +5918,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 : [];
         })
         : [];
-    const hasLiveBands = drawLiveWaveforms && (state.liveTtlBands && state.liveTtlBands.length > 0 || state.liveTtlBandStartTime != null);
+    const hasLiveBands = !fdMode && drawLiveWaveforms && (state.liveTtlBands && state.liveTtlBands.length > 0 || state.liveTtlBandStartTime != null);
     if (ttlLaneIndex !== -1 && (hasLiveBands || replayBands.length > 0)) {
         const bandTop = getLaneY(0);
         const bandBottom = getLaneY(lanes.length - 1) + getLaneHeight(lanes.length - 1);
@@ -5723,8 +5934,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
         if (replayBands.length > 0) bandsToDraw.push(...replayBands);
         bandsToDraw.forEach(function (band) {
-            const x1 = PADDING_LEFT + (band.start - timelineOffset) * timeScale;
-            const x2 = PADDING_LEFT + (band.end - timelineOffset) * timeScale;
+            const x1 = PADDING_LEFT + ((acousticTiming ? Math.min(band.start, band.end) : band.start) - timelineOffset) * timeScale;
+            const x2 = PADDING_LEFT + ((acousticTiming ? Math.max(band.start, band.end) : band.end) - timelineOffset) * timeScale;
             if (x2 <= PADDING_LEFT || x1 >= width - PADDING_RIGHT) return;
             const drawX1 = Math.max(PADDING_LEFT, x1);
             const drawX2 = Math.min(width - PADDING_RIGHT, x2);
@@ -5736,7 +5947,9 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 const midX = (drawX1 + drawX2) / 2;
-                ctx.fillText(band.ttlMs + ' ms', midX, ttlLaneCenterY);
+                const dominant = band.endpointMethod === 'dominant_energy_region';
+                ctx.fillText((dominant ? '≈ ' : '') + (acousticTiming ? band.ttlMs.toFixed(1) : band.ttlMs) + ' ms', midX, ttlLaneCenterY);
+                if (acousticTiming) state.timelineDuplexHitRegions.push({kind:'duplex', metric:'fd-ttl', x1:drawX1, x2:drawX2, y1:ttlLaneY, y2:ttlLaneY+ttlLaneH, start:band.start, end:band.end, ttlMs:band.ttlMs, dominant, ttlRange:band.ttlRange});
             }
         });
     }
@@ -6850,7 +7063,7 @@ function updateLiveSessionUI() {
 
         const turnCount = (state.liveChatTurns && state.liveChatTurns.length) || 0;
         const dateTimeStr = state.liveSessionStartTime > 0 ? formatSessionDateTime(state.liveSessionStartTime) : new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-        const turnsSuffix = dateTimeStr + ', ' + turnCount + ' turn' + (turnCount !== 1 ? 's' : '');
+        const turnsSuffix = dateTimeStr + ', ' + (isFullDuplexDisplay(currentConfig) ? duplexSpeechCount(fullDuplexView()) : turnCount + ' turn' + (turnCount !== 1 ? 's' : ''));
         if (state.sessionState === 'setup') {
             sessionTitle.textContent = state.liveSessionStartTime > 0 ? ('Session – ' + turnsSuffix) : ('Live Session – ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }));
             setSessionMetaRight('', '');
@@ -7046,7 +7259,7 @@ function updateHistoricalSessionPreview() {
         const metrics = session.metrics || {};
         const turns = metrics.total_turns || 0;
         const dateTimeStr = formatSessionDateTime(session.created_at);
-        const turnsStr = dateTimeStr + ', ' + turns + ' turn' + (turns !== 1 ? 's' : '');
+        const turnsStr = dateTimeStr + ', ' + (session.full_duplex ? duplexSpeechCount(session.full_duplex) : turns + ' turn' + (turns !== 1 ? 's' : ''));
 
         sessionTitle.textContent = session.name || 'Unnamed Session';
         var recordedLine = 'Session recorded: ' + turnsStr;
@@ -7232,6 +7445,9 @@ function handleVoiceWsMessage(ev) {
                 renderTimeline();
             }
         } else if (msg.type === 'user_amplitude') {
+            // Browser capture has its own frame-timed waveform; never mix it
+            // with transport-delayed server amplitude timestamps.
+            if (state.browserSpeechTiming && !state.micWaveformFromServer) return;
             var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
             var serverTs = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
             // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
@@ -7347,7 +7563,7 @@ function handleVoiceWsMessage(ev) {
                 var appVad = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
                 if (
                     evt.event_type === 'vad_start'
-                    && appVad.barge_in_enabled
+                    && appVad.barge_in_enabled && currentConfig.asr.realtime_api_style !== 'nemo-voicechat'
                     && appVad.barge_in_trigger === 'vad'
                 ) {
                     stopTtsPlayback({
@@ -7359,6 +7575,7 @@ function handleVoiceWsMessage(ev) {
                     });
                 }
             } else if (evt.event_type === 'asr_partial') {
+                if (currentConfig.asr.realtime_api_style === 'nemo-voicechat') window.MMASDuplexHelpers.observeUserSpeech(state);
                 state.voiceTurnActive = true;
                 state.ttsEligibleForCurrentTtl = false;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
@@ -7367,7 +7584,7 @@ function handleVoiceWsMessage(ev) {
                         syncFullscreenOverlays();
                 // Barge-in (partial trigger): stop frontend TTS after N consecutive partials with text
                 var app = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
-                if (app.barge_in_enabled && app.barge_in_trigger === 'partial') {
+                if (app.barge_in_enabled && currentConfig.asr.realtime_api_style !== 'nemo-voicechat' && app.barge_in_trigger === 'partial') {
                     var txt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (txt.length > 0) {
                         state.bargeInPartialCount = (state.bargeInPartialCount || 0) + 1;
@@ -7388,7 +7605,7 @@ function handleVoiceWsMessage(ev) {
                 state.bargeInPartialCount = 0;
                 // Barge-in (final trigger): stop frontend TTS when user final transcript arrives
                 var appFinal = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
-                if (appFinal.barge_in_enabled && appFinal.barge_in_trigger === 'final') {
+                if (appFinal.barge_in_enabled && currentConfig.asr.realtime_api_style !== 'nemo-voicechat' && appFinal.barge_in_trigger === 'final') {
                     var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (finalTxt.length > 0) {
                         stopTtsPlayback({
@@ -7412,6 +7629,9 @@ function handleVoiceWsMessage(ev) {
                             } else {
                                 state.liveChatTurns.push({ user: userText, assistant: '' });
                             }
+                            if (currentConfig.asr.realtime_api_style === 'nemo-voicechat') {
+                                window.MMASDuplexHelpers.completeUser(state);
+                            }
                             renderLiveChat();
                             requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
@@ -7430,7 +7650,12 @@ function handleVoiceWsMessage(ev) {
                             renderLiveChat();
                             requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
-            } else if (evt.event_type === 'tts_complete' && evt.data && evt.data.text != null) {
+            } else if ((evt.event_type === 'realtime_output_partial' || evt.event_type === 'realtime_output_final')
+                       && currentConfig.asr.realtime_api_style === 'nemo-voicechat' && evt.data && evt.data.text) {
+                window.MMASDuplexHelpers.applyOutput(state, evt.data);
+                renderLiveChat();
+                syncFullscreenOverlays();
+            } else if (evt.event_type === 'tts_complete' && currentConfig.asr.realtime_api_style !== 'nemo-voicechat' && evt.data && evt.data.text != null) {
                 // Realtime: tts_complete carries the AI response transcript
                 var last = state.liveChatTurns[state.liveChatTurns.length - 1];
                 if (last && last.assistant === '') {
@@ -7439,6 +7664,10 @@ function handleVoiceWsMessage(ev) {
                     requestAnimationFrame(function () { updateLiveSessionUI(); });
                 }
             }
+        } else if (msg.type === 'duplex_state') {
+            state.liveFullDuplex = msg.full_duplex;
+            renderTimelineMetrics();
+            updateLiveSessionUI();
         } else if (msg.type === 'tts_start') {
             state.firstTtsPlayTimeThisResponse = null;
             state.earliestTtsPlayTimeAboveThreshold = null;
@@ -7479,7 +7708,7 @@ function handleVoiceWsMessage(ev) {
             if (isServerSpeakerSelected()) {
                 recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             } else if (!state.ttsPlaybackStoppedByBargeIn) {
-                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments);
+                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments, msg.duplex_audio_onset);
             }
         } else if (msg.type === 'session_started' && msg.session_id) {
             // The filename is deterministic from session start. Keep it
@@ -7763,6 +7992,11 @@ function handleVoiceWsClose(ev) {
 
 function startSessionRecording() {
     if (state.sessionState !== 'setup') return;
+    const asrLanguages = getASRLanguageInfo(currentConfig.asr);
+    if (asrLanguages.languages.length && !window.MMASAsrLanguages.choices(asrLanguages.languages, currentConfig.asr.language || 'en-US').supported) {
+        showVoiceErrorToast('Select a supported ASR language in Configuration before starting.');
+        return;
+    }
 
     // Full voice uses response audio from the same Realtime session. Transcript
     // mode participates in the classic cascade and may independently use
@@ -7800,6 +8034,9 @@ function startSessionRecording() {
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
+        window.MMASDuplexHelpers.reset(state);
+        resetBrowserSpeechTiming();
+        state.liveFullDuplex = null;
         state.ttsNextStartTime = 0;
         state.activeTtsSources = [];
         state.bargeInPartialCount = 0;
@@ -7872,6 +8109,9 @@ function startSessionRecording() {
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
+        window.MMASDuplexHelpers.reset(state);
+        resetBrowserSpeechTiming();
+        state.liveFullDuplex = null;
         state.ttsNextStartTime = 0;
         state.activeTtsSources = [];
         state.bargeInPartialCount = 0;
@@ -8005,11 +8245,12 @@ function startVoiceMicStream() {
         : true;
     console.log('[Voice] Requesting getUserMedia({ audio: ... })', state.selectedBrowserMicId ? 'deviceId: ' + state.selectedBrowserMicId : 'default');
     navigator.mediaDevices.getUserMedia({ audio: audioConstraint }).then(function (s) {
+        if (state.sessionState !== 'live') {s.getTracks().forEach(track=>track.stop());return;}
         state.voiceMicStream = s;
         const label = s.getAudioTracks()[0]?.label || 'default';
         console.log('[Voice] getUserMedia ok, mic:', label, ', connecting PCM to WS');
         updateDeviceIndicators();
-        connectPcmToWs(s);
+        return connectPcmToWs(s);
     }).catch(function (e) {
         console.error('[Voice] getUserMedia for voice failed:', e);
     });
@@ -8038,86 +8279,157 @@ function updateVoiceDebugPanel() {
     logEl.textContent = state.voiceMessageLog.length ? state.voiceMessageLog.join('\n\n---\n\n') : '(no messages yet)';
 }
 
-function connectPcmToWs(stream) {
+function resetBrowserSpeechTiming() {
+    const previous = state.browserSpeechTiming;
+    if (previous) {
+        previous.timers.forEach(id => clearTimeout(id));
+        if (previous.tailTimer) clearTimeout(previous.tailTimer);
+    }
+    state.browserSpeechTiming = null;
+}
+
+function getBrowserSpeechTiming() {
+    if (state.liveSessionStartTime <= 0 || isServerMicSelected() || isServerSpeakerSelected()) return null;
+    if (!state.browserSpeechTiming) {
+        const origin = performance.now()/1000 - (Date.now()/1000-state.liveSessionStartTime);
+        state.browserSpeechTiming = {origin, timers:new Set(), outputActive:new Set(),
+            input:new window.MMASSpeechTiming.EnergyObserver({sampleRate:16000,source:'input'}), output:null};
+        recordBrowserTimingEvent({event_type:'browser_timing_started',timestamp:Math.max(0,performance.now()/1000-origin),
+            lane:'audio',data:{clock:'browser_monotonic',source:'browser_capture'}});
+    }
+    return state.browserSpeechTiming;
+}
+
+function recordBrowserTimingEvent(event) {
+    if (!Number.isFinite(event.timestamp) || event.timestamp < 0) return;
+    recordClientTimelineEvent(event);
+    const replies = window.MMASSpeechTiming.gaps(state.liveTimelineEvents);
+    // The same acoustic observations drive cascade bands and full-duplex gaps.
+    state.liveTtlBands = replies.filter(r => r.fd_ttl_ms != null).map(r => ({start:r.input_end,end:r.audio_onset,ttlMs:r.fd_ttl_ms}));
+    if (state.liveFullDuplex) {
+        const measured = replies.filter(r=>r.fd_ttl_ms != null);
+        const average = key => measured.length ? measured.reduce((sum,r)=>sum+r[key],0)/measured.length : null;
+        state.liveFullDuplex.replies = replies;
+        Object.assign(state.liveFullDuplex.metrics,{avg_fd_ttl_ms:average('fd_ttl_ms'),avg_reaction_ms:average('reaction_ms'),
+            matched_replies:measured.length,measurement_inputs:replies.length,ambiguous_inputs:0,dominant_endpoint_estimates:0,
+            timing_basis:'browser_capture_to_scheduled_audio'});
+    }
+    renderTimelineMetrics(); renderTimeline();
+}
+
+function cancelBrowserOutputTiming(reason) {
+    const timing = state.browserSpeechTiming;
+    if (!timing) return;
+    timing.timers.forEach(id=>clearTimeout(id)); timing.timers.clear();
+    if (timing.tailTimer) clearTimeout(timing.tailTimer);
+    const now = performance.now()/1000-timing.origin;
+    if (timing.output) timing.output.abort(now,reason).forEach(event=> {
+        if (timing.outputActive.has(event.data.region_id)) recordBrowserTimingEvent(event);
+    });
+    timing.outputActive.clear();
+}
+
+function observeBrowserOutputTiming(samples, sampleRate, context, startTime) {
+    const timing = getBrowserSpeechTiming();
+    if (!timing || state.browserSpeakerMuted || context.state !== 'running') return;
+    if (!timing.output) timing.output = new window.MMASSpeechTiming.EnergyObserver({sampleRate,source:'output',startRms:.004,stopRms:.004,minimumMs:20});
+    const now = performance.now()/1000-timing.origin;
+    let start = now + startTime-context.currentTime;
+    // Map the output device's presentation estimate into the same performance clock.
+    const stamp = context.getOutputTimestamp && context.getOutputTimestamp();
+    if (stamp && stamp.performanceTime > 0 && stamp.contextTime > 0) {
+        start = stamp.performanceTime/1000-timing.origin + startTime-stamp.contextTime;
+    }
+    const pcm = Float32Array.from(samples, s=>s/32768);
+    function deliver(event) {
+        if (state.sessionState !== 'live' || state.browserSpeakerMuted || state.browserSpeechTiming !== timing) return;
+        if (event.event_type === 'browser_output_start') timing.outputActive.add(event.data.region_id);
+        else timing.outputActive.delete(event.data.region_id);
+        recordBrowserTimingEvent(event);
+    }
+    timing.output.process(pcm,start).forEach(event=> {
+        const id = setTimeout(()=> {timing.timers.delete(id);deliver(event);},Math.max(0,(event.timestamp-now)*1000));
+        timing.timers.add(id);
+    });
+    if (timing.tailTimer) clearTimeout(timing.tailTimer);
+    timing.tailTimer = setTimeout(()=> {
+        timing.output.advance(performance.now()/1000-timing.origin).forEach(deliver);
+    },Math.max(0,(start+samples.length/sampleRate+.16-now)*1000));
+    return start;
+}
+
+async function connectPcmToWs(stream) {
     const ws = state.voiceWs;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn('[Voice] connectPcmToWs: WS not open, skipping');
-        return;
-    }
-    // Capture at 16 kHz directly (no JS resampling). Browser resamples device to context rate if needed.
-    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: TARGET_SAMPLE_RATE });
-    console.log('[Voice] AudioContext state:', ctx.state, 'sampleRate:', ctx.sampleRate);
+    if (!ws || ws.readyState !== WebSocket.OPEN || state.sessionState !== 'live') return;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({sampleRate:TARGET_SAMPLE_RATE});
     const src = ctx.createMediaStreamSource(stream);
-    const bufferLen = 2048; // 2048 @ 16 kHz = 128 ms per chunk
-    const processor = ctx.createScriptProcessor(bufferLen, 1, 1);
-    let pcmChunkCount = 0;
-
-    if (ctx.state === 'suspended') {
-        ctx.resume().then(function () {
-            console.log('[Voice] AudioContext resumed, mic streaming to server');
-        }).catch(function (e) {
-            console.warn('[Voice] AudioContext resume failed:', e);
-        });
-    }
-
-    var lastClientAmpLogTime = 0;
-    processor.onaudioprocess = function (e) {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        const input = e.inputBuffer.getChannelData(0);
-        const pcmData = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-            const v = Math.max(-1, Math.min(1, input[i]));
-            pcmData[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
-        }
-        // Debug-only: client mic RMS (enable with localStorage micWaveformDebug=1)
-        var nowSec = Date.now() / 1000;
-        var sumSq = 0;
-        for (var i = 0; i < input.length; i++) sumSq += input[i] * input[i];
-        var clientRms = input.length ? Math.sqrt(sumSq / input.length) : 0;
-        var clientAmpScaled = Math.min(100, clientRms * 400);
-        if (window._micWaveformDebug && state.liveSessionStartTime > 0 && nowSec - lastClientAmpLogTime >= 1.0) {
-            console.log('[user_amplitude] client: buffer_len=' + input.length + ' float_rms=' + clientRms.toFixed(4) + ' amp_0_100=' + clientAmpScaled.toFixed(2));
-            lastClientAmpLogTime = nowSec;
-        }
-        if (window._micWaveformDebug && state.liveSessionStartTime > 0 && clientAmpScaled >= 20) {
-            var sessionT = nowSec - state.liveSessionStartTime;
-            console.log('[user_amplitude_high] client: session_t=' + sessionT.toFixed(2) + 's amp_0_100=' + clientAmpScaled.toFixed(2));
-        }
-        ws.send(pcmData.buffer);
-        pcmChunkCount++;
-        if (pcmChunkCount % 50 === 0) console.log('[Voice] Sent', pcmChunkCount, 'PCM chunks');
-        // AUDIO lane waveform: use only server user_amplitude (single source). Client used to push here too → double source caused saw/block shape with Realtime. RIVA looks correct because it only uses server.
-        if (state.liveSessionStartTime > 0) {
-            let sumSq = 0;
-            for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
-            const rms = Math.min(100, Math.sqrt(sumSq / input.length) * 400);
-            const ts = (Date.now() / 1000) - state.liveSessionStartTime;
-            // Browser-side end-of-speech for TTL band: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
-            const userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
-            const SILENCE_CONFIRM_SEC = 0.15;
-            if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
-                if (rms < userTh) {
-                    if (state.voiceSilenceCandidate == null) state.voiceSilenceCandidate = ts;
-                    else if ((ts - state.voiceSilenceCandidate) >= SILENCE_CONFIRM_SEC) {
-                        state.liveTtlBandStartTime = state.voiceSilenceCandidate;
-                        state.voiceSilenceCandidate = null;
-                    }
-                } else {
+    const holder = {ctx,src,processor:null};
+    state.voicePcmNode = holder;
+    if (ctx.state === 'suspended') await ctx.resume();
+    const timing = getBrowserSpeechTiming();
+    const captureOffset = timing ? performance.now()/1000-timing.origin-ctx.currentTime : 0;
+    function receive(pcm, frameStart) {
+        if (state.voicePcmNode !== holder || ws.readyState !== WebSocket.OPEN || state.sessionState !== 'live') return;
+        if (timing) {
+            const start = captureOffset+frameStart/ctx.sampleRate;
+            if (Array.isArray(state.liveAudioAmplitudeHistory)) {
+                const rms = Math.sqrt(pcm.reduce((sum,s)=>sum+(s/32768)**2,0)/pcm.length);
+                state.liveAudioAmplitudeHistory.push({timestamp:start,amplitude:Math.min(100,rms*400),muted:!!state.micMuted});
+            }
+            if (state.micMuted) {
+                timing.input.abort(start,'muted').forEach(recordBrowserTimingEvent);
+            } else {
+                timing.input.process(Float32Array.from(pcm,s=>s/32768),start).forEach(recordBrowserTimingEvent);
+            }
+        } else if (state.liveSessionStartTime > 0 && state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+            // Preserve the earlier browser-mic path for a server-side speaker.
+            const rms = Math.sqrt(pcm.reduce((sum,s)=>sum+(s/32768)**2,0)/pcm.length)*400;
+            const threshold = Number.isFinite(uiSettings.userVoiceThreshold) ? uiSettings.userVoiceThreshold : 5;
+            const now = Date.now()/1000-state.liveSessionStartTime;
+            if (rms < threshold) {
+                if (state.voiceSilenceCandidate == null) state.voiceSilenceCandidate = now;
+                else if (now-state.voiceSilenceCandidate >= .15) {
+                    state.liveTtlBandStartTime = state.voiceSilenceCandidate;
                     state.voiceSilenceCandidate = null;
                 }
-            }
+            } else state.voiceSilenceCandidate = null;
         }
-    };
-    src.connect(processor);
-    processor.connect(ctx.destination);
-    state.voicePcmNode = { processor, src, ctx };
+        ws.send(pcm.buffer);
+    }
+    try {
+        if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
+        await ctx.audioWorklet.addModule(new URL('mic_capture_worklet.js?v=browser-timing-2',document.baseURI).href);
+        if (state.voicePcmNode !== holder) return;
+        const node = new AudioWorkletNode(ctx,'vaw-mic-capture');
+        holder.processor = node;
+        node.port.onmessage = event=>receive(new Int16Array(event.data.pcm),event.data.startFrame);
+        src.connect(node); node.connect(ctx.destination);
+        holder.captureMethod = 'audio_worklet';
+    } catch (error) {
+        if (state.voicePcmNode !== holder) return;
+        // Older browsers still get sub-buffer energy windows, with a less precise clock.
+        const node = ctx.createScriptProcessor(512,1,1);
+        holder.processor = node; holder.captureMethod = 'script_processor_fallback';
+        node.onaudioprocess = event=> {
+            const values = event.inputBuffer.getChannelData(0);
+            const pcm = Int16Array.from(values,s=>Math.max(-1,Math.min(1,s))*32767);
+            receive(pcm,Math.max(0,ctx.currentTime*ctx.sampleRate-pcm.length));
+        };
+        src.connect(node); node.connect(ctx.destination);
+    }
+    if (timing && state.voicePcmNode === holder) recordBrowserTimingEvent({event_type:'browser_capture_ready',
+        timestamp:performance.now()/1000-timing.origin,lane:'audio',
+        data:{clock:'browser_monotonic',method:holder.captureMethod}});
 }
 
 function stopVoiceMicStream() {
+    const timing = state.browserSpeechTiming;
+    if (timing) timing.input.abort(performance.now()/1000-timing.origin,'capture_disconnected').forEach(recordBrowserTimingEvent);
     if (state.voicePcmNode) {
         try {
             state.voicePcmNode.src.disconnect();
-            state.voicePcmNode.processor.disconnect();
+            if (state.voicePcmNode.processor) state.voicePcmNode.processor.disconnect();
+            state.voicePcmNode.ctx.close().catch(()=>{});
         } catch (e) {}
         state.voicePcmNode = null;
     }
@@ -8150,6 +8462,7 @@ function ttsChunkToAmplitudeSegments(ch, sampleRate, chunkStartTime, chunkDurati
 }
 
 function closeLiveTtlBandFromPlayback() {
+    if (isFullDuplexDisplay(currentConfig) || state.browserSpeechTiming) return;
     if (
         state.liveTtlBandStartTime == null
         || (
@@ -8159,11 +8472,9 @@ function closeLiveTtlBandFromPlayback() {
     ) {
         return false;
     }
-    var firstChunk = state.firstTtsPlayTimeThisResponse;
-    var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-    var bandEnd = (firstChunk != null && firstAbove != null)
-        ? Math.min(firstChunk, firstAbove)
-        : (firstAbove != null ? firstAbove : firstChunk);
+    // A silent first chunk is not an audible onset.
+    var bandEnd = state.earliestTtsPlayTimeAboveThreshold;
+    if (bandEnd == null) return false;
     return window.MMASTimelineHelpers.closeTtlBandAt(state, bandEnd);
 }
 
@@ -8224,6 +8535,8 @@ function recordClientTimelineEvent(event) {
  * calls this without options and intentionally emits no Barge-in marker.
  */
 function stopTtsPlayback(options) {
+    state.ttsScheduleEpoch = (state.ttsScheduleEpoch || 0) + 1;
+    cancelBrowserOutputTiming('cancelled');
     options = options || {};
     var sources = state.activeTtsSources || [];
     var ctx = state.ttsAudioContext;
@@ -8331,7 +8644,8 @@ function stopTtsPlayback(options) {
 
 /** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push from PCM; first/earliest set below when serverAmplitudeSegments provided.
  * serverAmplitudeSegments: optional array of { startTime?, endTime?, amplitude } from server; we use amplitude but assign startTime/endTime from when we schedule playback (client session time) so purple aligns with audio. */
-function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments) {
+function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments, duplexOnset) {
+    const scheduleEpoch = state.ttsScheduleEpoch || 0;
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -8354,6 +8668,7 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
     const duration = numSamples / sampleRate;
     var windowSec = 0.025;
     function schedulePlayback() {
+        if (state.sessionState !== 'live' || (state.ttsScheduleEpoch || 0) !== scheduleEpoch) return;
         let startTime = state.ttsNextStartTime;
         if (typeof startTime !== 'number' || startTime < 0 || startTime < ctx.currentTime) startTime = ctx.currentTime;
         state.ttsNextStartTime = startTime + duration;
@@ -8367,6 +8682,19 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
         var actualStartSession = (nowSec - sessionStart) + delayUntilPlay;
+        const measuredStart = observeBrowserOutputTiming(samples,sampleRate,ctx,startTime);
+        if (Number.isFinite(measuredStart)) actualStartSession = measuredStart;
+        const firstAudibleSample = samples.findIndex(sample=>Math.abs(sample)>128);
+        if (firstAudibleSample >= 0 && !state.browserSpeakerMuted) {
+            const onset = actualStartSession+firstAudibleSample/sampleRate;
+            if (state.earliestTtsPlayTimeAboveThreshold == null || onset < state.earliestTtsPlayTimeAboveThreshold) state.earliestTtsPlayTimeAboveThreshold = onset;
+        }
+        if (duplexOnset && !state.browserSpeakerMuted && ctx.state === 'running' && state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            const first = samples.findIndex(sample => Math.abs(sample) > 128);
+            if (first >= 0) state.voiceWs.send(JSON.stringify({type:'duplex_audio_playback',
+                timestamp:actualStartSession+first/sampleRate, utterance_id:duplexOnset.utterance_id,
+                audio_region_id:duplexOnset.audio_region_id, audible:true}));
+        }
         // Use server amplitude data but place segments at client play time so purple aligns with audio
         if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && Array.isArray(serverAmplitudeSegments) && serverAmplitudeSegments.length) {
             for (var i = 0; i < serverAmplitudeSegments.length; i++) {
@@ -8378,11 +8706,6 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
             }
             if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
                 state.firstTtsPlayTimeThisResponse = actualStartSession;
-            for (var ki = 0; ki < serverAmplitudeSegments.length; ki++) {
-                var a = (serverAmplitudeSegments[ki] && typeof serverAmplitudeSegments[ki].amplitude === 'number') ? serverAmplitudeSegments[ki].amplitude : 0;
-                if (a > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || actualStartSession + ki * windowSec < state.earliestTtsPlayTimeAboveThreshold))
-                    state.earliestTtsPlayTimeAboveThreshold = actualStartSession + ki * windowSec;
-            }
             closeLiveTtlBandFromPlayback();
         } else if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
             var actualEndSession = actualStartSession + duration;
@@ -8390,10 +8713,6 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
             for (var si = 0; si < segs.length; si++) state.liveTtsAmplitudeHistory.push(segs[si]);
             if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
                 state.firstTtsPlayTimeThisResponse = actualStartSession;
-            for (var ki = 0; ki < segs.length; ki++) {
-                if (segs[ki].amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || segs[ki].startTime < state.earliestTtsPlayTimeAboveThreshold))
-                    state.earliestTtsPlayTimeAboveThreshold = segs[ki].startTime;
-            }
             closeLiveTtlBandFromPlayback();
         } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
             closeLiveTtlBandFromPlayback();
@@ -8433,6 +8752,7 @@ function toggleMicMute() {
 
 /** Toggle browser speaker mute (TTS). Pipeline keeps running; only the browser output is silenced. For demo: talk over TTS with Q. */
 function toggleBrowserSpeakerMute() {
+    cancelBrowserOutputTiming('muted');
     state.browserSpeakerMuted = !state.browserSpeakerMuted;
     if (state.ttsGainNode) state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
     updateSpeakerButton();
@@ -8527,6 +8847,7 @@ function stopSessionRecording() {
 
     state.liveSessionThumbnail = captureSessionThumbnail();
     stopTtsPlayback();
+    stopVoiceMicStream();
     stopLiveSystemStatsPoll();
 
     if (state.liveTimelineRafId != null) {
@@ -8538,6 +8859,7 @@ function stopSessionRecording() {
             type: 'stop',
             ttl_bands: state.liveTtlBands || [],
             tts_playback_segments: state.liveTtsAmplitudeHistory || [],
+            audio_amplitude_history: state.liveAudioAmplitudeHistory || [],
             thumbnail: state.liveSessionThumbnail
         }));
         // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for
@@ -9053,8 +9375,9 @@ function initTimelineEventTooltip() {
         const rect = canvas.getBoundingClientRect();
         const localX = event.clientX - rect.left;
         const localY = event.clientY - rect.top;
-        const regions = state.timelineBargeInHitRegions || [];
+        const regions = [...(state.timelineBargeInHitRegions || []), ...(state.timelineDuplexHitRegions || [])];
         const hit = regions.find(function (region) {
+            if (region.kind === 'duplex') return localX >= region.x1 && localX <= region.x2 && localY >= region.y1 && localY <= region.y2;
             const halfWidth = Math.max(7, Number(region.width || 0) / 2);
             return Math.abs(localX - region.x) <= halfWidth
                 && localY >= region.y1
@@ -9080,6 +9403,19 @@ function initTimelineEventTooltip() {
         }
         if (hit.discardedAudioMs != null) {
             rows.push('Scheduled audio discarded: ' + Math.round(Number(hit.discardedAudioMs)) + ' ms');
+        }
+        if (hit.kind === 'duplex') {
+            rows.splice(0, rows.length,
+                '<strong>AI transcript · ' + (hit.finalized ? 'final' : 'partial') + '</strong>',
+                'Text received: ' + Number(hit.stopTime).toFixed(3) + ' s', escapeHtml(hit.text));
+            if (hit.metric === 'fd-ttl') {
+                rows.splice(0, rows.length, '<strong>TTL estimate</strong>',
+                    'Input end: ' + hit.start.toFixed(3) + ' s',
+                    'Scheduled audio: ' + hit.end.toFixed(3) + ' s',
+                    'FD-TTL: ' + hit.ttlMs.toFixed(1) + ' ms',
+                    hit.dominant ? 'Endpoint: dominant energy region (heuristic)' : 'Endpoint: observed energy region');
+                if (hit.dominant && hit.ttlRange) rows.push('Including later short regions: ' + hit.ttlRange.map(n => n.toFixed(1)).join(' – ') + ' ms');
+            }
         }
         tooltip.innerHTML = rows.join('<br>');
         tooltip.hidden = false;
@@ -9300,7 +9636,7 @@ function getPipelineTableHtml(config, options) {
     const arrowRow = hasCamera ? '<div class="pipeline-arrow-row" aria-hidden="true"><i data-lucide="chevron-down" class="lucide-inline pipeline-arrow-down"></i></div>' : '';
     var flowSegments;
     if (isRealtimeFullVoiceConfig(config)) {
-        var realtimeLabel = 'OpenAI Realtime';
+        var realtimeLabel = config.asr && config.asr.realtime_api_style === 'nemo-voicechat' ? 'Nemotron VoiceChat · Full duplex' : 'OpenAI Realtime';
         var realtimeTitle = 'ASR + TTS Realtime (Full voice)';
         flowSegments = '<div class="pipeline-flow">' +
             '<span class="pipeline-seg pipeline-seg-realtime">' +

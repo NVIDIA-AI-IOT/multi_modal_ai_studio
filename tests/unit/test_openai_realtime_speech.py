@@ -20,6 +20,7 @@ from multi_modal_ai_studio.backends.tts.openai_realtime import (
     OpenAIRealtimeTTSBackend,
 )
 from multi_modal_ai_studio.config.schema import ASRConfig, SessionConfig, TTSConfig
+from multi_modal_ai_studio.backends.realtime.duplex import AcousticTurn, ContinuousPCMInput
 
 
 class _SendingWebSocket:
@@ -46,6 +47,76 @@ class _IncomingWebSocket:
         if not self._messages:
             raise StopAsyncIteration
         return self._messages.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_voicechat_configures_only_supported_native_fields():
+    client = OpenAIRealtimeClient("ws://localhost/realtime", "", api_style="nemo-voicechat",
+                                  instructions="Speak briefly.", turn_detection={"type": "server_vad"})
+    client._ws = _SendingWebSocket()
+    await client._send_session_update()
+    config = client._ws.messages[0]["session"]
+    assert config == {
+        "instructions": "Speak briefly.", "tools": [],
+        "audio": {"input": {"format": {"type": "audio/pcm", "rate": 24000}},
+                  "output": {"format": "pcm16"}},
+    }
+    with pytest.raises(NotImplementedError):
+        await client.cancel_response()
+    assert len(client._ws.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_voicechat_finalizes_multiple_turns_sharing_response_id_and_drains_partial():
+    client = OpenAIRealtimeClient("ws://localhost/realtime", "", api_style="nemo-voicechat")
+    client._ws = _IncomingWebSocket([
+        {"type": "response.output_audio_transcript.done", "transcript": "", "response_id": "stream"},
+        {"type": "response.output_audio_transcript.delta", "delta": "Two."},
+        {"type": "response.output_audio_transcript.done", "transcript": "Two.", "response_id": "stream"},
+        {"type": "response.output_audio_transcript.delta", "delta": "Two."},
+        {"type": "response.output_audio_transcript.done", "transcript": "Two.", "response_id": "stream"},
+        {"type": "response.output_audio_transcript.delta", "delta": "Four."},
+        {"type": "session.end"},
+    ])
+    await client._receive_loop()
+    events = [e async for e in client.events() if e is not None]
+    assert [e.text for e in events if e.kind == "output_transcript_completed"] == ["Two.", "Two.", "Four."]
+    assert client._session_ended.is_set()
+
+
+@pytest.mark.asyncio
+async def test_native_transcript_done_does_not_duplicate_ga_item_final():
+    client = OpenAIRealtimeClient("ws://localhost/realtime", "")
+    client._ws = _IncomingWebSocket([
+        {"type": "response.output_audio_transcript.done", "transcript": "Two."},
+        {"type": "conversation.item.done", "item": {"role": "assistant", "content": [
+            {"type": "output_audio", "transcript": "Two."}]}},
+    ])
+    await client._receive_loop()
+    events = [e async for e in client.events() if e is not None]
+    assert [e.text for e in events if e.kind == "output_transcript_completed"] == ["Two."]
+
+
+def test_continuous_input_supplies_silence_after_mute_and_bounds_stale_capture():
+    source = ContinuousPCMInput()
+    source.feed(b"\x01\x02" * 100)
+    assert source.take() == b"\x01\x02" * 100 + bytes(3640)
+    source.feed(b"\x01\x02" * 1920)
+    source.clear()
+    assert source.take() == bytes(3840)
+    source.feed(b"\x01\x02" * 20000)
+    assert len(source.buffer) == 3840 * 5
+    assert source.take() == b"\x01\x02" * 1920
+
+
+def test_acoustic_turn_waits_for_silence_then_recovers_on_next_utterance():
+    turn = AcousticTurn()
+    assert turn.observe(bytes(3840), 0) == (False, False)
+    assert turn.observe(b"\x00\x80" * 1920, 1) == (True, False)
+    assert turn.observe(bytes(3840), 1.2) == (False, False)
+    assert turn.observe(bytes(3840), 1.5) == (False, True)
+    assert turn.observe(bytes(3840), 2) == (False, False)
+    assert turn.observe(b"\x00\x01" * 1920, 2.1) == (True, False)
 
 
 @pytest.mark.asyncio

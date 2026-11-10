@@ -1,0 +1,38 @@
+name: "Nemotron VoiceChat 11B — Thor"
+description: "Local full-duplex English conversation with the public 11B Q4_K_M model. VoiceChat manages turn taking and interruption."
+app_version: "0.2.0"
+
+asr:
+  scheme: openai-realtime
+  realtime_url: ws://localhost:18088/v1/realtime
+  realtime_session_type: full
+  realtime_transport: websocket
+  realtime_api_style: nemo-voicechat
+  model: nemotron-voicechat
+  language: en-US
+
+llm:
+  scheme: openai
+  api_base: http://localhost:18088/v1
+  model: nemotron-voicechat
+  enable_vision: false
+  system_prompt: >-
+    You are NVIDIA VoiceChat, a helpful and friendly voice assistant.
+    Have engaging conversations in English. Give concise answers unless asked for detail.
+    Use plain spoken text without markdown. Let the user finish speaking before answering.
+
+tts:
+  scheme: openai-realtime
+  realtime_url: ws://localhost:18088/v1/realtime
+  voice: default
+  sample_rate: 24000
+
+devices:
+  video_source: none
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: false
+  timeline_position: right
+  session_auto_save: true
