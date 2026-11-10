@@ -9,6 +9,7 @@ if (typeof localStorage !== 'undefined' && localStorage.getItem('micWaveformDebu
 // ===== State Management =====
 let asrModelDiscovery = null;
 let asrModelDiscoverySequence = 0;
+const asrRealtimeLanguageDiscovery = new Map();
 const asrModelDownloads = new Set();
 const state = {
     sessions: [],
@@ -634,6 +635,7 @@ function renderConfig() {
         }
         if (tab === 'asr' && (currentConfig.asr.backend === 'riva' || currentConfig.asr.scheme === 'riva')) setTimeout(() => fetchASRModels(currentConfig.asr.server || currentConfig.asr.riva_server || 'localhost:50051'), 0);
         if (tab === 'asr' && (currentConfig.asr.backend === 'openai-rest' || currentConfig.asr.scheme === 'openai-rest')) setTimeout(() => fetchOpenAIASRModels(), 0);
+        if (tab === 'asr' && (currentConfig.asr.backend === 'openai-realtime' || currentConfig.asr.scheme === 'openai-realtime')) setTimeout(() => refreshASRLanguageMetadata(), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'riva' || currentConfig.tts.scheme === 'riva')) setTimeout(() => fetchTTSVoices(currentConfig.tts.riva_server || currentConfig.tts.server || 'localhost:50051'), 0);
         if (tab === 'tts' && (currentConfig.tts.backend === 'openai-rest' || currentConfig.tts.scheme === 'openai-rest')) setTimeout(() => fetchOpenAITTSMetadata(), 0);
         if (tab === 'device') {
@@ -1387,6 +1389,90 @@ function renderOpenAIASRVADSettings(config, readonly = false) {
     `;
 }
 
+function getASRLanguageInfo(config) {
+    const helper = window.MMASAsrLanguages;
+    let models = [];
+    let result;
+    if ((config.backend || config.scheme) === 'openai-realtime') {
+        result = asrRealtimeLanguageDiscovery.get(helper.identity(config));
+        models = result && result.models || [];
+    } else if (asrModelDiscovery && asrModelDiscovery.apiBase === helper.apiBase(config)
+            && asrModelDiscovery.apiKey === (config.api_key || '')) {
+        models = asrModelDiscovery.data.models || [];
+    }
+    const model = models.find(item => item.id === config.model);
+    return {...helper.languageInfo(config, model && model.languages), pending:!!(result && result.pending), failed:!!(result && result.failed)};
+}
+
+function renderASRLanguageSetting(config, readonly = false) {
+    if ((config.backend || config.scheme) === 'riva') return '';
+    const language = config.language || 'en-US';
+    if (readonly) return '<div class="form-group" id="asr-language-field"><label>Language</label>' +
+        '<input type="text" readonly disabled value="' + escapeHtml(language) + '"><div class="input-hint">Recorded session setting</div></div>';
+    const info = getASRLanguageInfo(config);
+    const choice = window.MMASAsrLanguages.choices(info.languages, language);
+    const locked = state.sessionState !== 'setup' ? ' disabled' : '';
+    const label = code => {
+        try { return new Intl.DisplayNames(['en'], {type:'language'}).of(code); }
+        catch (_) { return code; }
+    };
+    let field;
+    let hint;
+    if (info.languages.length) {
+        const placeholder = choice.supported ? '' : '<option value="" selected disabled>Select a supported language (configured: ' + escapeHtml(language) + ')</option>';
+        field = '<select id="asr-language-select"' + locked + ' onchange="updateConfig(\'asr\', \'language\', this.value)">' + placeholder +
+            choice.options.map(option => '<option value="' + escapeHtml(option.value) + '"' + (option.selected ? ' selected' : '') + '>' + escapeHtml(label(option.code)) + '</option>').join('') + '</select>';
+        hint = info.source === 'provider' ? 'Supported languages reported by the selected model.' :
+            'English-only public VoiceChat 11B model profile. The server does not advertise supported languages.';
+        if (!choice.supported) hint += ' The configured language is unsupported; select a supported language before starting.';
+    } else {
+        field = '<input type="text" id="asr-language-code"' + locked + ' value="' + escapeHtml(language) + '" onchange="updateConfig(\'asr\', \'language\', this.value)">';
+        hint = 'Supported languages are not reported by this model. Enter a language code; support is unverified.';
+    }
+    if (info.pending) hint = 'Checking provider language metadata… ' + (info.source === 'model_profile' ? 'Using the public VoiceChat 11B English profile meanwhile.' : '');
+    if (info.failed) hint = 'Could not retrieve language metadata. ' + hint;
+    return '<div class="form-group" id="asr-language-field"><label>Language</label>' + field +
+        '<div class="input-hint">' + escapeHtml(hint) + '</div>' +
+        '<button type="button" class="btn-secondary"' + locked + ' onclick="refreshASRLanguageMetadata(true)">Refresh languages</button></div>';
+}
+
+function refreshASRLanguageSetting() {
+    const field = document.getElementById('asr-language-field');
+    if (field && state.isLiveSession && state.activeConfigTab === 'asr') {
+        field.outerHTML = renderASRLanguageSetting(currentConfig.asr);
+    }
+}
+
+async function refreshASRLanguageMetadata(force = false) {
+    const config = currentConfig.asr || {};
+    if ((config.backend || config.scheme) === 'openai-rest') {
+        if (force) await fetchOpenAIASRModels();
+        refreshASRLanguageSetting();
+        return;
+    }
+    if ((config.backend || config.scheme) !== 'openai-realtime' || !state.isLiveSession) return;
+    const helper = window.MMASAsrLanguages;
+    const identity = helper.identity(config);
+    if (force) asrRealtimeLanguageDiscovery.delete(identity);
+    if (asrRealtimeLanguageDiscovery.has(identity)) { refreshASRLanguageSetting(); return; }
+    const apiBase = helper.apiBase(config);
+    if (!apiBase) return;
+    const pending = {models:[], pending:true};
+    asrRealtimeLanguageDiscovery.set(identity, pending);
+    try {
+        const response = await fetch('/api/asr/openai-models', {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({api_base:apiBase, api_key:config.api_key || '', realtime:true})});
+        const data = await response.json();
+        if (!response.ok) throw new Error('Language metadata unavailable');
+        if (asrRealtimeLanguageDiscovery.get(identity) !== pending) return;
+        asrRealtimeLanguageDiscovery.set(identity, {models:data.models || []});
+    } catch (_) {
+        if (asrRealtimeLanguageDiscovery.get(identity) !== pending) return;
+        asrRealtimeLanguageDiscovery.set(identity, {models:[], failed:true});
+    }
+    if (helper.identity(currentConfig.asr) === identity) refreshASRLanguageSetting();
+}
+
 function renderASRConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
@@ -1615,19 +1701,7 @@ function renderASRConfig(config, readonly = false) {
                 </div>
             </div>
 
-            <!-- Common Settings (for non-Riva backends) -->
-            <div class="form-group" style="display: ${config.backend === 'riva' ? 'none' : 'block'}">
-                <label>Language</label>
-                <select ${disabled} value="${config.language}" onchange="updateConfig('asr', 'language', this.value)">
-                    <option value="en-US" ${config.language === 'en-US' ? 'selected' : ''}>English (US)</option>
-                    <option value="en-GB" ${config.language === 'en-GB' ? 'selected' : ''}>English (UK)</option>
-                    <option value="es-ES" ${config.language === 'es-ES' ? 'selected' : ''}>Spanish</option>
-                    <option value="fr-FR" ${config.language === 'fr-FR' ? 'selected' : ''}>French</option>
-                    <option value="de-DE" ${config.language === 'de-DE' ? 'selected' : ''}>German</option>
-                    <option value="ja-JP" ${config.language === 'ja-JP' ? 'selected' : ''}>Japanese</option>
-                    <option value="zh-CN" ${config.language === 'zh-CN' ? 'selected' : ''}>Chinese (Simplified)</option>
-                </select>
-            </div>
+            ${renderASRLanguageSetting(config, readonly)}
 
             ${renderOpenAIASRVADSettings(config, readonly)}
 
@@ -3023,6 +3097,12 @@ function updateConfig(section, key, value) {
             setTimeout(() => fetchOpenAITTSMetadata(), 0);
         }
     }
+    if (state.activeConfigTab === 'asr') {
+        refreshASRLanguageSetting();
+        if ((currentConfig.asr.backend || currentConfig.asr.scheme) === 'openai-realtime') {
+            setTimeout(() => refreshASRLanguageMetadata(), 0);
+        }
+    }
     if (section === 'devices') {
         updateDeviceIndicators();
         updateChatInputVisibility();
@@ -3170,12 +3250,14 @@ async function fetchOpenAIASRModels() {
     const sequence = ++asrModelDiscoverySequence;
     const config = currentConfig.asr || {};
     const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
+    const apiKey = config.api_key || '';
     const select = document.getElementById('asr-rest-model-select');
     const hint = document.getElementById('asr-rest-model-hint');
     if (!apiBase || !select) return;
     const reload = document.getElementById('asr-model-reload');
     if (reload) reload.disabled = true;
     asrModelDiscovery = null;
+    refreshASRLanguageSetting();
     updateASRDownloadButton();
     if (hint) hint.textContent = 'Discovering ASR models from the provider…';
 
@@ -3185,15 +3267,16 @@ async function fetchOpenAIASRModels() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 api_base: apiBase,
-                api_key: config.api_key || '',
+                api_key: apiKey,
             }),
         });
         const data = await response.json().catch(function () { return {}; });
-        if (sequence !== asrModelDiscoverySequence || !window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
+        if (sequence !== asrModelDiscoverySequence || (currentConfig.asr.api_key || '') !== apiKey || !window.MMASConfigHelpers.matchesOpenAiAsrDiscovery(currentConfig.asr, apiBase)) return;
         if (!response.ok) throw new Error(data.error || ('Request failed: ' + response.status));
 
         const models = Array.isArray(data.models) ? data.models : [];
-        asrModelDiscovery = {apiBase: apiBase, data: data};
+        asrModelDiscovery = {apiBase: apiBase, apiKey:apiKey, data: data};
+        refreshASRLanguageSetting();
         const configured = String(currentConfig.asr.model || '');
         if (configured && !models.some(function (model) { return String(model.id) === configured; })) {
             models.unshift({id: configured, downloaded: false, configuredOnly: true, languages: []});
@@ -7896,6 +7979,11 @@ function handleVoiceWsClose(ev) {
 
 function startSessionRecording() {
     if (state.sessionState !== 'setup') return;
+    const asrLanguages = getASRLanguageInfo(currentConfig.asr);
+    if (asrLanguages.languages.length && !window.MMASAsrLanguages.choices(asrLanguages.languages, currentConfig.asr.language || 'en-US').supported) {
+        showVoiceErrorToast('Select a supported ASR language in Configuration before starting.');
+        return;
+    }
 
     // Full voice uses response audio from the same Realtime session. Transcript
     // mode participates in the classic cascade and may independently use

@@ -89,3 +89,27 @@ latency sample. Historical text events and amplitude envelopes alone cannot
 establish exact word-to-audio timing. Full speech-to-speech providers without
 the native measurement events still show transcripts and utilization, but
 latency remains unavailable. The cascade metrics retain their existing path.
+
+## ASR language choices
+
+The ASR configuration reads the selected model's optional `supported_languages`,
+`languages`, or `language` metadata from the provider model list. REST discovery
+reuses its existing model query. Realtime discovery converts the configured
+WebSocket URL to its HTTP model-list endpoint; it does not probe inference,
+download a model, or query a registry. Model, endpoint, wire-format and credential
+changes keep their language results separate.
+
+The current NeMo-Speech.cpp VoiceChat server does not advertise languages. For
+the explicit public 11B model ID and the trial preset's `nemotron-voicechat`
+alias, the UI uses its [English model profile](https://huggingface.co/nvidia/NVIDIA-NemotronLabs-VoiceChat-11B)
+and identifies that source instead of claiming dynamic language discovery.
+Provider language metadata takes precedence if available. Unknown models with
+no language metadata show an unverified manual code field rather than a list
+implying support for every language.
+
+Changing models preserves the configured language. If a reported list excludes
+it, select a supported language before starting. Generic language tags such as
+`en` accept equivalent configured locales such as `en-US`; a specific locale
+does not imply support for other locales. Historical sessions show the recorded
+language unchanged and do not query current provider capabilities. Riva retains
+its existing deployment-controlled language field.

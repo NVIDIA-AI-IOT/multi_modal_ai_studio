@@ -234,6 +234,8 @@ def _merge_openai_tts_models(
 def _parse_openai_asr_models(
     local_payload: Any,
     registry_payload: Any = None,
+    *,
+    realtime: bool = False,
 ) -> List[Dict[str, Any]]:
     """Combine local and provider-registry ASR models, marking local entries."""
     def asr_items(payload: Any) -> List[Dict[str, Any]]:
@@ -242,7 +244,7 @@ def _parse_openai_asr_models(
             item for item in raw
             if isinstance(item, dict)
             and item.get("id")
-            and item.get("task") == "automatic-speech-recognition"
+            and (realtime or item.get("task") == "automatic-speech-recognition")
         ]
 
     local_items = asr_items(local_payload)
@@ -253,13 +255,17 @@ def _parse_openai_asr_models(
         model_id = str(item["id"])
         if model_id in by_id:
             continue
-        languages = item.get("language", [])
+        languages = item.get("supported_languages", item.get("languages", item.get("language", [])))
         if isinstance(languages, str):
             languages = [languages]
+        if not isinstance(languages, list):
+            languages = []
         by_id[model_id] = {
             "id": model_id,
             "downloaded": model_id in local_ids,
-            "languages": [str(language) for language in languages if language],
+            "languages": sorted({_canonical_language_tag(language) for language in languages
+                                 if isinstance(language, str) and language.strip()
+                                 and language.lower() != "multilingual"}),
         }
     return sorted(
         by_id.values(),
@@ -1057,6 +1063,7 @@ class WebUIServer:
             return web.json_response({"error": "Request body must be JSON"}, status=400)
         api_base = (body.get("api_base") or "").strip().rstrip("/")
         api_key = (body.get("api_key") or "").strip()
+        realtime = body.get("realtime") is True
         if not api_base:
             return web.json_response({"error": "api_base is required"}, status=400)
 
@@ -1064,7 +1071,7 @@ class WebUIServer:
         try:
             async with ClientSession(timeout=ClientTimeout(total=20)) as session:
                 async with session.get(
-                    f"{api_base}/models?task=automatic-speech-recognition",
+                    f"{api_base}/models" if realtime else f"{api_base}/models?task=automatic-speech-recognition",
                     headers=headers,
                 ) as response:
                     local_body = await response.text()
@@ -1077,16 +1084,17 @@ class WebUIServer:
 
                 registry_payload: Any = None
                 registry_available = False
-                async with session.get(
-                    f"{api_base}/registry?task=automatic-speech-recognition",
-                    headers=headers,
-                ) as response:
-                    if response.status < 400:
-                        registry_payload = json.loads(await response.text())
-                        registry_available = True
+                if not realtime:
+                    async with session.get(
+                        f"{api_base}/registry?task=automatic-speech-recognition",
+                        headers=headers,
+                    ) as response:
+                        if response.status < 400:
+                            registry_payload = json.loads(await response.text())
+                            registry_available = True
 
-            models = _parse_openai_asr_models(local_payload, registry_payload)
-            download_supported = await discover_speaches_download(api_base, api_key)
+            models = _parse_openai_asr_models(local_payload, registry_payload, realtime=realtime)
+            download_supported = False if realtime else await discover_speaches_download(api_base, api_key)
             return web.json_response({
                 "models": models,
                 "registry_available": registry_available,
