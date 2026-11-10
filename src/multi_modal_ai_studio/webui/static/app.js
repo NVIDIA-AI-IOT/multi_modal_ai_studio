@@ -4022,7 +4022,12 @@ function renderTimelineMetrics() {
         return;
     }
     const session = state.selectedSession || {};
-    const metrics = session.metrics || {};
+    const metrics = {...(session.metrics || {})};
+    if (state.isLiveSession && state.browserSpeechTiming) {
+        const gaps = state.liveTtlBands.map(band=>band.ttlMs/1000);
+        Object.assign(metrics,{avg_ttl:gaps.length ? gaps.reduce((a,b)=>a+b,0)/gaps.length : null,
+            min_ttl:gaps.length ? Math.min(...gaps) : null,max_ttl:gaps.length ? Math.max(...gaps) : null});
+    }
     // Never label an old recording with the machine currently serving the UI.
     // Historical sessions use only the identity captured in their own JSON.
     const systemInfo = state.selectedSession ? session.system_info : state.serverSystemInfo;
@@ -4030,16 +4035,18 @@ function renderTimelineMetrics() {
     if (isFullDuplexDisplay(state.isLiveSession ? currentConfig : session.config)) {
         const fd = fullDuplexView();
         const m = (fd && fd.metrics) || {};
-        const ms = value => value == null ? 'Not aligned' : value.toFixed(1) + ' ms';
+        const browserMeasured = m.timing_basis === 'browser_capture_to_scheduled_audio';
+        const ms = value => value == null ? (browserMeasured ? 'No samples' : 'Not aligned') : value.toFixed(1) + ' ms';
         const values = [
             ['User utterances', m.user_utterances || 0], ['AI utterances', m.assistant_utterances || 0],
-            ['FD-TTL estimate', ms(m.avg_fd_ttl_ms)], ['First reply estimate', ms(m.avg_reaction_ms)],
-            ['FD-TTL samples', (m.matched_replies || 0) + '/' + (m.user_utterances || 0)],
+            [browserMeasured ? 'TTL estimate' : 'FD-TTL estimate', ms(m.avg_fd_ttl_ms)], [browserMeasured ? 'First audio estimate' : 'First reply estimate', ms(m.avg_reaction_ms)],
+            [browserMeasured ? 'TTL samples' : 'FD-TTL samples', browserMeasured ? (m.matched_replies || 0) : (m.matched_replies || 0) + '/' + (m.user_utterances || 0)],
+            ...(browserMeasured ? [['Speech regions',m.measurement_inputs || 0]] : []),
             ...(m.ambiguous_inputs ? [['Uncertain endpoints', m.ambiguous_inputs]] : []),
             ['Duration', state.isLiveSession && state.sessionState === 'live' ? formatDuration(Math.max(0,Date.now()/1000-state.liveSessionStartTime)) : (m.duration_s == null ? '—' : formatDuration(m.duration_s))],
         ];
         metricsEl.innerHTML = values.map(([label, value]) =>
-            '<div class="timeline-metric" title="Input energy boundaries to browser scheduled audio; temporal association. Short acknowledgements count. Dominant-region endpoint estimates are marked ≈; hover shows the method and range. Comparable input regions remain uncertain and are excluded from latency averages. Unaligned replies are excluded, not replaced by a later answer. Negative FD-TTL means overlap."><span class="timeline-metric-label">' + escapeHtml(label) + '</span><span class="timeline-metric-value">' + escapeHtml(String(value)) + '</span></div>'
+            '<div class="timeline-metric" title="' + escapeHtml(browserMeasured ? 'Browser acoustic gap: capture energy end to the next scheduled audible region. No transcript or model-turn matching. Input pauses and already-playing audio are recorded separately; microphone/speaker hardware latency is not directly measured.' : 'Legacy server-input energy to browser scheduled audio; transcript association and endpoint estimates may be uncertain.') + '"><span class="timeline-metric-label">' + escapeHtml(label) + '</span><span class="timeline-metric-value">' + escapeHtml(String(value)) + '</span></div>'
         ).join('') + renderTimelineSystemInfo(systemInfo);
         return;
     }
@@ -4328,7 +4335,7 @@ function renderTimeline() {
         speech: 'ASR',      // Changed from 'SPEECH' to 'ASR'
         llm: 'LLM',
         tts: 'TTS',
-        ttl: fdMode ? 'FD-TTL' : 'TTL'
+        ttl: fdMode && !(fullDuplexView() && fullDuplexView().metrics.timing_basis === 'browser_capture_to_scheduled_audio') ? 'FD-TTL' : 'TTL'
     };
     if (fdMode) {
         laneLabels.speech = 'USER TEXT';
@@ -5886,6 +5893,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     // 3b. TTL bands: transparent red from browser-observed end-of-speech to
     // first sound out.  Persisted live bands are authoritative during replay;
     // waveform reconstruction is only a fallback for legacy recordings.
+    const acousticTiming = fdMode || !!(state.isLiveSession && state.browserSpeechTiming) || !!(state.selectedSession && state.selectedSession.browser_timing);
     const ttlLaneIndex = lanes.indexOf('ttl');
     const persistedReplayBands = (
         state.selectedSession && Array.isArray(state.selectedSession.ttl_bands)
@@ -5897,7 +5905,9 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         return persisted.length ? persisted : fallbackFactory();
     };
     const fdBands = fdMode && fullDuplexView() ? fullDuplexView().replies.filter(r => r.fd_ttl_ms != null).map(r => ({start:r.input_end, end:r.audio_onset, ttlMs:r.fd_ttl_ms, endpointMethod:r.endpoint_method, ttlRange:r.fd_ttl_range_ms})) : [];
-    const replayBands = fdMode ? fdBands : (!inLive && !hasStoppedLiveData && state.selectedSession)
+    const replayBands = fdMode ? fdBands : (!inLive && state.selectedSession && state.selectedSession.browser_timing)
+        ? state.selectedSession.browser_timing.replies.filter(r=>r.fd_ttl_ms != null).map(r=>({start:r.input_end,end:r.audio_onset,ttlMs:r.fd_ttl_ms}))
+        : (!inLive && !hasStoppedLiveData && state.selectedSession)
         ? selectReplayTtlBands(persistedReplayBands, function () {
             return replayTtsSegments && replayTtsSegments.length
                 ? computeTtlBandsFromReplay(
@@ -5924,8 +5934,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
         if (replayBands.length > 0) bandsToDraw.push(...replayBands);
         bandsToDraw.forEach(function (band) {
-            const x1 = PADDING_LEFT + ((fdMode ? Math.min(band.start, band.end) : band.start) - timelineOffset) * timeScale;
-            const x2 = PADDING_LEFT + ((fdMode ? Math.max(band.start, band.end) : band.end) - timelineOffset) * timeScale;
+            const x1 = PADDING_LEFT + ((acousticTiming ? Math.min(band.start, band.end) : band.start) - timelineOffset) * timeScale;
+            const x2 = PADDING_LEFT + ((acousticTiming ? Math.max(band.start, band.end) : band.end) - timelineOffset) * timeScale;
             if (x2 <= PADDING_LEFT || x1 >= width - PADDING_RIGHT) return;
             const drawX1 = Math.max(PADDING_LEFT, x1);
             const drawX2 = Math.min(width - PADDING_RIGHT, x2);
@@ -5938,8 +5948,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 ctx.textBaseline = 'middle';
                 const midX = (drawX1 + drawX2) / 2;
                 const dominant = band.endpointMethod === 'dominant_energy_region';
-                ctx.fillText((dominant ? '≈ ' : '') + (fdMode ? band.ttlMs.toFixed(1) : band.ttlMs) + ' ms', midX, ttlLaneCenterY);
-                if (fdMode) state.timelineDuplexHitRegions.push({kind:'duplex', metric:'fd-ttl', x1:drawX1, x2:drawX2, y1:ttlLaneY, y2:ttlLaneY+ttlLaneH, start:band.start, end:band.end, ttlMs:band.ttlMs, dominant, ttlRange:band.ttlRange});
+                ctx.fillText((dominant ? '≈ ' : '') + (acousticTiming ? band.ttlMs.toFixed(1) : band.ttlMs) + ' ms', midX, ttlLaneCenterY);
+                if (acousticTiming) state.timelineDuplexHitRegions.push({kind:'duplex', metric:'fd-ttl', x1:drawX1, x2:drawX2, y1:ttlLaneY, y2:ttlLaneY+ttlLaneH, start:band.start, end:band.end, ttlMs:band.ttlMs, dominant, ttlRange:band.ttlRange});
             }
         });
     }
@@ -7435,6 +7445,9 @@ function handleVoiceWsMessage(ev) {
                 renderTimeline();
             }
         } else if (msg.type === 'user_amplitude') {
+            // Browser capture has its own frame-timed waveform; never mix it
+            // with transport-delayed server amplitude timestamps.
+            if (state.browserSpeechTiming && !state.micWaveformFromServer) return;
             var amp = typeof msg.amplitude === 'number' ? msg.amplitude : 0;
             var serverTs = typeof msg.timestamp === 'number' ? msg.timestamp : 0;
             // Use server timestamp so amplitude history is monotonic and matches server 25ms spacing (no saw/block).
@@ -8022,6 +8035,7 @@ function startSessionRecording() {
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
         window.MMASDuplexHelpers.reset(state);
+        resetBrowserSpeechTiming();
         state.liveFullDuplex = null;
         state.ttsNextStartTime = 0;
         state.activeTtsSources = [];
@@ -8096,6 +8110,7 @@ function startSessionRecording() {
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
         window.MMASDuplexHelpers.reset(state);
+        resetBrowserSpeechTiming();
         state.liveFullDuplex = null;
         state.ttsNextStartTime = 0;
         state.activeTtsSources = [];
@@ -8230,11 +8245,12 @@ function startVoiceMicStream() {
         : true;
     console.log('[Voice] Requesting getUserMedia({ audio: ... })', state.selectedBrowserMicId ? 'deviceId: ' + state.selectedBrowserMicId : 'default');
     navigator.mediaDevices.getUserMedia({ audio: audioConstraint }).then(function (s) {
+        if (state.sessionState !== 'live') {s.getTracks().forEach(track=>track.stop());return;}
         state.voiceMicStream = s;
         const label = s.getAudioTracks()[0]?.label || 'default';
         console.log('[Voice] getUserMedia ok, mic:', label, ', connecting PCM to WS');
         updateDeviceIndicators();
-        connectPcmToWs(s);
+        return connectPcmToWs(s);
     }).catch(function (e) {
         console.error('[Voice] getUserMedia for voice failed:', e);
     });
@@ -8263,86 +8279,157 @@ function updateVoiceDebugPanel() {
     logEl.textContent = state.voiceMessageLog.length ? state.voiceMessageLog.join('\n\n---\n\n') : '(no messages yet)';
 }
 
-function connectPcmToWs(stream) {
+function resetBrowserSpeechTiming() {
+    const previous = state.browserSpeechTiming;
+    if (previous) {
+        previous.timers.forEach(id => clearTimeout(id));
+        if (previous.tailTimer) clearTimeout(previous.tailTimer);
+    }
+    state.browserSpeechTiming = null;
+}
+
+function getBrowserSpeechTiming() {
+    if (state.liveSessionStartTime <= 0 || isServerMicSelected() || isServerSpeakerSelected()) return null;
+    if (!state.browserSpeechTiming) {
+        const origin = performance.now()/1000 - (Date.now()/1000-state.liveSessionStartTime);
+        state.browserSpeechTiming = {origin, timers:new Set(), outputActive:new Set(),
+            input:new window.MMASSpeechTiming.EnergyObserver({sampleRate:16000,source:'input'}), output:null};
+        recordBrowserTimingEvent({event_type:'browser_timing_started',timestamp:Math.max(0,performance.now()/1000-origin),
+            lane:'audio',data:{clock:'browser_monotonic',source:'browser_capture'}});
+    }
+    return state.browserSpeechTiming;
+}
+
+function recordBrowserTimingEvent(event) {
+    if (!Number.isFinite(event.timestamp) || event.timestamp < 0) return;
+    recordClientTimelineEvent(event);
+    const replies = window.MMASSpeechTiming.gaps(state.liveTimelineEvents);
+    // The same acoustic observations drive cascade bands and full-duplex gaps.
+    state.liveTtlBands = replies.filter(r => r.fd_ttl_ms != null).map(r => ({start:r.input_end,end:r.audio_onset,ttlMs:r.fd_ttl_ms}));
+    if (state.liveFullDuplex) {
+        const measured = replies.filter(r=>r.fd_ttl_ms != null);
+        const average = key => measured.length ? measured.reduce((sum,r)=>sum+r[key],0)/measured.length : null;
+        state.liveFullDuplex.replies = replies;
+        Object.assign(state.liveFullDuplex.metrics,{avg_fd_ttl_ms:average('fd_ttl_ms'),avg_reaction_ms:average('reaction_ms'),
+            matched_replies:measured.length,measurement_inputs:replies.length,ambiguous_inputs:0,dominant_endpoint_estimates:0,
+            timing_basis:'browser_capture_to_scheduled_audio'});
+    }
+    renderTimelineMetrics(); renderTimeline();
+}
+
+function cancelBrowserOutputTiming(reason) {
+    const timing = state.browserSpeechTiming;
+    if (!timing) return;
+    timing.timers.forEach(id=>clearTimeout(id)); timing.timers.clear();
+    if (timing.tailTimer) clearTimeout(timing.tailTimer);
+    const now = performance.now()/1000-timing.origin;
+    if (timing.output) timing.output.abort(now,reason).forEach(event=> {
+        if (timing.outputActive.has(event.data.region_id)) recordBrowserTimingEvent(event);
+    });
+    timing.outputActive.clear();
+}
+
+function observeBrowserOutputTiming(samples, sampleRate, context, startTime) {
+    const timing = getBrowserSpeechTiming();
+    if (!timing || state.browserSpeakerMuted || context.state !== 'running') return;
+    if (!timing.output) timing.output = new window.MMASSpeechTiming.EnergyObserver({sampleRate,source:'output',startRms:.004,stopRms:.004,minimumMs:20});
+    const now = performance.now()/1000-timing.origin;
+    let start = now + startTime-context.currentTime;
+    // Map the output device's presentation estimate into the same performance clock.
+    const stamp = context.getOutputTimestamp && context.getOutputTimestamp();
+    if (stamp && stamp.performanceTime > 0 && stamp.contextTime > 0) {
+        start = stamp.performanceTime/1000-timing.origin + startTime-stamp.contextTime;
+    }
+    const pcm = Float32Array.from(samples, s=>s/32768);
+    function deliver(event) {
+        if (state.sessionState !== 'live' || state.browserSpeakerMuted || state.browserSpeechTiming !== timing) return;
+        if (event.event_type === 'browser_output_start') timing.outputActive.add(event.data.region_id);
+        else timing.outputActive.delete(event.data.region_id);
+        recordBrowserTimingEvent(event);
+    }
+    timing.output.process(pcm,start).forEach(event=> {
+        const id = setTimeout(()=> {timing.timers.delete(id);deliver(event);},Math.max(0,(event.timestamp-now)*1000));
+        timing.timers.add(id);
+    });
+    if (timing.tailTimer) clearTimeout(timing.tailTimer);
+    timing.tailTimer = setTimeout(()=> {
+        timing.output.advance(performance.now()/1000-timing.origin).forEach(deliver);
+    },Math.max(0,(start+samples.length/sampleRate+.16-now)*1000));
+    return start;
+}
+
+async function connectPcmToWs(stream) {
     const ws = state.voiceWs;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.warn('[Voice] connectPcmToWs: WS not open, skipping');
-        return;
-    }
-    // Capture at 16 kHz directly (no JS resampling). Browser resamples device to context rate if needed.
-    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: TARGET_SAMPLE_RATE });
-    console.log('[Voice] AudioContext state:', ctx.state, 'sampleRate:', ctx.sampleRate);
+    if (!ws || ws.readyState !== WebSocket.OPEN || state.sessionState !== 'live') return;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({sampleRate:TARGET_SAMPLE_RATE});
     const src = ctx.createMediaStreamSource(stream);
-    const bufferLen = 2048; // 2048 @ 16 kHz = 128 ms per chunk
-    const processor = ctx.createScriptProcessor(bufferLen, 1, 1);
-    let pcmChunkCount = 0;
-
-    if (ctx.state === 'suspended') {
-        ctx.resume().then(function () {
-            console.log('[Voice] AudioContext resumed, mic streaming to server');
-        }).catch(function (e) {
-            console.warn('[Voice] AudioContext resume failed:', e);
-        });
-    }
-
-    var lastClientAmpLogTime = 0;
-    processor.onaudioprocess = function (e) {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        const input = e.inputBuffer.getChannelData(0);
-        const pcmData = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) {
-            const v = Math.max(-1, Math.min(1, input[i]));
-            pcmData[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
-        }
-        // Debug-only: client mic RMS (enable with localStorage micWaveformDebug=1)
-        var nowSec = Date.now() / 1000;
-        var sumSq = 0;
-        for (var i = 0; i < input.length; i++) sumSq += input[i] * input[i];
-        var clientRms = input.length ? Math.sqrt(sumSq / input.length) : 0;
-        var clientAmpScaled = Math.min(100, clientRms * 400);
-        if (window._micWaveformDebug && state.liveSessionStartTime > 0 && nowSec - lastClientAmpLogTime >= 1.0) {
-            console.log('[user_amplitude] client: buffer_len=' + input.length + ' float_rms=' + clientRms.toFixed(4) + ' amp_0_100=' + clientAmpScaled.toFixed(2));
-            lastClientAmpLogTime = nowSec;
-        }
-        if (window._micWaveformDebug && state.liveSessionStartTime > 0 && clientAmpScaled >= 20) {
-            var sessionT = nowSec - state.liveSessionStartTime;
-            console.log('[user_amplitude_high] client: session_t=' + sessionT.toFixed(2) + 's amp_0_100=' + clientAmpScaled.toFixed(2));
-        }
-        ws.send(pcmData.buffer);
-        pcmChunkCount++;
-        if (pcmChunkCount % 50 === 0) console.log('[Voice] Sent', pcmChunkCount, 'PCM chunks');
-        // AUDIO lane waveform: use only server user_amplitude (single source). Client used to push here too → double source caused saw/block shape with Realtime. RIVA looks correct because it only uses server.
-        if (state.liveSessionStartTime > 0) {
-            let sumSq = 0;
-            for (let i = 0; i < input.length; i++) sumSq += input[i] * input[i];
-            const rms = Math.min(100, Math.sqrt(sumSq / input.length) * 400);
-            const ts = (Date.now() / 1000) - state.liveSessionStartTime;
-            // Browser-side end-of-speech for TTL band: only when we have seen voice this turn (voiceTurnActive set by asr_partial)
-            const userTh = (typeof uiSettings.userVoiceThreshold === 'number' && !isNaN(uiSettings.userVoiceThreshold)) ? uiSettings.userVoiceThreshold : 5;
-            const SILENCE_CONFIRM_SEC = 0.15;
-            if (state.voiceTurnActive && state.liveTtlBandStartTime == null) {
-                if (rms < userTh) {
-                    if (state.voiceSilenceCandidate == null) state.voiceSilenceCandidate = ts;
-                    else if ((ts - state.voiceSilenceCandidate) >= SILENCE_CONFIRM_SEC) {
-                        state.liveTtlBandStartTime = state.voiceSilenceCandidate;
-                        state.voiceSilenceCandidate = null;
-                    }
-                } else {
+    const holder = {ctx,src,processor:null};
+    state.voicePcmNode = holder;
+    if (ctx.state === 'suspended') await ctx.resume();
+    const timing = getBrowserSpeechTiming();
+    const captureOffset = timing ? performance.now()/1000-timing.origin-ctx.currentTime : 0;
+    function receive(pcm, frameStart) {
+        if (state.voicePcmNode !== holder || ws.readyState !== WebSocket.OPEN || state.sessionState !== 'live') return;
+        if (timing) {
+            const start = captureOffset+frameStart/ctx.sampleRate;
+            if (Array.isArray(state.liveAudioAmplitudeHistory)) {
+                const rms = Math.sqrt(pcm.reduce((sum,s)=>sum+(s/32768)**2,0)/pcm.length);
+                state.liveAudioAmplitudeHistory.push({timestamp:start,amplitude:Math.min(100,rms*400),muted:!!state.micMuted});
+            }
+            if (state.micMuted) {
+                timing.input.abort(start,'muted').forEach(recordBrowserTimingEvent);
+            } else {
+                timing.input.process(Float32Array.from(pcm,s=>s/32768),start).forEach(recordBrowserTimingEvent);
+            }
+        } else if (state.liveSessionStartTime > 0 && state.voiceTurnActive && state.liveTtlBandStartTime == null) {
+            // Preserve the earlier browser-mic path for a server-side speaker.
+            const rms = Math.sqrt(pcm.reduce((sum,s)=>sum+(s/32768)**2,0)/pcm.length)*400;
+            const threshold = Number.isFinite(uiSettings.userVoiceThreshold) ? uiSettings.userVoiceThreshold : 5;
+            const now = Date.now()/1000-state.liveSessionStartTime;
+            if (rms < threshold) {
+                if (state.voiceSilenceCandidate == null) state.voiceSilenceCandidate = now;
+                else if (now-state.voiceSilenceCandidate >= .15) {
+                    state.liveTtlBandStartTime = state.voiceSilenceCandidate;
                     state.voiceSilenceCandidate = null;
                 }
-            }
+            } else state.voiceSilenceCandidate = null;
         }
-    };
-    src.connect(processor);
-    processor.connect(ctx.destination);
-    state.voicePcmNode = { processor, src, ctx };
+        ws.send(pcm.buffer);
+    }
+    try {
+        if (!ctx.audioWorklet) throw new Error('AudioWorklet unavailable');
+        await ctx.audioWorklet.addModule(new URL('mic_capture_worklet.js?v=browser-timing-2',document.baseURI).href);
+        if (state.voicePcmNode !== holder) return;
+        const node = new AudioWorkletNode(ctx,'vaw-mic-capture');
+        holder.processor = node;
+        node.port.onmessage = event=>receive(new Int16Array(event.data.pcm),event.data.startFrame);
+        src.connect(node); node.connect(ctx.destination);
+        holder.captureMethod = 'audio_worklet';
+    } catch (error) {
+        if (state.voicePcmNode !== holder) return;
+        // Older browsers still get sub-buffer energy windows, with a less precise clock.
+        const node = ctx.createScriptProcessor(512,1,1);
+        holder.processor = node; holder.captureMethod = 'script_processor_fallback';
+        node.onaudioprocess = event=> {
+            const values = event.inputBuffer.getChannelData(0);
+            const pcm = Int16Array.from(values,s=>Math.max(-1,Math.min(1,s))*32767);
+            receive(pcm,Math.max(0,ctx.currentTime*ctx.sampleRate-pcm.length));
+        };
+        src.connect(node); node.connect(ctx.destination);
+    }
+    if (timing && state.voicePcmNode === holder) recordBrowserTimingEvent({event_type:'browser_capture_ready',
+        timestamp:performance.now()/1000-timing.origin,lane:'audio',
+        data:{clock:'browser_monotonic',method:holder.captureMethod}});
 }
 
 function stopVoiceMicStream() {
+    const timing = state.browserSpeechTiming;
+    if (timing) timing.input.abort(performance.now()/1000-timing.origin,'capture_disconnected').forEach(recordBrowserTimingEvent);
     if (state.voicePcmNode) {
         try {
             state.voicePcmNode.src.disconnect();
-            state.voicePcmNode.processor.disconnect();
+            if (state.voicePcmNode.processor) state.voicePcmNode.processor.disconnect();
+            state.voicePcmNode.ctx.close().catch(()=>{});
         } catch (e) {}
         state.voicePcmNode = null;
     }
@@ -8375,7 +8462,7 @@ function ttsChunkToAmplitudeSegments(ch, sampleRate, chunkStartTime, chunkDurati
 }
 
 function closeLiveTtlBandFromPlayback() {
-    if (isFullDuplexDisplay(currentConfig)) return;
+    if (isFullDuplexDisplay(currentConfig) || state.browserSpeechTiming) return;
     if (
         state.liveTtlBandStartTime == null
         || (
@@ -8385,11 +8472,9 @@ function closeLiveTtlBandFromPlayback() {
     ) {
         return false;
     }
-    var firstChunk = state.firstTtsPlayTimeThisResponse;
-    var firstAbove = state.earliestTtsPlayTimeAboveThreshold;
-    var bandEnd = (firstChunk != null && firstAbove != null)
-        ? Math.min(firstChunk, firstAbove)
-        : (firstAbove != null ? firstAbove : firstChunk);
+    // A silent first chunk is not an audible onset.
+    var bandEnd = state.earliestTtsPlayTimeAboveThreshold;
+    if (bandEnd == null) return false;
     return window.MMASTimelineHelpers.closeTtlBandAt(state, bandEnd);
 }
 
@@ -8450,6 +8535,8 @@ function recordClientTimelineEvent(event) {
  * calls this without options and intentionally emits no Barge-in marker.
  */
 function stopTtsPlayback(options) {
+    state.ttsScheduleEpoch = (state.ttsScheduleEpoch || 0) + 1;
+    cancelBrowserOutputTiming('cancelled');
     options = options || {};
     var sources = state.activeTtsSources || [];
     var ctx = state.ttsAudioContext;
@@ -8558,6 +8645,7 @@ function stopTtsPlayback(options) {
 /** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push from PCM; first/earliest set below when serverAmplitudeSegments provided.
  * serverAmplitudeSegments: optional array of { startTime?, endTime?, amplitude } from server; we use amplitude but assign startTime/endTime from when we schedule playback (client session time) so purple aligns with audio. */
 function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments, duplexOnset) {
+    const scheduleEpoch = state.ttsScheduleEpoch || 0;
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -8580,6 +8668,7 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
     const duration = numSamples / sampleRate;
     var windowSec = 0.025;
     function schedulePlayback() {
+        if (state.sessionState !== 'live' || (state.ttsScheduleEpoch || 0) !== scheduleEpoch) return;
         let startTime = state.ttsNextStartTime;
         if (typeof startTime !== 'number' || startTime < 0 || startTime < ctx.currentTime) startTime = ctx.currentTime;
         state.ttsNextStartTime = startTime + duration;
@@ -8593,6 +8682,13 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
         var actualStartSession = (nowSec - sessionStart) + delayUntilPlay;
+        const measuredStart = observeBrowserOutputTiming(samples,sampleRate,ctx,startTime);
+        if (Number.isFinite(measuredStart)) actualStartSession = measuredStart;
+        const firstAudibleSample = samples.findIndex(sample=>Math.abs(sample)>128);
+        if (firstAudibleSample >= 0 && !state.browserSpeakerMuted) {
+            const onset = actualStartSession+firstAudibleSample/sampleRate;
+            if (state.earliestTtsPlayTimeAboveThreshold == null || onset < state.earliestTtsPlayTimeAboveThreshold) state.earliestTtsPlayTimeAboveThreshold = onset;
+        }
         if (duplexOnset && !state.browserSpeakerMuted && ctx.state === 'running' && state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
             const first = samples.findIndex(sample => Math.abs(sample) > 128);
             if (first >= 0) state.voiceWs.send(JSON.stringify({type:'duplex_audio_playback',
@@ -8610,11 +8706,6 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
             }
             if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
                 state.firstTtsPlayTimeThisResponse = actualStartSession;
-            for (var ki = 0; ki < serverAmplitudeSegments.length; ki++) {
-                var a = (serverAmplitudeSegments[ki] && typeof serverAmplitudeSegments[ki].amplitude === 'number') ? serverAmplitudeSegments[ki].amplitude : 0;
-                if (a > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || actualStartSession + ki * windowSec < state.earliestTtsPlayTimeAboveThreshold))
-                    state.earliestTtsPlayTimeAboveThreshold = actualStartSession + ki * windowSec;
-            }
             closeLiveTtlBandFromPlayback();
         } else if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && !skipSegmentPush) {
             var actualEndSession = actualStartSession + duration;
@@ -8622,10 +8713,6 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
             for (var si = 0; si < segs.length; si++) state.liveTtsAmplitudeHistory.push(segs[si]);
             if (state.firstTtsPlayTimeThisResponse == null || actualStartSession < state.firstTtsPlayTimeThisResponse)
                 state.firstTtsPlayTimeThisResponse = actualStartSession;
-            for (var ki = 0; ki < segs.length; ki++) {
-                if (segs[ki].amplitude > 0 && (state.earliestTtsPlayTimeAboveThreshold == null || segs[ki].startTime < state.earliestTtsPlayTimeAboveThreshold))
-                    state.earliestTtsPlayTimeAboveThreshold = segs[ki].startTime;
-            }
             closeLiveTtlBandFromPlayback();
         } else if (skipSegmentPush && state.liveTtlBandStartTime != null && (state.earliestTtsPlayTimeAboveThreshold != null || state.firstTtsPlayTimeThisResponse != null)) {
             closeLiveTtlBandFromPlayback();
@@ -8665,6 +8752,7 @@ function toggleMicMute() {
 
 /** Toggle browser speaker mute (TTS). Pipeline keeps running; only the browser output is silenced. For demo: talk over TTS with Q. */
 function toggleBrowserSpeakerMute() {
+    cancelBrowserOutputTiming('muted');
     state.browserSpeakerMuted = !state.browserSpeakerMuted;
     if (state.ttsGainNode) state.ttsGainNode.gain.value = state.browserSpeakerMuted ? 0 : 1;
     updateSpeakerButton();
@@ -8759,6 +8847,7 @@ function stopSessionRecording() {
 
     state.liveSessionThumbnail = captureSessionThumbnail();
     stopTtsPlayback();
+    stopVoiceMicStream();
     stopLiveSystemStatsPoll();
 
     if (state.liveTimelineRafId != null) {
@@ -8770,6 +8859,7 @@ function stopSessionRecording() {
             type: 'stop',
             ttl_bands: state.liveTtlBands || [],
             tts_playback_segments: state.liveTtsAmplitudeHistory || [],
+            audio_amplitude_history: state.liveAudioAmplitudeHistory || [],
             thumbnail: state.liveSessionThumbnail
         }));
         // Do not close the WebSocket here: the server may still send a synthetic asr_final (e.g. for
@@ -9319,11 +9409,11 @@ function initTimelineEventTooltip() {
                 '<strong>AI transcript · ' + (hit.finalized ? 'final' : 'partial') + '</strong>',
                 'Text received: ' + Number(hit.stopTime).toFixed(3) + ' s', escapeHtml(hit.text));
             if (hit.metric === 'fd-ttl') {
-                rows.splice(0, rows.length, '<strong>FD-TTL estimate</strong>',
+                rows.splice(0, rows.length, '<strong>TTL estimate</strong>',
                     'Input end: ' + hit.start.toFixed(3) + ' s',
                     'Scheduled audio: ' + hit.end.toFixed(3) + ' s',
                     'FD-TTL: ' + hit.ttlMs.toFixed(1) + ' ms',
-                    hit.dominant ? 'Endpoint: dominant energy region (heuristic)' : 'Endpoint: single energy region');
+                    hit.dominant ? 'Endpoint: dominant energy region (heuristic)' : 'Endpoint: observed energy region');
                 if (hit.dominant && hit.ttlRange) rows.push('Including later short regions: ' + hit.ttlRange.map(n => n.toFixed(1)).join(' – ') + ' ms');
             }
         }

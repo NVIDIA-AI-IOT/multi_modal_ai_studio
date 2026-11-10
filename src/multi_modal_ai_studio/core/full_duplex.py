@@ -6,6 +6,7 @@ Never substitute a later answer for an earlier reply lacking audio alignment.
 """
 import math
 from statistics import fmean
+from multi_modal_ai_studio.core.speech_timing import derive_browser_timing
 
 
 def is_full_duplex(config):
@@ -156,7 +157,7 @@ def derive_full_duplex(session):
         replies.append(reply)
     stops = [e["timestamp"] for e in events if e.get("event_type") == "session_stop"]
     duration = max(stops) if stops else max((e["timestamp"] for e in events), default=0)
-    return dict(
+    result = dict(
         schema_version=1,
         messages=sorted(users + list(assistants.values()), key=lambda m: m["timestamp"]),
         replies=replies,
@@ -170,3 +171,11 @@ def derive_full_duplex(session):
                      timing_basis="input_energy_to_browser_scheduled_audio",
                      association="temporal_candidate"),
     )
+    browser = derive_browser_timing(events)
+    if browser is not None:
+        result["schema_version"] = 2
+        result["transcript_replies"] = result["replies"]
+        result["replies"] = browser["replies"]
+        result["metrics"].update(browser["metrics"])
+        result["browser_timing"] = browser
+    return result

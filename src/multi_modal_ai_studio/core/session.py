@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from multi_modal_ai_studio.core.full_duplex import derive_full_duplex
+from multi_modal_ai_studio.core.speech_timing import derive_browser_timing
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.config.schema import SessionConfig
 from multi_modal_ai_studio.core.timeline import Timeline, TimelineEvent, Lane, EventType
@@ -396,15 +397,22 @@ class Session:
         if self.created_at.tzinfo is None and "Z" not in created_at_str and "+" not in created_at_str:
             created_at_str = created_at_str + "Z"
         duplex = derive_full_duplex({"config": self.config.to_dict(), "timeline": self.timeline.to_dict()})
+        browser = derive_browser_timing(self.timeline.to_dict())
+        metric_values = self._metrics.to_dict() if self._metrics and duplex is None else {}
+        if browser is not None and duplex is None:
+            gaps = [r["fd_ttl_ms"]/1000 for r in browser["replies"] if r["fd_ttl_ms"] is not None]
+            metric_values.update(avg_ttl=sum(gaps)/len(gaps) if gaps else None,
+                                 min_ttl=min(gaps) if gaps else None, max_ttl=max(gaps) if gaps else None)
         return {
             **({"full_duplex": duplex} if duplex is not None else {}),
+            "browser_timing": browser,
             "session_id": self.session_id,
             "name": self.name,
             "created_at": created_at_str,
             "config": self.config.to_dict(),
             "timeline": self.timeline.to_dict(),
             "turns": [turn.to_dict() for turn in self.turns],
-            "metrics": self._metrics.to_dict() if self._metrics and duplex is None else {},
+            "metrics": metric_values,
             "system_stats": getattr(self, "system_stats", None) or [],
             "system_info": getattr(self, "system_info", None),
             "tts_playback_segments": getattr(self, "tts_playback_segments", None) or [],

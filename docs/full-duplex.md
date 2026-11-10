@@ -41,6 +41,50 @@ data message.
 
 ## Independent metrics
 
+Browser microphone + browser speaker sessions now use the same acoustic TTL
+observer as cascade sessions. It works without ASR partial/final transcripts,
+output subtitles, response IDs, or particular recognized words.
+
+- AudioWorklet captures 20 ms PCM frames and preserves audio-frame timestamps
+  across main-thread delivery delays. A ScriptProcessor fallback uses 32 ms
+  frames when AudioWorklet is unavailable; the capture method is recorded.
+- Input energy is evaluated in 10 ms windows with start/stop hysteresis, a
+  60 ms minimum active region and 150 ms trailing-silence confirmation. End
+  timestamps refer to the last active window, not the end of the confirmation
+  wait. Short gaps within speech are merged. Observation never gates audio or
+  changes model turn control. Display gain/threshold controls do not alter it.
+- Output uses the scheduled PCM, excluding leading silence and requiring a
+  20 ms active region. Its first qualifying sample supplies onset time.
+  `AudioContext.getOutputTimestamp()` maps presentation estimates to the same
+  browser performance clock when available; context scheduling is the fallback.
+- Future scheduled onsets are committed when their presentation time is reached.
+  Muted output and cancelled pending playback do not create audible onsets.
+- The first new output region after input starts and before input resumes gives
+  an acoustic gap. Earlier input regions followed by resumed input are marked
+  `continued_input`. Already-running output without a new boundary is marked
+  `overlapping_audio`. A new output region beginning before input ends gives a
+  negative gap. This is acoustic sequence association, not semantic attribution.
+
+Raw `browser_input_*` / `browser_output_*` observations and the resulting
+`browser_timing` view are saved independently of transcripts. Full-duplex
+recordings retain optional transcript associations as diagnostic data; those
+associations do not gate acoustic TTL. The UI shows TTL sample and speech-region
+counts separately from transcript utterance counts. New recordings without a
+measured gap remain unmeasured instead of falling back to server/ASR timing.
+Cascade saved aggregate TTL uses the same observations.
+The input waveform is saved from browser capture frames, and output waveform
+segments use the same presentation clock as TTL. Server amplitude delivery is
+not mixed into the browser input waveform.
+
+The 10 ms window is detector resolution, not a guarantee of physical acoustic
+accuracy. Microphone/device capture buffering, echo, background sounds and
+output presentation estimates still require physical validation. Input capture
+graph time does not reveal the microphone's ADC time. See the
+[Web Audio timestamp specification](https://www.w3.org/TR/webaudio/#dom-audiocontext-getoutputtimestamp).
+
+Server USB routes and historical recordings without a browser-observer marker
+retain the earlier timing path described below; old JSON is not rewritten.
+
 - **User / AI utterances:** transcript counts, independent of cascade turns.
 - **FD-TTL estimate:** first associated assistant audio onset minus input speech
   end. Negative values indicate overlap.

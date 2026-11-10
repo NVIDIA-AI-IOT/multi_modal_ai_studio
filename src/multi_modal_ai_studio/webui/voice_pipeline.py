@@ -62,6 +62,7 @@ from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.core.session import Session, validate_session_thumbnail
 from multi_modal_ai_studio.core.timeline import Lane
 from multi_modal_ai_studio.core.full_duplex import derive_full_duplex
+from multi_modal_ai_studio.core.speech_timing import browser_timing_event
 from multi_modal_ai_studio.webui import system_stats as system_stats_module
 from multi_modal_ai_studio.webui.telemetry import stream_system_stats
 from multi_modal_ai_studio.backends.base import ASRResult
@@ -997,6 +998,12 @@ async def _run_realtime_loop(
                 if msg.type == web.WSMsgType.TEXT:
                     try:
                         obj = json.loads(msg.data)
+                        if obj.get("type") == "client_timeline_event" and session.timeline.start_time is not None:
+                            observation = browser_timing_event(obj.get("event"), time.time()-session.timeline.start_time)
+                            if observation:
+                                session.timeline.add_event(observation["event_type"], Lane.AUDIO, timestamp=observation["timestamp"], data=observation["data"])
+                                snapshot = derive_full_duplex({"config":config.to_dict(), "timeline":session.timeline.to_dict()})
+                                await ws.send_str(json.dumps({"type":"duplex_state", "full_duplex":snapshot}))
                         if obj.get("type") == "duplex_audio_playback" and native_duplex and session.timeline.start_time is not None:
                             t = obj.get("timestamp")
                             uid = obj.get("utterance_id")
@@ -1911,6 +1918,10 @@ async def _run_voice_pipeline(
                             return
                         if obj.get("type") == "client_timeline_event":
                             event = obj.get("event")
+                            if session.timeline.start_time is not None:
+                                observation = browser_timing_event(event, time.time()-session.timeline.start_time)
+                                if observation:
+                                    session.timeline.add_event(observation["event_type"], Lane.AUDIO, timestamp=observation["timestamp"], data=observation["data"])
                             if isinstance(event, dict) and event.get("event_type") == "tts_playback_stopped":
                                 try:
                                     event_ts = float(event.get("timestamp"))

@@ -1,0 +1,331 @@
+[
+  {
+    "name": "gap_without_any_transcript",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 2.5,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      }
+    ],
+    "statuses": [
+      "estimated"
+    ],
+    "ttl_ms": [
+      500
+    ]
+  },
+  {
+    "name": "continued_input_before_response",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 1.2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1.4,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 2
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 2
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 2.5,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      }
+    ],
+    "statuses": [
+      "continued_input",
+      "estimated"
+    ],
+    "ttl_ms": [
+      null,
+      500
+    ]
+  },
+  {
+    "name": "already_speaking_without_new_boundary",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 0.5,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_output_end",
+        "timestamp": 3,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      }
+    ],
+    "statuses": [
+      "overlapping_audio"
+    ],
+    "ttl_ms": [
+      null
+    ]
+  },
+  {
+    "name": "new_output_overlaps_input",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 1.8,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      }
+    ],
+    "statuses": [
+      "estimated"
+    ],
+    "ttl_ms": [
+      -200
+    ]
+  },
+  {
+    "name": "mute_is_not_a_natural_speech_end",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 1.5,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1,
+          "reason": "muted"
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      }
+    ],
+    "statuses": [
+      "input_interrupted"
+    ],
+    "ttl_ms": [
+      null
+    ]
+  },
+  {
+    "name": "all_silence_has_no_audio_onset",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      }
+    ],
+    "statuses": [
+      "no_audio_onset"
+    ],
+    "ttl_ms": [
+      null
+    ]
+  },
+  {
+    "name": "greeting_does_not_count_as_reply",
+    "events": [
+      {
+        "event_type": "browser_timing_started",
+        "timestamp": 0,
+        "data": {
+          "clock": "browser_monotonic"
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 0.1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_output_end",
+        "timestamp": 0.4,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_start",
+        "timestamp": 1,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_input_end",
+        "timestamp": 2,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 1
+        }
+      },
+      {
+        "event_type": "browser_output_start",
+        "timestamp": 2.5,
+        "data": {
+          "clock": "browser_monotonic",
+          "region_id": 2
+        }
+      }
+    ],
+    "statuses": [
+      "estimated"
+    ],
+    "ttl_ms": [
+      500
+    ]
+  }
+]
