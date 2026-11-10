@@ -279,14 +279,16 @@ code, pre {
 /* ===== Layout ===== */
 .container {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 280px minmax(0, 1fr);
     height: calc(100vh - 64px);
     overflow: hidden;
 }
 
 /* ===== Main Panel (wraps config, chat, timeline) ===== */
 .main-panel {
+    min-width: 0;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 1fr auto;
     overflow: hidden;
 }
@@ -294,18 +296,20 @@ code, pre {
 /* ===== Content Area (config + chat side by side) ===== */
 .content-area {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-width: 0;
     min-height: 0; /* allow row to shrink so config/chat panels can scroll internally */
     overflow: hidden;
     transition: grid-template-columns var(--transition-base);
 }
 .content-area > .config-panel,
 .content-area > .chat-panel {
+    min-width: 0;
     min-height: 0; /* allow grid items to shrink so inner scroll works */
     overflow: hidden;
 }
 .content-area.content-area--config-collapsed {
-    grid-template-columns: 48px 1fr;
+    grid-template-columns: 48px minmax(0, 1fr);
 }
 
 /* ===== Header ===== */
@@ -1870,7 +1874,9 @@ body[data-configuration-layout="compact"] .tts-quality-setting--rest {
     align-items: flex-end;
     gap: 2px;
     margin-left: auto;
-    flex-shrink: 0;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
     text-align: right;
 }
 .session-meta-recorded,
@@ -3029,6 +3035,9 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 }
 
 .chat-bubble {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     display: flex;
     flex-direction: row;
     align-items: flex-start;
@@ -3090,6 +3099,7 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 
 .chat-bubble .chat-text {
     line-height: 1.4;
+    overflow-wrap: anywhere;
 }
 
 .chat-text {
@@ -4353,13 +4363,13 @@ body[data-limit-session-image-height="true"] .chat-panel.chat-panel--config-coll
 /* Wide screens: larger session-list sidebar */
 @media (min-width: 1600px) {
     .container {
-        grid-template-columns: 360px 1fr;
+        grid-template-columns: 360px minmax(0, 1fr);
     }
 }
 
 @media (max-width: 1200px) {
     .container {
-        grid-template-columns: 240px 1fr;
+        grid-template-columns: 240px minmax(0, 1fr);
         grid-template-areas:
             "sidebar config"
             "sidebar timeline";

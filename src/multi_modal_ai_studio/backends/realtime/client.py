@@ -80,7 +80,7 @@ class OpenAIRealtimeClient:
         input_audio_sample_rate: int = REALTIME_SAMPLE_RATE,
         output_audio_sample_rate: int = REALTIME_SAMPLE_RATE,
         session_type: Literal["realtime", "transcription"] = "realtime",
-        api_style: Literal["openai-ga", "openai-beta"] = "openai-ga",
+        api_style: Literal["openai-ga", "openai-beta", "nemo-voicechat"] = "openai-ga",
         log_all_events: bool = False,
     ):
         self.url = url.rstrip("/")
@@ -103,6 +103,8 @@ class OpenAIRealtimeClient:
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._recv_task: Optional[asyncio.Task] = None
         self._closed = False
+        self._session_ended = asyncio.Event()
+        self._native_output_text = ""
 
     def _connect_url(self) -> str:
         """Build WebSocket URL with required model query parameter."""
@@ -135,7 +137,16 @@ class OpenAIRealtimeClient:
 
     async def _send_session_update(self) -> None:
         """Send an OpenAI GA or legacy beta-compatible ``session.update``."""
-        if self.api_style == "openai-beta":
+        if self.api_style == "nemo-voicechat":
+            session = {
+                "instructions": self.instructions,
+                "tools": [],
+                "audio": {
+                    "input": {"format": {"type": "audio/pcm", "rate": self.input_audio_sample_rate}},
+                    "output": {"format": "pcm16"},
+                },
+            }
+        elif self.api_style == "openai-beta":
             # Speaches 0.8.x and older Realtime-compatible servers implement
             # the preview schema. Keep this isolated from the GA wire format.
             # PCM16 is the preview schema default. Omit its optional format
@@ -242,6 +253,8 @@ class OpenAIRealtimeClient:
 
     async def cancel_response(self, response_id: Optional[str] = None) -> None:
         """Cancel the active response when supported by the provider."""
+        if self.api_style == "nemo-voicechat":
+            raise NotImplementedError("VoiceChat handles interruption through incoming speech")
         message: Dict[str, Any] = {"type": "response.cancel"}
         if response_id:
             message["response_id"] = response_id
@@ -391,6 +404,22 @@ class OpenAIRealtimeClient:
                                         raw=data,
                                     )
                                 )
+                        elif self.api_style == "nemo-voicechat" and event_type == "response.output_audio_transcript.done":
+                            text = str(data.get("transcript") or "").strip()
+                            self._native_output_text = ""
+                            if text:
+                                await self._event_queue.put(RealtimeEvent(
+                                    kind="output_transcript_completed", text=text, is_final=True,
+                                    response_id=data.get("response_id"), raw=data,
+                                ))
+                        elif self.api_style == "nemo-voicechat" and event_type == "session.end":
+                            if self._native_output_text.strip():
+                                await self._event_queue.put(RealtimeEvent(
+                                    kind="output_transcript_completed", text=self._native_output_text.strip(),
+                                    is_final=True, raw=data,
+                                ))
+                            self._native_output_text = ""
+                            self._session_ended.set()
                         elif event_type == "response.output_audio_transcript.delta":
                             raw_delta = data.get("delta")
                             delta = (
@@ -398,6 +427,8 @@ class OpenAIRealtimeClient:
                                 if isinstance(raw_delta, str)
                                 else str(raw_delta or "")
                             )
+                            if self.api_style == "nemo-voicechat":
+                                self._native_output_text += delta
                             if delta.strip():
                                 await self._event_queue.put(
                                     RealtimeEvent(
@@ -502,3 +533,9 @@ class OpenAIRealtimeClient:
             await self._session.close()
             self._session = None
         logger.info("Realtime WebSocket disconnected")
+
+    async def finish_session(self) -> None:
+        """Drain VoiceChat's final audio and transcripts before disconnecting."""
+        if self.api_style == "nemo-voicechat" and self._ws is not None and not self._ws.closed:
+            await self._send_json({"type": "session.close"})
+            await asyncio.wait_for(self._session_ended.wait(), timeout=10)

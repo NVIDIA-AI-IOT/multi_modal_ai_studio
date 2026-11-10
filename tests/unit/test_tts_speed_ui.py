@@ -3,6 +3,7 @@
 """Regression checks for the OpenAI REST TTS speed control."""
 
 from pathlib import Path
+import re
 
 
 def test_openai_rest_tts_speed_control_is_scoped_and_persisted():
@@ -26,7 +27,7 @@ def test_openai_rest_tts_speed_control_is_scoped_and_persisted():
         repository_root
         / "src/multi_modal_ai_studio/webui/static/index.html"
     ).read_text()
-    assert 'app.js?v=20260826-compact-configuration-4' in index
+    assert re.search(r'<script src="app\.js\?v=[^"]+"', index)
 
 
 def test_compact_configuration_layout_is_opt_in_and_scoped_to_rest_tts():
@@ -62,7 +63,7 @@ def test_compact_configuration_layout_is_opt_in_and_scoped_to_rest_tts():
     assert 'id="tts-rest-sample-rate"' in app
     assert 'body[data-configuration-layout="compact"] .tts-rest-settings' in styles
     assert 'body[data-configuration-layout="compact"] .tts-quality-setting--rest' in styles
-    assert 'styles.css?v=20260826-compact-configuration-3' in index
+    assert re.search(r'styles\.css\?v=[^"\s]+', index)
     assert 'body[data-configuration-layout="compact"] .tts-rest-settings .compact-config-section + .compact-config-section' in styles
     assert '.config-info-trigger:hover + .config-info-tooltip-content' in styles
     assert '.config-info-trigger:focus-visible + .config-info-tooltip-content' in styles

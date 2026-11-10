@@ -297,6 +297,7 @@ function renderSessionList() {
 
     container.innerHTML = state.sessions.map((session, index) => {
         const metrics = session.metrics || {};
+        const duplex = session.full_duplex;
         const isActive = state.selectedSession?.session_id === session.session_id;
         const sid = escapeHtml(session.session_id);
         const safeName = escapeHtml(session.name);
@@ -314,10 +315,10 @@ function renderSessionList() {
                             <div class="session-item-meta">
                                 <span>${formatSessionDateOnly(session.created_at)}</span>
                                 <span>${formatDate(session.created_at)}</span>
-                                <span>${metrics.total_turns || 0} turns</span>
+                                <span>${duplex ? duplexSpeechCount(duplex) : (metrics.total_turns || 0) + " turns"}</span>
                             </div>
                             <div class="session-item-metrics">
-                                <span class="metric-badge">TTL: ${formatLatency(metrics.avg_ttl)}</span>
+                                <span class="metric-badge">${duplex ? "Full duplex" : "TTL: " + formatLatency(metrics.avg_ttl)}</span>
                                 <span class="metric-badge">${session.timeline_event_count ?? session.timeline?.length ?? 0} events</span>
                             </div>
                         </div>
@@ -1601,8 +1602,9 @@ function renderASRConfig(config, readonly = false) {
                     <select ${disabled} onchange="updateConfig('asr', 'realtime_api_style', this.value)">
                         <option value="openai-ga" ${(config.realtime_api_style || 'openai-ga') === 'openai-ga' ? 'selected' : ''}>OpenAI Realtime GA</option>
                         <option value="openai-beta" ${config.realtime_api_style === 'openai-beta' ? 'selected' : ''}>OpenAI Realtime beta compatible</option>
+                        <option value="nemo-voicechat" ${config.realtime_api_style === 'nemo-voicechat' ? 'selected' : ''}>Nemotron VoiceChat (full duplex)</option>
                     </select>
-                    <div class="input-hint">Use GA for current OpenAI-compatible services. Beta compatibility supports Speaches 0.8.x and other preview-schema servers.</div>
+                    <div class="input-hint">${config.realtime_api_style === 'nemo-voicechat' ? 'VoiceChat manages turn taking and interruption. Keep the microphone unmuted to interrupt naturally.' : 'Use GA for current OpenAI-compatible services. Beta compatibility supports Speaches 0.8.x and other preview-schema servers.'}</div>
                 </div>
 
                 <div class="form-group" id="asr-realtime-api-key-group" style="display: ${(config.realtime_transport || 'websocket') === 'websocket' && (config.realtime_url || '').indexOf('openai.com') !== -1 ? 'block' : 'none'};">
@@ -3551,6 +3553,11 @@ async function checkServersHealth() {
         }
         return { ok: true };
     }
+    if (asr.realtime_api_style === 'nemo-voicechat') {
+        state.serverHealth.asr = await checkOpenAI(apiBase);
+        updateServerHealthUI();
+        return;
+    }
     var results = await Promise.allSettled([
         checkSpeech(asr),
         checkOpenAI(apiBase),
@@ -3577,6 +3584,11 @@ function updateServerHealthUI() {
         if (result === null) parts.push(label + ': …');
         else if (result.ok) parts.push(label + ': ✓');
         else parts.push(label + ': ✗ ' + (result.error || '').slice(0, 40));
+    }
+    if (currentConfig.asr && currentConfig.asr.realtime_api_style === 'nemo-voicechat') {
+        add('VoiceChat', asr);
+        statusEl.textContent = parts.join('  ');
+        return;
     }
     add('ASR', asr);
     add('LLM', llm);
@@ -3790,6 +3802,9 @@ function applyVADPreset(preset) {
 
 /** Build chat list from session.chat and, when present, add AI messages from timeline tts_complete (data.text). Sorted by timestamp. */
 function getMergedChatMessages(session) {
+    if (session.full_duplex) {
+        return session.full_duplex.messages.map(m => ({role: m.role, content: m.text, timestamp: m.timestamp}));
+    }
     const chat = session.chat || [];
     const timeline = session.timeline || [];
     const aiFromTimeline = timeline
@@ -3898,6 +3913,22 @@ function formatTimestamp(seconds) {
     return mm + ':' + ss;
 }
 
+function fullDuplexView() {
+    return state.isLiveSession ? state.liveFullDuplex : (state.selectedSession && state.selectedSession.full_duplex);
+}
+
+function isFullDuplexDisplay(config) {
+    const asr = (config || {}).asr || {};
+    return (asr.scheme || asr.backend) === 'openai-realtime'
+        && (asr.realtime_session_type || 'full') === 'full'
+        && (asr.realtime_transport || 'websocket') === 'websocket';
+}
+
+function duplexSpeechCount(view) {
+    const m = (view && view.metrics) || {};
+    return (m.user_utterances || 0) + ' user · ' + (m.assistant_utterances || 0) + ' AI utterances';
+}
+
 function renderTimelineMetrics() {
     const metricsEl = document.getElementById('timeline-metrics');
     if (!metricsEl) return;
@@ -3913,6 +3944,22 @@ function renderTimelineMetrics() {
     // Historical sessions use only the identity captured in their own JSON.
     const systemInfo = state.selectedSession ? session.system_info : state.serverSystemInfo;
 
+    if (isFullDuplexDisplay(state.isLiveSession ? currentConfig : session.config)) {
+        const fd = fullDuplexView();
+        const m = (fd && fd.metrics) || {};
+        const ms = value => value == null ? 'Not aligned' : value.toFixed(1) + ' ms';
+        const values = [
+            ['User utterances', m.user_utterances || 0], ['AI utterances', m.assistant_utterances || 0],
+            ['FD-TTL estimate', ms(m.avg_fd_ttl_ms)], ['First reply estimate', ms(m.avg_reaction_ms)],
+            ['FD-TTL samples', (m.matched_replies || 0) + '/' + (m.user_utterances || 0)],
+            ...(m.ambiguous_inputs ? [['Uncertain endpoints', m.ambiguous_inputs]] : []),
+            ['Duration', state.isLiveSession && state.sessionState === 'live' ? formatDuration(Math.max(0,Date.now()/1000-state.liveSessionStartTime)) : (m.duration_s == null ? '—' : formatDuration(m.duration_s))],
+        ];
+        metricsEl.innerHTML = values.map(([label, value]) =>
+            '<div class="timeline-metric" title="Input energy boundaries to browser scheduled audio; temporal association. Short acknowledgements count. Dominant-region endpoint estimates are marked ≈; hover shows the method and range. Comparable input regions remain uncertain and are excluded from latency averages. Unaligned replies are excluded, not replaced by a later answer. Negative FD-TTL means overlap."><span class="timeline-metric-label">' + escapeHtml(label) + '</span><span class="timeline-metric-value">' + escapeHtml(String(value)) + '</span></div>'
+        ).join('') + renderTimelineSystemInfo(systemInfo);
+        return;
+    }
     metricsEl.innerHTML = `
         <div class="timeline-metric">
             <span class="timeline-metric-label">Avg TTL</span>
@@ -4099,6 +4146,7 @@ function initTimeline() {
     state.timelineOffset = 0;
     state.timelineDuration = 0;
     state.timelineBargeInHitRegions = [];
+    state.timelineDuplexHitRegions = [];
     updateAsrTimelineLegend(currentConfig);
     updateBargeInDiagnosticLegend([]);
 
@@ -4138,6 +4186,7 @@ function renderTimeline() {
     updateAsrTimelineLegend(legendConfig);
     updateBargeInDiagnosticLegend(timeline, inLive);
     state.timelineBargeInHitRegions = [];
+    state.timelineDuplexHitRegions = [];
     if (!inLive && !hasStoppedLiveData && !state.selectedSession) return;
 
     const canvas = document.getElementById('timeline-canvas');
@@ -4169,6 +4218,7 @@ function renderTimeline() {
     }
 
     // Timeline rendering constants
+    const fdMode = isFullDuplexDisplay(state.isLiveSession ? currentConfig : (state.selectedSession || {}).config);
     const combineSpeechLanes = uiSettings.combineSpeechLanes; // Use global UI setting
     const lanes = combineSpeechLanes
         ? ['audio', 'speech', 'llm', 'ttl', 'system']
@@ -4195,8 +4245,22 @@ function renderTimeline() {
         speech: 'ASR',      // Changed from 'SPEECH' to 'ASR'
         llm: 'LLM',
         tts: 'TTS',
-        ttl: 'TTL'
+        ttl: fdMode ? 'FD-TTL' : 'TTL'
     };
+    if (fdMode) {
+        laneLabels.speech = 'USER TEXT';
+        laneLabels.tts = 'AI SPEECH';
+        laneLabels.llm = 'LLM —';
+        ['llm-prefill', 'llm-generate'].forEach(key => {
+            const legend = document.querySelector('[data-timeline-legend="' + key + '"]');
+            if (legend) legend.style.opacity = '0.3';
+        });
+    } else {
+        ['llm-prefill', 'llm-generate'].forEach(key => {
+            const legend = document.querySelector('[data-timeline-legend="' + key + '"]');
+            if (legend) legend.style.opacity = '';
+        });
+    }
 
     // Calculate lane dimensions: AUDIO 2x, CPU/GPU (system) 1.5x, others 1x
     const laneAreaHeight = height - PADDING_TOP - TIME_LABEL_HEIGHT;
@@ -4305,6 +4369,18 @@ function renderTimeline() {
         : (rebuiltTtsSegments.length > 0 ? rebuiltTtsSegments : timelineTtsSegments);
     const replayUserAmplitudeForTtl = replayAudioAmplitudeHistory;
     const liveSessionTime = (state.liveSessionStartTime > 0) ? (Date.now() / 1000 - state.liveSessionStartTime) : null;
+    if (fdMode) {
+        const row = lanes.indexOf('llm');
+        const readiness = timeline.some(e => e.event_type === 'realtime_session_ready') ? 'Ready · ' : '';
+        ctx.save();
+        ctx.fillStyle = 'rgba(128,128,128,0.10)';
+        ctx.fillRect(PADDING_LEFT, getLaneY(row), width-PADDING_LEFT-PADDING_RIGHT, getLaneHeight(row));
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary');
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(readiness + 'Full duplex · end-to-end model · no separate LLM timing', PADDING_LEFT+12, getLaneY(row)+getLaneHeight(row)/2);
+        ctx.restore();
+    }
     drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LANE_GAP, PADDING_TOP, PADDING_LEFT,
                        PADDING_RIGHT, width, timeScale, state.timelineOffset, laneColors, combineSpeechLanes,
                        inLive, hasStoppedLiveData, liveAmplitude, liveTtsSegments, liveSystemStats, replayTtsSegments, replayAudioAmplitudeHistory, replayUserAmplitudeForTtl, liveSessionTime);
@@ -4601,6 +4677,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     if (hasStoppedLiveData === undefined) hasStoppedLiveData = false;
     if (liveSessionTime === undefined) liveSessionTime = null;
     const drawLiveWaveforms = inLive || hasStoppedLiveData;
+    const fdMode = isFullDuplexDisplay(state.isLiveSession ? currentConfig : (state.selectedSession || {}).config);
     const getLaneY = (i) => PADDING_TOP + laneYOffsets[i];
     const getLaneHeight = (i) => LANE_HEIGHTS[i];
     const bargeInWindows = (
@@ -5122,6 +5199,14 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
             }
         }
 
+        // Full-duplex A: Cyan → Purple above; Purple → Magenta below.
+        if (fdMode && (targetLane === 'speech' || targetLane === 'tts')) {
+            const isInput = event.lane === 'speech' || event.lane === 'asr';
+            const gradient = ctx.createLinearGradient(0, barY, 0, barY + barHeight);
+            gradient.addColorStop(0, isInput ? '#2db5e1' : '#8753c2');
+            gradient.addColorStop(1, isInput ? '#8753c2' : '#e74397');
+            fillColor = gradient;
+        }
         // Draw the rectangle
         if (fillPattern === 'diagonal-stripes') {
             // Pre-ASR: diagonal stripes clipped to rectangle
@@ -5535,6 +5620,13 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         return s.slice(0, maxLen) + '\u2026';
     }
 
+    const fdTelemetryRow = lanes.indexOf('system');
+    if (fdMode && fdTelemetryRow >= 0 && (!liveSystemStats || !liveSystemStats.some(s => s.cpu != null || s.gpu != null))) {
+        ctx.save(); ctx.font = '11px sans-serif'; ctx.fillStyle = '#888'; ctx.textAlign = 'left';
+        ctx.fillText(inLive ? 'Waiting for CPU / GPU samples' : 'CPU / GPU samples not recorded', PADDING_LEFT+12, getLaneY(fdTelemetryRow)+getLaneHeight(fdTelemetryRow)/2);
+        ctx.restore();
+    }
+
     // 3. Draw point events: ASR partial = light blue small dot, ASR final = blue dot + transcript text; LLM/TTS lanes = no dots (tts_first_audio shown as thin pale magenta line); llm_complete = response label only; Realtime = system + TTS output transcript
     pointEvents.forEach(event => {
         let targetLane = event.lane;
@@ -5564,6 +5656,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
 
         const et = event.event_type || event.eventType || '';
+        if (fdMode && ['realtime_output_partial', 'realtime_output_final', 'tts_complete', 'realtime_session_ready'].includes(et)) return;
         // System lane: Realtime session_ready (green), error (red)
         if (targetLane === 'system') {
             let dotColor = '#888';
@@ -5683,6 +5776,30 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
     });
 
+    if (fdMode) {
+        const row = lanes.indexOf(combineSpeechLanes ? 'speech' : 'tts');
+        const y = getLaneY(row) + getLaneHeight(row) * (combineSpeechLanes ? 0.75 : 0.5);
+        const markers = window.MMASDuplexHelpers.transcriptMarkers(timeline);
+        ctx.save();
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const placed = window.MMASDuplexHelpers.layoutTranscriptLabels(
+            markers.map(marker => ({...marker, x:PADDING_LEFT+(marker.timestamp-timelineOffset)*timeScale})),
+            PADDING_LEFT, width-PADDING_RIGHT, text => ctx.measureText(text).width);
+        placed.forEach(marker => {
+            const {x, label, textX} = marker;
+            ctx.fillStyle = laneColors.tts;
+            ctx.globalAlpha = marker.finalized ? 1 : 0.5;
+            ctx.beginPath();
+            ctx.arc(x, y, marker.finalized ? 4 : 2.5, 0, Math.PI*2);
+            ctx.fill();
+            if (label) ctx.fillText(label, textX, y);
+            state.timelineDuplexHitRegions.push({kind:'duplex', x1:Math.min(x-6,textX), x2:Math.max(x+6,textX+ctx.measureText(label).width), y1:y-10, y2:y+10, text:marker.text, stopTime:marker.timestamp, finalized:marker.finalized});
+        });
+        ctx.restore();
+    }
+
     // 3b. TTL bands: transparent red from browser-observed end-of-speech to
     // first sound out.  Persisted live bands are authoritative during replay;
     // waveform reconstruction is only a fallback for legacy recordings.
@@ -5696,7 +5813,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
     ) ? window.MMASTimelineHelpers.selectReplayTtlBands : function (persisted, fallbackFactory) {
         return persisted.length ? persisted : fallbackFactory();
     };
-    const replayBands = (!inLive && !hasStoppedLiveData && state.selectedSession)
+    const fdBands = fdMode && fullDuplexView() ? fullDuplexView().replies.filter(r => r.fd_ttl_ms != null).map(r => ({start:r.input_end, end:r.audio_onset, ttlMs:r.fd_ttl_ms, endpointMethod:r.endpoint_method, ttlRange:r.fd_ttl_range_ms})) : [];
+    const replayBands = fdMode ? fdBands : (!inLive && !hasStoppedLiveData && state.selectedSession)
         ? selectReplayTtlBands(persistedReplayBands, function () {
             return replayTtsSegments && replayTtsSegments.length
                 ? computeTtlBandsFromReplay(
@@ -5707,7 +5825,7 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 : [];
         })
         : [];
-    const hasLiveBands = drawLiveWaveforms && (state.liveTtlBands && state.liveTtlBands.length > 0 || state.liveTtlBandStartTime != null);
+    const hasLiveBands = !fdMode && drawLiveWaveforms && (state.liveTtlBands && state.liveTtlBands.length > 0 || state.liveTtlBandStartTime != null);
     if (ttlLaneIndex !== -1 && (hasLiveBands || replayBands.length > 0)) {
         const bandTop = getLaneY(0);
         const bandBottom = getLaneY(lanes.length - 1) + getLaneHeight(lanes.length - 1);
@@ -5723,8 +5841,8 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
         }
         if (replayBands.length > 0) bandsToDraw.push(...replayBands);
         bandsToDraw.forEach(function (band) {
-            const x1 = PADDING_LEFT + (band.start - timelineOffset) * timeScale;
-            const x2 = PADDING_LEFT + (band.end - timelineOffset) * timeScale;
+            const x1 = PADDING_LEFT + ((fdMode ? Math.min(band.start, band.end) : band.start) - timelineOffset) * timeScale;
+            const x2 = PADDING_LEFT + ((fdMode ? Math.max(band.start, band.end) : band.end) - timelineOffset) * timeScale;
             if (x2 <= PADDING_LEFT || x1 >= width - PADDING_RIGHT) return;
             const drawX1 = Math.max(PADDING_LEFT, x1);
             const drawX2 = Math.min(width - PADDING_RIGHT, x2);
@@ -5736,7 +5854,9 @@ function drawTimelineEvents(ctx, timeline, lanes, LANE_HEIGHTS, laneYOffsets, LA
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 const midX = (drawX1 + drawX2) / 2;
-                ctx.fillText(band.ttlMs + ' ms', midX, ttlLaneCenterY);
+                const dominant = band.endpointMethod === 'dominant_energy_region';
+                ctx.fillText((dominant ? '≈ ' : '') + (fdMode ? band.ttlMs.toFixed(1) : band.ttlMs) + ' ms', midX, ttlLaneCenterY);
+                if (fdMode) state.timelineDuplexHitRegions.push({kind:'duplex', metric:'fd-ttl', x1:drawX1, x2:drawX2, y1:ttlLaneY, y2:ttlLaneY+ttlLaneH, start:band.start, end:band.end, ttlMs:band.ttlMs, dominant, ttlRange:band.ttlRange});
             }
         });
     }
@@ -6850,7 +6970,7 @@ function updateLiveSessionUI() {
 
         const turnCount = (state.liveChatTurns && state.liveChatTurns.length) || 0;
         const dateTimeStr = state.liveSessionStartTime > 0 ? formatSessionDateTime(state.liveSessionStartTime) : new Date().toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-        const turnsSuffix = dateTimeStr + ', ' + turnCount + ' turn' + (turnCount !== 1 ? 's' : '');
+        const turnsSuffix = dateTimeStr + ', ' + (isFullDuplexDisplay(currentConfig) ? duplexSpeechCount(fullDuplexView()) : turnCount + ' turn' + (turnCount !== 1 ? 's' : ''));
         if (state.sessionState === 'setup') {
             sessionTitle.textContent = state.liveSessionStartTime > 0 ? ('Session – ' + turnsSuffix) : ('Live Session – ' + new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }));
             setSessionMetaRight('', '');
@@ -7046,7 +7166,7 @@ function updateHistoricalSessionPreview() {
         const metrics = session.metrics || {};
         const turns = metrics.total_turns || 0;
         const dateTimeStr = formatSessionDateTime(session.created_at);
-        const turnsStr = dateTimeStr + ', ' + turns + ' turn' + (turns !== 1 ? 's' : '');
+        const turnsStr = dateTimeStr + ', ' + (session.full_duplex ? duplexSpeechCount(session.full_duplex) : turns + ' turn' + (turns !== 1 ? 's' : ''));
 
         sessionTitle.textContent = session.name || 'Unnamed Session';
         var recordedLine = 'Session recorded: ' + turnsStr;
@@ -7347,7 +7467,7 @@ function handleVoiceWsMessage(ev) {
                 var appVad = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
                 if (
                     evt.event_type === 'vad_start'
-                    && appVad.barge_in_enabled
+                    && appVad.barge_in_enabled && currentConfig.asr.realtime_api_style !== 'nemo-voicechat'
                     && appVad.barge_in_trigger === 'vad'
                 ) {
                     stopTtsPlayback({
@@ -7359,6 +7479,7 @@ function handleVoiceWsMessage(ev) {
                     });
                 }
             } else if (evt.event_type === 'asr_partial') {
+                if (currentConfig.asr.realtime_api_style === 'nemo-voicechat') window.MMASDuplexHelpers.observeUserSpeech(state);
                 state.voiceTurnActive = true;
                 state.ttsEligibleForCurrentTtl = false;
                 var pt = evt.timestamp != null ? Number(evt.timestamp) : null;
@@ -7367,7 +7488,7 @@ function handleVoiceWsMessage(ev) {
                         syncFullscreenOverlays();
                 // Barge-in (partial trigger): stop frontend TTS after N consecutive partials with text
                 var app = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
-                if (app.barge_in_enabled && app.barge_in_trigger === 'partial') {
+                if (app.barge_in_enabled && currentConfig.asr.realtime_api_style !== 'nemo-voicechat' && app.barge_in_trigger === 'partial') {
                     var txt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (txt.length > 0) {
                         state.bargeInPartialCount = (state.bargeInPartialCount || 0) + 1;
@@ -7388,7 +7509,7 @@ function handleVoiceWsMessage(ev) {
                 state.bargeInPartialCount = 0;
                 // Barge-in (final trigger): stop frontend TTS when user final transcript arrives
                 var appFinal = (typeof currentConfig !== 'undefined' && currentConfig && currentConfig.app) ? currentConfig.app : {};
-                if (appFinal.barge_in_enabled && appFinal.barge_in_trigger === 'final') {
+                if (appFinal.barge_in_enabled && currentConfig.asr.realtime_api_style !== 'nemo-voicechat' && appFinal.barge_in_trigger === 'final') {
                     var finalTxt = (evt.data && evt.data.text != null) ? String(evt.data.text).trim() : '';
                     if (finalTxt.length > 0) {
                         stopTtsPlayback({
@@ -7412,6 +7533,9 @@ function handleVoiceWsMessage(ev) {
                             } else {
                                 state.liveChatTurns.push({ user: userText, assistant: '' });
                             }
+                            if (currentConfig.asr.realtime_api_style === 'nemo-voicechat') {
+                                window.MMASDuplexHelpers.completeUser(state);
+                            }
                             renderLiveChat();
                             requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
@@ -7430,7 +7554,12 @@ function handleVoiceWsMessage(ev) {
                             renderLiveChat();
                             requestAnimationFrame(function () { updateLiveSessionUI(); });
                         }
-            } else if (evt.event_type === 'tts_complete' && evt.data && evt.data.text != null) {
+            } else if ((evt.event_type === 'realtime_output_partial' || evt.event_type === 'realtime_output_final')
+                       && currentConfig.asr.realtime_api_style === 'nemo-voicechat' && evt.data && evt.data.text) {
+                window.MMASDuplexHelpers.applyOutput(state, evt.data);
+                renderLiveChat();
+                syncFullscreenOverlays();
+            } else if (evt.event_type === 'tts_complete' && currentConfig.asr.realtime_api_style !== 'nemo-voicechat' && evt.data && evt.data.text != null) {
                 // Realtime: tts_complete carries the AI response transcript
                 var last = state.liveChatTurns[state.liveChatTurns.length - 1];
                 if (last && last.assistant === '') {
@@ -7439,6 +7568,10 @@ function handleVoiceWsMessage(ev) {
                     requestAnimationFrame(function () { updateLiveSessionUI(); });
                 }
             }
+        } else if (msg.type === 'duplex_state') {
+            state.liveFullDuplex = msg.full_duplex;
+            renderTimelineMetrics();
+            updateLiveSessionUI();
         } else if (msg.type === 'tts_start') {
             state.firstTtsPlayTimeThisResponse = null;
             state.earliestTtsPlayTimeAboveThreshold = null;
@@ -7479,7 +7612,7 @@ function handleVoiceWsMessage(ev) {
             if (isServerSpeakerSelected()) {
                 recordTtsSegmentOnly(msg.data, msg.sample_rate || 24000, skipSegmentPush);
             } else if (!state.ttsPlaybackStoppedByBargeIn) {
-                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments);
+                playTtsChunk(msg.data, msg.sample_rate || 24000, skipSegmentPush, serverAmplitudeSegments, msg.duplex_audio_onset);
             }
         } else if (msg.type === 'session_started' && msg.session_id) {
             // The filename is deterministic from session start. Keep it
@@ -7800,6 +7933,8 @@ function startSessionRecording() {
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
+        window.MMASDuplexHelpers.reset(state);
+        state.liveFullDuplex = null;
         state.ttsNextStartTime = 0;
         state.activeTtsSources = [];
         state.bargeInPartialCount = 0;
@@ -7872,6 +8007,8 @@ function startSessionRecording() {
         state.liveTimelineEvents = [];
         state.voiceMessageLog = [];
         state.liveChatTurns = [];
+        window.MMASDuplexHelpers.reset(state);
+        state.liveFullDuplex = null;
         state.ttsNextStartTime = 0;
         state.activeTtsSources = [];
         state.bargeInPartialCount = 0;
@@ -8150,6 +8287,7 @@ function ttsChunkToAmplitudeSegments(ch, sampleRate, chunkStartTime, chunkDurati
 }
 
 function closeLiveTtlBandFromPlayback() {
+    if (isFullDuplexDisplay(currentConfig)) return;
     if (
         state.liveTtlBandStartTime == null
         || (
@@ -8331,7 +8469,7 @@ function stopTtsPlayback(options) {
 
 /** skipSegmentPush: when true (e.g. server sent amplitude_segments), do not push from PCM; first/earliest set below when serverAmplitudeSegments provided.
  * serverAmplitudeSegments: optional array of { startTime?, endTime?, amplitude } from server; we use amplitude but assign startTime/endTime from when we schedule playback (client session time) so purple aligns with audio. */
-function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments) {
+function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSegments, duplexOnset) {
     const binary = atob(base64Data);
     const len = binary.length;
     const bytes = new Uint8Array(len);
@@ -8367,6 +8505,12 @@ function playTtsChunk(base64Data, sampleRate, skipSegmentPush, serverAmplitudeSe
         var sessionStart = state.liveSessionStartTime;
         var delayUntilPlay = Math.max(0, startTime - ctx.currentTime);
         var actualStartSession = (nowSec - sessionStart) + delayUntilPlay;
+        if (duplexOnset && !state.browserSpeakerMuted && ctx.state === 'running' && state.voiceWs && state.voiceWs.readyState === WebSocket.OPEN) {
+            const first = samples.findIndex(sample => Math.abs(sample) > 128);
+            if (first >= 0) state.voiceWs.send(JSON.stringify({type:'duplex_audio_playback',
+                timestamp:actualStartSession+first/sampleRate, utterance_id:duplexOnset.utterance_id,
+                audio_region_id:duplexOnset.audio_region_id, audible:true}));
+        }
         // Use server amplitude data but place segments at client play time so purple aligns with audio
         if (state.liveSessionStartTime > 0 && state.liveTtsAmplitudeHistory && Array.isArray(serverAmplitudeSegments) && serverAmplitudeSegments.length) {
             for (var i = 0; i < serverAmplitudeSegments.length; i++) {
@@ -9053,8 +9197,9 @@ function initTimelineEventTooltip() {
         const rect = canvas.getBoundingClientRect();
         const localX = event.clientX - rect.left;
         const localY = event.clientY - rect.top;
-        const regions = state.timelineBargeInHitRegions || [];
+        const regions = [...(state.timelineBargeInHitRegions || []), ...(state.timelineDuplexHitRegions || [])];
         const hit = regions.find(function (region) {
+            if (region.kind === 'duplex') return localX >= region.x1 && localX <= region.x2 && localY >= region.y1 && localY <= region.y2;
             const halfWidth = Math.max(7, Number(region.width || 0) / 2);
             return Math.abs(localX - region.x) <= halfWidth
                 && localY >= region.y1
@@ -9080,6 +9225,19 @@ function initTimelineEventTooltip() {
         }
         if (hit.discardedAudioMs != null) {
             rows.push('Scheduled audio discarded: ' + Math.round(Number(hit.discardedAudioMs)) + ' ms');
+        }
+        if (hit.kind === 'duplex') {
+            rows.splice(0, rows.length,
+                '<strong>AI transcript · ' + (hit.finalized ? 'final' : 'partial') + '</strong>',
+                'Text received: ' + Number(hit.stopTime).toFixed(3) + ' s', escapeHtml(hit.text));
+            if (hit.metric === 'fd-ttl') {
+                rows.splice(0, rows.length, '<strong>FD-TTL estimate</strong>',
+                    'Input end: ' + hit.start.toFixed(3) + ' s',
+                    'Scheduled audio: ' + hit.end.toFixed(3) + ' s',
+                    'FD-TTL: ' + hit.ttlMs.toFixed(1) + ' ms',
+                    hit.dominant ? 'Endpoint: dominant energy region (heuristic)' : 'Endpoint: single energy region');
+                if (hit.dominant && hit.ttlRange) rows.push('Including later short regions: ' + hit.ttlRange.map(n => n.toFixed(1)).join(' – ') + ' ms');
+            }
         }
         tooltip.innerHTML = rows.join('<br>');
         tooltip.hidden = false;
@@ -9300,7 +9458,7 @@ function getPipelineTableHtml(config, options) {
     const arrowRow = hasCamera ? '<div class="pipeline-arrow-row" aria-hidden="true"><i data-lucide="chevron-down" class="lucide-inline pipeline-arrow-down"></i></div>' : '';
     var flowSegments;
     if (isRealtimeFullVoiceConfig(config)) {
-        var realtimeLabel = 'OpenAI Realtime';
+        var realtimeLabel = config.asr && config.asr.realtime_api_style === 'nemo-voicechat' ? 'Nemotron VoiceChat · Full duplex' : 'OpenAI Realtime';
         var realtimeTitle = 'ASR + TTS Realtime (Full voice)';
         flowSegments = '<div class="pipeline-flow">' +
             '<span class="pipeline-seg pipeline-seg-realtime">' +

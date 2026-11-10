@@ -34,6 +34,7 @@ from aiohttp.abc import AbstractAccessLogger
 from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig, TTSConfig
 from multi_modal_ai_studio.config.presets import available_presets, find_preset, writable_presets_dir
 from multi_modal_ai_studio.core.session import decode_session_thumbnail
+from multi_modal_ai_studio.core.full_duplex import derive_full_duplex
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
 from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
@@ -683,6 +684,9 @@ class WebUIServer:
                 )
             with open(path, "r") as session_file:
                 session = json.load(session_file)
+            duplex = derive_full_duplex(session)
+            if duplex is not None:
+                session = {**session, "full_duplex": duplex}
             return web.json_response(session)
         except Exception as e:
             logger.error(f"Error loading session {session_id}: {e}")
@@ -1541,7 +1545,7 @@ class WebUIServer:
             if key in config:
                 summary[key] = config[key]
         section_keys = {
-            "asr": ("backend", "scheme", "model"),
+            "asr": ("backend", "scheme", "model", "realtime_session_type", "realtime_transport", "realtime_api_style"),
             "llm": ("backend", "scheme", "model"),
             "tts": ("backend", "scheme", "riva_model_name", "model", "voice"),
             "devices": (
@@ -1572,7 +1576,9 @@ class WebUIServer:
             event_count = len(events) if isinstance(events, list) else 0
         else:
             event_count = len(timeline) if isinstance(timeline, list) else 0
+        duplex = derive_full_duplex(session)
         return {
+            **({"full_duplex": {"metrics": duplex["metrics"]}} if duplex is not None else {}),
             "session_id": session.get("session_id"),
             "name": session.get("name"),
             "created_at": session.get("created_at"),

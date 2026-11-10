@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from multi_modal_ai_studio.core.full_duplex import derive_full_duplex
 from multi_modal_ai_studio import __version__
 from multi_modal_ai_studio.config.schema import SessionConfig
 from multi_modal_ai_studio.core.timeline import Timeline, TimelineEvent, Lane, EventType
@@ -394,14 +395,16 @@ class Session:
         created_at_str = self.created_at.isoformat()
         if self.created_at.tzinfo is None and "Z" not in created_at_str and "+" not in created_at_str:
             created_at_str = created_at_str + "Z"
+        duplex = derive_full_duplex({"config": self.config.to_dict(), "timeline": self.timeline.to_dict()})
         return {
+            **({"full_duplex": duplex} if duplex is not None else {}),
             "session_id": self.session_id,
             "name": self.name,
             "created_at": created_at_str,
             "config": self.config.to_dict(),
             "timeline": self.timeline.to_dict(),
             "turns": [turn.to_dict() for turn in self.turns],
-            "metrics": self._metrics.to_dict() if self._metrics else {},
+            "metrics": self._metrics.to_dict() if self._metrics and duplex is None else {},
             "system_stats": getattr(self, "system_stats", None) or [],
             "system_info": getattr(self, "system_info", None),
             "tts_playback_segments": getattr(self, "tts_playback_segments", None) or [],
