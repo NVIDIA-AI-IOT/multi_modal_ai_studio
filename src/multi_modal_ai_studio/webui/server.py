@@ -34,9 +34,11 @@ from aiohttp.abc import AbstractAccessLogger
 from multi_modal_ai_studio.config.schema import LLMConfig, SessionConfig, TTSConfig
 from multi_modal_ai_studio.config.presets import available_presets, find_preset, writable_presets_dir
 from multi_modal_ai_studio.core.session import decode_session_thumbnail
+from multi_modal_ai_studio.core.voice_library import VoiceLibrary, MAX_AUDIO_BYTES
+from multi_modal_ai_studio.backends.base import ConfigError
 from multi_modal_ai_studio.backends.llm.openai import OpenAILLMBackend, video_encode_available
 from multi_modal_ai_studio.backends.asr.riva import DEFAULT_ASR_MODEL, list_riva_asr_models_sync
-from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend
+from multi_modal_ai_studio.backends.tts.openai_rest import OpenAIRestTTSBackend, QWEN3_LANGUAGES
 from multi_modal_ai_studio.backends.tts.openai_realtime import OpenAIRealtimeTTSBackend
 from multi_modal_ai_studio.backends.tts.riva import RivaTTSBackend, list_riva_tts_voices_sync
 from multi_modal_ai_studio.devices.local import (
@@ -340,7 +342,8 @@ async def _probe_openai_tts_languages(
 
 def _tts_preview_text(language: str) -> str:
     """Return a short sample sentence appropriate for the selected language."""
-    language = (language or "en-US").lower()
+    language = (language or "en-US").strip().lower().replace("_", "-")
+    language = {name.lower(): code for code, name in QWEN3_LANGUAGES.items()}.get(language, language)
     samples = {
         "ja": "日本語音声のサンプルを再生します。",
         "zh": "你好。这是一段中文语音示例。",
@@ -350,6 +353,8 @@ def _tts_preview_text(language: str) -> str:
         "hi": "नमस्ते। यह चुनी गई आवाज़ का एक नमूना है।",
         "it": "Ciao. Questo è un esempio della voce selezionata.",
         "pt": "Olá. Esta é uma amostra da voz selecionada.",
+        "ko": "안녕하세요. 선택한 목소리의 미리 듣기입니다.",
+        "ru": "Здравствуйте. Это пример выбранного голоса.",
     }
     return samples.get(
         language.split("-", 1)[0],
@@ -588,6 +593,10 @@ class WebUIServer:
         self.app.router.add_get('/api/tts/voices', self.handle_tts_voices)
         self.app.router.add_post('/api/tts/openai-metadata', self.handle_openai_tts_metadata)
         self.app.router.add_post('/api/tts/preview', self.handle_tts_preview)
+        self.app.router.add_get('/api/tts/reference-voices', self.handle_reference_voices)
+        self.app.router.add_post('/api/tts/reference-voices', self.handle_reference_voice_upload)
+        self.app.router.add_get('/api/tts/reference-voices/{voice_id}/audio', self.handle_reference_voice_audio)
+        self.app.router.add_delete('/api/tts/reference-voices/{voice_id}', self.handle_reference_voice_delete)
         self.app.router.add_get('/api/health/llm', self.handle_health_llm)
         self.app.router.add_get('/api/health/riva', self.handle_health_riva)
         self.app.router.add_get('/api/devices/cameras', self.handle_list_cameras)
@@ -1261,6 +1270,61 @@ class WebUIServer:
             logger.warning("OpenAI REST TTS metadata discovery failed for %s: %s", api_base, e)
             return web.json_response({"error": str(e)}, status=502)
 
+    async def handle_reference_voices(self, request: web.Request) -> web.Response:
+        voices = await asyncio.to_thread(VoiceLibrary().list)
+        return web.json_response({"voices": voices}, headers={"Cache-Control": "no-store"})
+
+    @staticmethod
+    def _check_voice_origin(request):
+        # This is a trusted-network application, not a multi-user voice vault.
+        # Reject browser cross-origin writes; never accept remote file URLs.
+        origin = request.headers.get("Origin")
+        if origin and origin != f"{request.scheme}://{request.host}":
+            raise ValueError("Cross-origin voice library changes are not allowed")
+
+    async def handle_reference_voice_upload(self, request: web.Request) -> web.Response:
+        try:
+            WebUIServer._check_voice_origin(request)
+            if request.content_type != "multipart/form-data":
+                raise ValueError("Upload reference audio using multipart/form-data")
+            reader = await request.multipart()
+            fields = {}
+            total = 0
+            async for part in reader:
+                if part.name not in {"audio", "name", "transcript", "consent", "source"} or part.name in fields:
+                    raise ValueError("Unexpected or duplicate upload field")
+                limit = MAX_AUDIO_BYTES if part.name == "audio" else 8192
+                value = bytearray()
+                while chunk := await part.read_chunk(65536):
+                    value.extend(chunk)
+                    total += len(chunk)
+                    if len(value) > limit or total > MAX_AUDIO_BYTES + 32768:
+                        raise ValueError("Reference upload is too large (WAV maximum 3 MiB)")
+                fields[part.name] = bytes(value) if part.name == "audio" else value.decode("utf-8")
+            entry = await asyncio.to_thread(
+                VoiceLibrary().save, fields.get("audio", b""),
+                name=fields.get("name", ""), transcript=fields.get("transcript", ""),
+                consent=fields.get("consent") == "true", source=fields.get("source", "upload"),
+            )
+            return web.json_response(entry, status=201, headers={"Cache-Control": "no-store"})
+        except (ValueError, AssertionError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    async def handle_reference_voice_audio(self, request: web.Request) -> web.Response:
+        try:
+            _, audio = await asyncio.to_thread(VoiceLibrary().load, request.match_info["voice_id"])
+            return web.Response(body=audio, content_type="audio/wav", headers={"Cache-Control": "no-store"})
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=404)
+
+    async def handle_reference_voice_delete(self, request: web.Request) -> web.Response:
+        try:
+            WebUIServer._check_voice_origin(request)
+            await asyncio.to_thread(VoiceLibrary().delete, request.match_info["voice_id"])
+            return web.json_response({"deleted": True})
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
     async def handle_tts_preview(self, request: web.Request) -> web.Response:
         """Synthesize a short, browser-playable preview for the selected voice."""
         try:
@@ -1274,7 +1338,10 @@ class WebUIServer:
 
         try:
             config = SessionConfig.from_dict({"tts": tts_payload}).tts
-            text = _tts_preview_text(config.language)
+            text = body.get("text", "")
+            if not isinstance(text, str) or len(text) > 500:
+                raise ValueError("Preview text must be at most 500 characters")
+            text = text.strip() or _tts_preview_text(config.language)
             audio = await asyncio.wait_for(
                 _synthesize_tts_preview(config, text),
                 timeout=_TTS_PREVIEW_TIMEOUT_SECONDS,
@@ -1282,14 +1349,15 @@ class WebUIServer:
             return web.Response(
                 body=audio,
                 content_type="audio/wav",
-                headers={"Cache-Control": "no-store"},
+                headers={"Cache-Control": "no-store",
+                         "X-VAW-Preview-Text": quote(text, safe="")},
             )
         except asyncio.TimeoutError:
             return web.json_response(
                 {"error": f"TTS preview timed out after {_TTS_PREVIEW_TIMEOUT_SECONDS} seconds"},
                 status=504,
             )
-        except ValueError as e:
+        except (ValueError, ConfigError) as e:
             return web.json_response({"error": str(e)}, status=400)
         except Exception as e:
             logger.exception("TTS voice preview failed")

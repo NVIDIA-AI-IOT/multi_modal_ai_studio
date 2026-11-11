@@ -463,14 +463,22 @@ function renderSessionDetail() {
     renderTimelineMetrics();
 }
 
+function canEditPreset() {
+    return state.isLiveSession && state.sessionState === 'setup';
+}
+
 function updateConfigPanelState() {
     const panel = document.getElementById('config-panel');
     if (!panel) return;
     const autoHideBtn = document.getElementById('auto-hide-config-btn');
     const configContent = document.getElementById('config-content');
     const configFooter = document.getElementById('config-footer');
-    const isSetup = state.sessionState === 'setup';
-    const canEditConfig = state.isLiveSession && isSetup;
+    const canEditConfig = canEditPreset();
+    ['preset-select', 'preset-save-btn'].forEach(function (id) {
+        const control = document.getElementById(id);
+        if (control) control.disabled = !canEditConfig;
+    });
+    if (!canEditConfig) closePresetSaveModal();
 
     if (canEditConfig) {
         panel.classList.add('config-panel--editable');
@@ -725,6 +733,10 @@ const defaultConfig = {
         language: 'en-US',
         sample_rate: 22050,
         speed: 1.0,
+        request_profile: 'openai',
+        instructions: '',
+        reference_voice_id: '',
+        reference_voice_mode: 'icl',
         quality: 'high',
         realtime_transport: 'websocket',
         stream_tts: true,
@@ -989,11 +1001,13 @@ function _syncPresetDropdownToCurrentConfig() {
 }
 
 async function onPresetSelected(slug) {
+    if (!canEditPreset()) return;
     if (!slug) return;
     try {
         var resp = await fetch(getApiBase() + '/api/presets/' + encodeURIComponent(slug));
         if (!resp.ok) return;
         var preset = await resp.json();
+        if (!canEditPreset()) return;
         var normalized = _normalizePresetToFrontend(preset);
         currentConfig = _deepMerge(JSON.parse(JSON.stringify(defaultConfig)), normalized);
         for (var _dk of Object.keys(defaultConfig)) {
@@ -1016,6 +1030,7 @@ async function onPresetSelected(slug) {
 }
 
 function openPresetSaveModal() {
+    if (!canEditPreset()) return;
     var modal = document.getElementById('preset-save-modal');
     var input = document.getElementById('preset-save-name');
     if (!modal || !input) return;
@@ -1052,6 +1067,7 @@ function _findExistingPreset(name) {
 var _presetOverwriteConfirmed = false;
 
 async function confirmSavePreset() {
+    if (!canEditPreset()) return;
     var input = document.getElementById('preset-save-name');
     var name = (input ? input.value : '').trim();
     if (!name) { if (input) input.focus(); return; }
@@ -1897,6 +1913,11 @@ function toggleVlmSettings() {
 function renderTTSConfig(config, readonly = false) {
     const disabled = readonly ? 'disabled' : '';
     const roClass = readonly ? 'readonly' : '';
+    const requestProfile = config.request_profile || 'openai';
+    const isQwen = ['qwen3-customvoice', 'qwen3-voicedesign', 'qwen3-base'].includes(requestProfile);
+    const isVoiceDesign = requestProfile === 'qwen3-voicedesign';
+    const isVoiceClone = requestProfile === 'qwen3-base';
+    const instructions = typeof config.instructions === 'string' ? config.instructions : '';
     const configuredRestVoice = config.voice || '';
     const configuredRestLanguage = config.language || 'en-US';
     const configuredRestModel = config.model || '';
@@ -1904,7 +1925,9 @@ function renderTTSConfig(config, readonly = false) {
     const configuredRestSpeed = Number.isFinite(parsedRestSpeed)
         ? Math.min(4.0, Math.max(0.25, parsedRestSpeed))
         : 1.0;
-    const restVoiceOptions = configuredRestVoice
+    const restVoiceOptions = isVoiceClone
+        ? '<option value="' + escapeHtml(config.reference_voice_id || '') + '">' + escapeHtml(configuredRestVoice || 'Select a saved reference…') + '</option>'
+        : configuredRestVoice
         ? '<option value="' + escapeHtml(configuredRestVoice) + '" selected>' + escapeHtml(configuredRestVoice) + ' (configured)</option>'
         : '<option value="">Default</option>';
 
@@ -2005,19 +2028,32 @@ function renderTTSConfig(config, readonly = false) {
                                 }
                                 ${!readonly ? '<div id="tts-rest-model-hint" class="input-hint">Discovering TTS models from the provider…</div>' : ''}
                             </div>
+                            <div class="form-group compact-config-field--wide">
+                                <label for="tts-rest-request-profile"><i data-lucide="sliders-horizontal" class="lucide-inline" aria-hidden="true"></i> Request profile</label>
+                                <select ${disabled} id="tts-rest-request-profile" onchange="stopTTSVoicePreview(); updateConfig('tts', 'request_profile', this.value)">
+                                    <option value="openai" ${requestProfile === 'openai' ? 'selected' : ''}>OpenAI-compatible (default)</option>
+                                    <option value="qwen3-customvoice" ${requestProfile === 'qwen3-customvoice' ? 'selected' : ''}>Qwen3-TTS · CustomVoice (vLLM-Omni)</option>
+                                    <option value="qwen3-voicedesign" ${requestProfile === 'qwen3-voicedesign' ? 'selected' : ''}>Qwen3-TTS · VoiceDesign (vLLM-Omni)</option>
+                                    <option value="qwen3-base" ${requestProfile === 'qwen3-base' ? 'selected' : ''}>Qwen3-TTS · Voice Clone / Base (vLLM-Omni)</option>
+                                </select>
+                                <span class="input-hint">${isQwen ? 'Use the matching Qwen3-TTS model and endpoint. Streams 24 kHz PCM over HTTP, not the WebSocket Realtime API.' : 'Keep this profile for Speaches, NVIDIA Speech, and other OpenAI-compatible providers.'}</span>
+                            </div>
                         </div>
                     </section>
 
                     <section class="compact-config-section">
                         <div class="compact-config-section-title"><i data-lucide="audio-lines" class="lucide-inline" aria-hidden="true"></i> Voice</div>
                         <div class="compact-config-grid">
-                            <div class="form-group">
+                            <div class="form-group ${isQwen ? 'compact-config-field--wide' : ''}">
                                 <label><i data-lucide="globe-2" class="lucide-inline" aria-hidden="true"></i> Language</label>
                                 <select ${disabled} id="tts-rest-language-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'language', this.value)">
                                     <option value="${escapeHtml(configuredRestLanguage)}" selected>${escapeHtml(configuredRestLanguage)} (configured)</option>
                                 </select>
                             </div>
 
+                            ${isQwen ? `<section class="qwen-voice-panel compact-config-field--wide" aria-labelledby="tts-qwen-voice-heading">
+                                <h3 id="tts-qwen-voice-heading" class="qwen-voice-panel-heading">Qwen3-TTS <span>· ${isVoiceClone ? 'Voice Clone' : isVoiceDesign ? 'VoiceDesign' : 'CustomVoice'}</span></h3>
+                                <div class="qwen-voice-panel-fields">` : ''}
                             <div class="form-group">
                                 <div class="config-label-row">
                                     <label for="tts-rest-voice-select"><i data-lucide="audio-lines" class="lucide-inline" aria-hidden="true"></i> Voice</label>
@@ -2029,22 +2065,31 @@ function renderTTSConfig(config, readonly = false) {
                                     ` : ''}
                                 </div>
                                 <div class="tts-voice-control-row">
-                                    <select ${disabled} id="tts-rest-voice-select" class="config-select" onchange="stopTTSVoicePreview(); updateConfig('tts', 'voice', this.value)">
-                                        ${restVoiceOptions}
+                                    <select ${readonly || isVoiceDesign ? 'disabled' : ''} id="tts-rest-voice-select" class="config-select" onchange="stopTTSVoicePreview(); ${isVoiceClone ? 'selectReferenceVoice(this.value)' : "updateConfig('tts', 'voice', this.value)"}">
+                                        ${isVoiceDesign ? '<option value="">Designed from instructions</option>' : restVoiceOptions}
                                     </select>
                                     ${!readonly ? '<button type="button" id="tts-rest-preview-btn" class="icon-btn tts-voice-preview-btn" onclick="previewTTSVoice(this)" title="Play a sample of the selected voice" aria-label="Preview selected voice"><i data-lucide="play" class="lucide-inline"></i></button>' : ''}
                                 </div>
                                 ${!readonly ? '<div id="tts-rest-preview-status" class="input-hint tts-voice-preview-status" role="status" aria-live="polite"></div>' : ''}
                             </div>
+                            ${!isVoiceClone ? `<div class="form-group compact-config-field--wide">
+                                <label for="tts-rest-instructions"><i data-lucide="message-square" class="lucide-inline" aria-hidden="true"></i> Voice instructions${isVoiceDesign ? ' (required)' : ' (optional)'}</label>
+                                <textarea ${disabled} ${isVoiceDesign ? 'required' : ''} id="tts-rest-instructions" rows="3" maxlength="4000"
+                                          placeholder="${isVoiceDesign ? 'Describe the voice: age, timbre, accent, and speaking style.' : 'For example: Speak warmly and clearly, with an upbeat, playful tone.'}"
+                                          oninput="stopTTSVoicePreview(); updateConfig('tts', 'instructions', this.value)">${escapeHtml(instructions)}</textarea>
+                                <span class="input-hint">${isVoiceDesign ? 'Designs a voice for each request; identity may vary between chunks. Save a generated preview below, then use Voice Clone / Base for a reusable reference voice.' : isQwen ? 'Directs delivery of the selected speaker. Instruction control requires 1.7B CustomVoice; it does not replace the speaker identity.' : 'Sent as the optional instructions field. Support depends on the provider; leave blank for providers that do not support it.'} Instructions are not spoken text and are saved with the session.</span>
+                            </div>` : ''}
+                            ${isQwen ? renderReferenceVoiceControls(config, readonly) : ''}
+                            ${isQwen ? '</div></section>' : ''}
                         </div>
                     </section>
 
                     <section class="compact-config-section">
                         <div class="compact-config-section-title"><i data-lucide="audio-waveform" class="lucide-inline" aria-hidden="true"></i> Audio</div>
-                        <div class="compact-config-grid">
+                        <div class="compact-config-grid tts-audio-settings-grid" role="group" aria-label="Audio output settings">
                             <div class="form-group">
-                                <label><i data-lucide="audio-waveform" class="lucide-inline" aria-hidden="true"></i> Sample Rate (Hz)</label>
-                                <select ${disabled} id="tts-rest-sample-rate" value="${config.sample_rate}" onchange="updateConfig('tts', 'sample_rate', parseInt(this.value))">
+                                <label for="tts-rest-sample-rate"><i data-lucide="audio-waveform" class="lucide-inline" aria-hidden="true"></i> Sample Rate (Hz)</label>
+                                <select ${readonly || isQwen ? 'disabled' : ''} id="tts-rest-sample-rate" value="${config.sample_rate}" onchange="updateConfig('tts', 'sample_rate', parseInt(this.value))">
                                     <option value="16000" ${config.sample_rate === 16000 ? 'selected' : ''}>16000</option>
                                     <option value="22050" ${config.sample_rate === 22050 ? 'selected' : ''}>22050</option>
                                     <option value="24000" ${config.sample_rate === 24000 ? 'selected' : ''}>24000</option>
@@ -2055,12 +2100,23 @@ function renderTTSConfig(config, readonly = false) {
 
                             <div class="form-group">
                                 <label for="tts-rest-speed"><i data-lucide="gauge" class="lucide-inline" aria-hidden="true"></i> Speech speed</label>
-                                <input type="range" ${disabled} id="tts-rest-speed" min="0.25" max="4.0" step="0.05" value="${configuredRestSpeed}"
-                                       oninput="updateConfig('tts', 'speed', parseFloat(this.value)); document.getElementById('tts-rest-speed-value').textContent = Number(this.value).toFixed(2) + '×';">
-                                <span id="tts-rest-speed-value" class="range-value">${configuredRestSpeed.toFixed(2)}×</span>
-                                ${!readonly ? '<span class="input-hint">OpenAI-compatible range: 0.25–4.00×. Provider support varies.</span>' : ''}
+                                <div class="tts-speed-control">
+                                    <input type="range" ${readonly || isQwen ? 'disabled' : ''} id="tts-rest-speed" min="0.25" max="4.0" step="0.05" value="${configuredRestSpeed}"
+                                           oninput="updateConfig('tts', 'speed', parseFloat(this.value)); document.getElementById('tts-rest-speed-value').textContent = Number(this.value).toFixed(2) + '×';">
+                                    <span id="tts-rest-speed-value" class="range-value">${configuredRestSpeed.toFixed(2)}×</span>
+                                </div>
+                            </div>
+
+                            <div class="form-group tts-quality-setting">
+                                <label for="tts-rest-quality"><i data-lucide="sliders-horizontal" class="lucide-inline" aria-hidden="true"></i> Quality</label>
+                                <select ${disabled} id="tts-rest-quality" onchange="updateConfig('tts', 'quality', this.value)">
+                                    <option value="low" ${config.quality === 'low' ? 'selected' : ''}>Low (Faster)</option>
+                                    <option value="medium" ${config.quality === 'medium' ? 'selected' : ''}>Medium</option>
+                                    <option value="high" ${config.quality === 'high' ? 'selected' : ''}>High (Better)</option>
+                                </select>
                             </div>
                         </div>
+                        ${!readonly ? '<span class="input-hint tts-audio-settings-hint">' + (isVoiceClone ? 'Qwen3-TTS Base streaming uses 24 kHz PCM at 1.00× and the reference delivery.' : isQwen ? 'Qwen3-TTS streaming uses 24 kHz PCM at 1.00×. Describe a faster or slower delivery in Voice instructions.' : 'Speech speed: 0.25–4.00×. Provider support varies.') + '</span>' : ''}
                     </section>
                 </div>
             </div>
@@ -2128,14 +2184,14 @@ function renderTTSConfig(config, readonly = false) {
                 </select>
             </div>
 
-            <div class="form-group tts-quality-setting ${config.backend === 'openai-rest' || config.scheme === 'openai-rest' ? 'tts-quality-setting--rest' : ''}">
+            ${config.backend !== 'openai-rest' && config.scheme !== 'openai-rest' ? `<div class="form-group tts-quality-setting">
                 <label>Quality</label>
                 <select ${disabled} value="${config.quality}" onchange="updateConfig('tts', 'quality', this.value)">
                     <option value="low" ${config.quality === 'low' ? 'selected' : ''}>Low (Faster)</option>
                     <option value="medium" ${config.quality === 'medium' ? 'selected' : ''}>Medium</option>
                     <option value="high" ${config.quality === 'high' ? 'selected' : ''}>High (Better)</option>
                 </select>
-            </div>
+            </div>` : ''}
 
             <div class="form-group" style="margin-top: 12px; border-top: 1px solid var(--border-color, #333); padding-top: 12px;">
                 <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
@@ -2903,8 +2959,18 @@ async function checkVideoEncodeAndShowBanner() {
 
 // Update configuration value
 function updateConfig(section, key, value) {
-    console.log(`Config updated: ${section}.${key} = ${value}`);
+    if (key !== 'instructions') console.log(`Config updated: ${section}.${key} = ${value}`);
     currentConfig[section][key] = value;
+
+    if (section === 'tts' && key === 'request_profile' &&
+        ['qwen3-customvoice', 'qwen3-voicedesign', 'qwen3-base'].includes(value)) {
+        currentConfig.tts.sample_rate = 24000;
+        currentConfig.tts.speed = 1.0;
+        // Endpoint and model remain explicit; selecting a wire profile must not
+        // redirect a user's requests to another service.
+        if (value === 'qwen3-customvoice' && !currentConfig.tts.voice) currentConfig.tts.voice = 'ryan';
+        if (value === 'qwen3-base') currentConfig.tts.instructions = '';
+    }
 
     // Sync backend -> scheme for pipeline
     if (section === 'asr' && key === 'backend') currentConfig.asr.scheme = value;
@@ -2998,6 +3064,9 @@ function updateConfig(section, key, value) {
         section === 'asr' &&
         key === 'model' &&
         (currentConfig.asr.backend === 'openai-rest' || currentConfig.asr.scheme === 'openai-rest')
+    ) || (
+        state.activeConfigTab === 'tts' && section === 'tts' &&
+        (key === 'instructions' || key === 'speed')
     );
 
     // Re-render the config panel only when the change affects conditional UI.
@@ -3356,9 +3425,14 @@ async function fetchTTSVoices(server, language) {
     }
 }
 
-function restTTSFallbackVoices(apiBase, model) {
+function restTTSFallbackVoices(apiBase, model, requestProfile) {
     const normalizedModel = String(model || '').toLowerCase();
     const normalizedApiBase = String(apiBase || '').toLowerCase();
+    if (requestProfile === 'qwen3-customvoice') {
+        return ['aiden', 'dylan', 'eric', 'ono_anna', 'ryan', 'serena', 'sohee', 'uncle_fu', 'vivian'].map(function (id) {
+            return { id: id, name: id };
+        });
+    }
     if (normalizedModel.indexOf('nvidia/magpie') === 0) {
         return ['Aria', 'Jason', 'John', 'Leo', 'Sofia'].map(function (id) {
             return { id: id, name: id };
@@ -3382,7 +3456,7 @@ function restTTSLanguageLabel(language) {
         'en-US': 'English (US)', 'en-GB': 'English (UK)', en: 'English',
         ja: 'Japanese', es: 'Spanish', 'fr-FR': 'French', fr: 'French',
         de: 'German', zh: 'Chinese', hi: 'Hindi', it: 'Italian',
-        'pt-BR': 'Portuguese (Brazil)'
+        'pt-BR': 'Portuguese (Brazil)', pt: 'Portuguese', ko: 'Korean', ru: 'Russian', auto: 'Auto'
     };
     return labels[language] || language;
 }
@@ -3392,6 +3466,9 @@ async function fetchOpenAITTSMetadata() {
     const config = currentConfig.tts || {};
     const apiBase = String(config.api_base || config.openai_url || '').replace(/\/$/, '');
     const model = String(config.model || '');
+    const requestProfile = config.request_profile || 'openai';
+    const isQwen = ['qwen3-customvoice', 'qwen3-voicedesign', 'qwen3-base'].includes(requestProfile);
+    const isVoiceDesign = requestProfile === 'qwen3-voicedesign';
     const voiceSelect = document.getElementById('tts-rest-voice-select');
     const languageSelect = document.getElementById('tts-rest-language-select');
     const modelSelect = document.getElementById('tts-rest-model-select');
@@ -3420,6 +3497,9 @@ async function fetchOpenAITTSMetadata() {
         discoveryError = error && error.message ? error.message : String(error);
     }
 
+    // The user may have changed profiles or switched to a recorded session
+    // while discovery was in flight. Never modify that new form/config.
+    if (!voiceSelect.isConnected || (currentConfig.tts.request_profile || 'openai') !== requestProfile) return;
     let voices = Array.isArray(data.voices) ? data.voices : [];
     const modelChoices = Array.isArray(data.model_choices) ? data.model_choices.slice() : [];
     if (modelSelect) {
@@ -3456,12 +3536,22 @@ async function fetchOpenAITTSMetadata() {
     }
     const dynamicVoiceCount = voices.length;
     const reportedVoiceCount = Number(data.reported_voice_count) || dynamicVoiceCount;
-    if (!voices.length) voices = restTTSFallbackVoices(apiBase, model);
+    if (!voices.length) voices = restTTSFallbackVoices(apiBase, model, requestProfile);
     const languages = Array.isArray(data.languages) ? data.languages.slice() : [];
-    const configuredLanguage = window.MMASConfigHelpers.normalizeLanguageTag(config.language || 'en-US');
+    const reportedLanguageCount = languages.length;
+    // These are model capabilities, not provider discovery results. Qwen's
+    // built-in speakers can speak all ten languages regardless of native accent.
+    if (isQwen && !languages.length) languages.push('en', 'zh', 'ja', 'ko', 'de', 'fr', 'ru', 'pt', 'es', 'it', 'auto');
+    const normalizeLanguage = function (language) {
+        const normalized = window.MMASConfigHelpers.normalizeLanguageTag(language);
+        if (!isQwen) return normalized;
+        const names = {english: 'en', chinese: 'zh', japanese: 'ja', korean: 'ko', german: 'de', french: 'fr', russian: 'ru', portuguese: 'pt', spanish: 'es', italian: 'it', auto: 'auto'};
+        return names[String(normalized).toLowerCase()] || String(normalized).split('-')[0];
+    };
+    const configuredLanguage = normalizeLanguage(config.language || 'en-US');
     const normalizedLanguages = [];
     languages.forEach(function (language) {
-        const normalized = window.MMASConfigHelpers.normalizeLanguageTag(language);
+        const normalized = normalizeLanguage(language);
         if (normalized && normalizedLanguages.indexOf(normalized) === -1) normalizedLanguages.push(normalized);
     });
     if (configuredLanguage && normalizedLanguages.indexOf(configuredLanguage) === -1) {
@@ -3470,16 +3560,27 @@ async function fetchOpenAITTSMetadata() {
     if (!normalizedLanguages.length) normalizedLanguages.push(configuredLanguage || 'en-US');
     languageSelect.innerHTML = normalizedLanguages.map(function (language) {
         const configuredOnly = languages.length && !languages.some(function (reported) {
-            return window.MMASConfigHelpers.normalizeLanguageTag(reported) === language;
+            return normalizeLanguage(reported) === language;
         });
         const label = restTTSLanguageLabel(language) + (configuredOnly ? ' (configured; not reported)' : '');
         return '<option value="' + escapeHtml(language) + '"' +
             (language === configuredLanguage ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
     }).join('');
 
+    if (requestProfile === 'qwen3-base') {
+        await loadReferenceVoices();
+        return;
+    }
+    if (isVoiceDesign) {
+        voiceSelect.innerHTML = '<option value="">Designed from instructions</option>';
+        voiceSelect.disabled = true;
+        if (hint) hint.textContent = 'VoiceDesign uses a voice description, not a named speaker. Languages come from Qwen3-TTS model capabilities.' + (discoveryError ? ' Discovery error: ' + discoveryError : '');
+        return;
+    }
+
     const configuredVoice = String(config.voice || '');
     const voiceResolution = window.MMASConfigHelpers.resolveTtsVoiceSelection(
-        voices, configuredLanguage, configuredVoice, dynamicVoiceCount > 0
+        voices, isQwen ? '' : configuredLanguage, configuredVoice, dynamicVoiceCount > 0 || isQwen
     );
     const optionVoices = voiceResolution.voices;
     const selectedVoice = voiceResolution.selectedVoice;
@@ -3502,8 +3603,8 @@ async function fetchOpenAITTSMetadata() {
     if (hint) {
         if (dynamicVoiceCount) {
             hint.textContent = (data.language_qualification === 'runtime-probed'
-                ? 'Runtime-qualified ' + dynamicVoiceCount + ' of ' + reportedVoiceCount + ' reported voices and ' + languages.length + ' languages'
-                : 'Discovered ' + dynamicVoiceCount + ' voices and ' + languages.length + ' languages') +
+                ? 'Runtime-qualified ' + dynamicVoiceCount + ' of ' + reportedVoiceCount + ' reported voices and ' + reportedLanguageCount + ' languages'
+                : 'Discovered ' + dynamicVoiceCount + ' voices and ' + reportedLanguageCount + ' languages') +
                 ' from ' + (data.model || model) + '; showing ' + optionVoices.length +
                 ' voices for ' + configuredLanguage + '.';
             if (Array.isArray(data.unsupported_languages) && data.unsupported_languages.length) {
@@ -3515,6 +3616,7 @@ async function fetchOpenAITTSMetadata() {
             hint.textContent = 'The provider did not report voice metadata. The configured value is preserved.';
         }
         if (discoveryError) hint.textContent += ' Discovery error: ' + discoveryError;
+        if (isQwen) hint.textContent += ' All nine Qwen speakers are multilingual; fallback language choices reflect model capabilities.';
     }
 }
 
@@ -3677,6 +3779,8 @@ function _setTTSVoicePreviewButton(button, iconName, disabled) {
 
 /** Stop a voice preview without touching the live session or its timeline. */
 function stopTTSVoicePreview() {
+    const referenceAudio = document.getElementById('reference-voice-audio');
+    if (referenceAudio) referenceAudio.pause();
     if (_ttsVoicePreviewAbortController) {
         _ttsVoicePreviewAbortController.abort();
         _ttsVoicePreviewAbortController = null;
@@ -3711,8 +3815,11 @@ async function previewTTSVoice(button) {
     _ttsVoicePreviewButton = button;
     _ttsVoicePreviewAbortController = new AbortController();
     const controller = _ttsVoicePreviewAbortController;
+    const previewConfig = JSON.parse(JSON.stringify(currentConfig.tts || {}));
     const status = _ttsVoicePreviewStatusElement();
-    const voice = (currentConfig.tts && currentConfig.tts.voice) || 'default';
+    const voice = currentConfig.tts && currentConfig.tts.request_profile === 'qwen3-voicedesign'
+        ? 'designed voice'
+        : (currentConfig.tts && currentConfig.tts.voice) || 'default';
     if (status) status.textContent = 'Generating preview for ' + voice + '…';
     _setTTSVoicePreviewButton(button, 'loader-circle', true);
 
@@ -3720,7 +3827,7 @@ async function previewTTSVoice(button) {
         const response = await fetch(getApiBase() + '/api/tts/preview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tts: currentConfig.tts || {} }),
+            body: JSON.stringify({ tts: previewConfig, text: previewConfig.request_profile?.startsWith('qwen3-') ? ttsPreviewText : '' }),
             signal: controller.signal
         });
         if (!response.ok) {
@@ -3729,6 +3836,7 @@ async function previewTTSVoice(button) {
         }
         const audioBlob = await response.blob();
         if (controller.signal.aborted) return;
+        rememberDesignedVoicePreview(previewConfig, audioBlob, response.headers.get('X-VAW-Preview-Text'));
         _ttsVoicePreviewObjectUrl = URL.createObjectURL(audioBlob);
         _ttsVoicePreviewAudio = new Audio(_ttsVoicePreviewObjectUrl);
         _ttsVoicePreviewAudio.onended = function () {

@@ -243,6 +243,11 @@ class TTSConfig:
     sample_rate: int = 24000
     speed: float = 1.0
     response_format: str = "pcm"
+    # Explicit provider extensions; never infer the wire protocol from a URL.
+    request_profile: Literal["openai", "qwen3-customvoice", "qwen3-voicedesign", "qwen3-base"] = "openai"
+    instructions: str = ""
+    reference_voice_id: str = ""
+    reference_voice_mode: Literal["icl", "x-vector"] = "icl"
     stream_tts: bool = True
     # OpenAI Realtime API (when scheme == "openai-realtime")
     realtime_url: Optional[str] = None
@@ -265,6 +270,8 @@ class TTSConfig:
                 warnings.append("Riva scheme requires server address")
 
         elif self.scheme in ["openai-rest", "openai-realtime"]:
+            if self.scheme == "openai-rest":
+                warnings.extend(self.validate_rest_controls())
             endpoint = self.realtime_url or self.api_base
             is_local = bool(
                 endpoint
@@ -290,6 +297,43 @@ class TTSConfig:
             warnings.append(f"Unusual sample rate: {self.sample_rate} Hz")
 
         return warnings
+
+    def validate_rest_controls(self) -> List[str]:
+        """Validate optional REST voice controls without requiring a live provider."""
+        errors = []
+        if not isinstance(self.instructions, str):
+            errors.append("TTS instructions must be text")
+        elif len(self.instructions) > 4000:
+            errors.append("TTS instructions must not exceed 4000 characters")
+        if self.request_profile not in ("openai", "qwen3-customvoice", "qwen3-voicedesign", "qwen3-base"):
+            errors.append("Unsupported REST TTS request profile")
+        if self.request_profile in ("qwen3-customvoice", "qwen3-voicedesign", "qwen3-base"):
+            if not self.model:
+                errors.append("Qwen3-TTS requires an explicit model identifier")
+            if self.sample_rate != 24000:
+                errors.append("Qwen3-TTS streaming PCM requires a 24000 Hz sample rate")
+            if self.speed != 1.0:
+                errors.append("Qwen3-TTS streaming requires speed 1.0; use instructions for speaking pace")
+            if self.request_profile == "qwen3-voicedesign" and not (
+                isinstance(self.instructions, str) and self.instructions.strip()
+            ):
+                errors.append("VoiceDesign requires voice instructions")
+            if self.request_profile == "qwen3-customvoice" and not self.voice:
+                errors.append("CustomVoice requires a speaker voice")
+            if self.request_profile == "qwen3-base":
+                if not self.reference_voice_id:
+                    errors.append("Voice cloning requires a saved reference voice")
+                if self.reference_voice_mode not in ("icl", "x-vector"):
+                    errors.append("Unsupported reference voice mode")
+                if self.instructions:
+                    errors.append("Base voice cloning uses reference audio, not voice instructions")
+            if (
+                self.request_profile == "qwen3-customvoice"
+                and "0.6b" in (self.model or "").lower()
+                and isinstance(self.instructions, str) and self.instructions.strip()
+            ):
+                errors.append("Qwen3-TTS 0.6B CustomVoice does not support voice instructions; use 1.7B")
+        return errors
 
 
 @dataclass
