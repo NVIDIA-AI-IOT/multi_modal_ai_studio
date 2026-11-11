@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-License-Identifier: Apache-2.0
+
+name: "Qwen3-TTS — CustomVoice (Experimental)"
+description: "0.3.0 development: Speaches ASR + Gemma 4 E2B + Qwen3-TTS 1.7B CustomVoice via vLLM-Omni HTTP streaming. Requires independent model services."
+app_version: "0.2.0"
+
+asr:
+  scheme: openai-rest
+  api_base: http://localhost:18080/v1
+  model: Systran/faster-whisper-tiny.en
+  language: en
+  vad_start_threshold: 0.4
+  vad_stop_threshold: 0.3
+  speech_pad_ms: 500
+  speech_timeout_ms: 700
+
+llm:
+  scheme: openai
+  api_base: http://localhost:8080/v1
+  model: gemma-4-e2b
+  temperature: 0.3
+  max_tokens: 128
+  history_turns: 3
+  include_conversation_history: true
+  system_prompt: >-
+    You are a friendly robot assistant. Answer briefly in English, in one or
+    two sentences. Plain spoken text only: no markdown, emojis, stage directions,
+    or emotion tags. Voice delivery is configured separately in the TTS service.
+  enable_vision: false
+
+tts:
+  scheme: openai-rest
+  api_base: http://localhost:18083/v1
+  model: Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice
+  request_profile: qwen3-customvoice
+  language: en
+  voice: "ryan"
+  instructions: >-
+    Speak clearly with a warm, upbeat, playful tone. Keep the words easy to understand.
+  sample_rate: 24000
+  speed: 1.0
+  response_format: pcm
+  # Wait for complete LLM text for prosody. HTTP audio still streams as generated.
+  stream_tts: false
+  tts_chunk_words: 10
+
+devices:
+  video_source: none
+  audio_input_source: browser
+  audio_output_source: browser
+
+app:
+  barge_in_enabled: true
+  barge_in_trigger: vad
+  timeline_position: right
+  session_auto_save: true
+  session_output_dir: ./sessions

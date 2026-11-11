@@ -18,6 +18,7 @@ from multi_modal_ai_studio.backends.base import (
     split_tts_text,
 )
 from multi_modal_ai_studio.config.schema import TTSConfig
+from multi_modal_ai_studio.core.voice_library import VoiceLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,51 @@ logger = logging.getLogger(__name__)
 # 50-character limit that restarted prosody every few words.
 MAX_REST_TTS_CHARS = 400
 REST_TTS_CONNECTION_RETRIES = 1
+
+QWEN3_LANGUAGES = {
+    "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",
+    "de": "German", "fr": "French", "ru": "Russian", "pt": "Portuguese",
+    "es": "Spanish", "it": "Italian", "auto": "Auto",
+}
+
+
+def build_speech_request(config: TTSConfig, text: str) -> dict:
+    """Keep spoken text separate from direction and provider-specific controls.
+
+    The Qwen profiles target vLLM-Omni's audio/speech extension, not the
+    WebSocket Realtime API. Its default streaming format is SSE, not PCM.
+    """
+    errors = config.validate_rest_controls()
+    if errors:
+        raise ConfigError("; ".join(errors))
+    request = {
+        "model": config.model or "tts-1", "input": text,
+        "voice": config.voice, "response_format": "pcm", "speed": config.speed,
+    }
+    if config.instructions.strip():
+        request["instructions"] = config.instructions.strip()
+    if config.request_profile in ("qwen3-customvoice", "qwen3-voicedesign", "qwen3-base"):
+        language = (config.language or "auto").strip().lower().replace("_", "-")
+        names = {name.lower(): name for name in QWEN3_LANGUAGES.values()}
+        language = names.get(language) or QWEN3_LANGUAGES.get(language.split("-")[0])
+        if language is None:
+            raise ConfigError("Unsupported Qwen3-TTS language; choose one of its ten languages or Auto")
+        design = config.request_profile == "qwen3-voicedesign"
+        clone = config.request_profile == "qwen3-base"
+        request.update(
+            task_type="Base" if clone else "VoiceDesign" if design else "CustomVoice",
+            language=language, stream=True, stream_format="audio",
+        )
+        if design or clone:
+            request.pop("voice")
+        if clone:
+            try:
+                request.update(VoiceLibrary().speech_fields(config.reference_voice_id, config.reference_voice_mode))
+            except ValueError as exc:
+                raise ConfigError(str(exc)) from exc
+    elif (config.model or "").startswith("nvidia/"):
+        request["language"] = (config.language or "en").split("-")[0].lower()
+    return request
 
 
 @dataclass
@@ -71,6 +117,8 @@ class OpenAIRestTTSBackend(TTSBackend):
             raise ConfigError(f"Expected scheme 'openai-rest', got '{config.scheme}'")
         if not config.api_base:
             raise ConfigError("OpenAI-compatible TTS api_base is required")
+        # Fail before opening a connection, including in voice preview.
+        build_speech_request(config, "")
         self._session: Optional[aiohttp.ClientSession] = None
         self._active_tasks = set()
 
@@ -112,6 +160,12 @@ class OpenAIRestTTSBackend(TTSBackend):
                             body = await response.text()
                             raise ConnectionError(
                                 f"TTS request failed ({response.status}): {body[:300]}"
+                            )
+                        content_type = getattr(response, "headers", {}).get("Content-Type", "").lower()
+                        if any(kind in content_type for kind in ("text/", "json", "wav", "mpeg", "flac", "ogg")):
+                            raise ConnectionError(
+                                "TTS returned a non-PCM response (" + content_type + "). "
+                                "Select the correct request profile; event streams must not be played as PCM."
                             )
                         pending = None
                         aligner = _PCM16FrameAligner()
@@ -194,17 +248,7 @@ class OpenAIRestTTSBackend(TTSBackend):
         text_chunks = split_tts_text(text, MAX_REST_TTS_CHARS)
 
         for text_index, text_chunk in enumerate(text_chunks):
-            request = {
-                "model": self.config.model or "tts-1",
-                "input": text_chunk,
-                "voice": self.config.voice,
-                "response_format": "pcm",
-                "speed": self.config.speed,
-            }
-            if (self.config.model or "").startswith("nvidia/"):
-                request["language"] = (
-                    self.config.language or "en"
-                ).split("-")[0].lower()
+            request = build_speech_request(self.config, text_chunk)
             output: asyncio.Queue = asyncio.Queue()
             worker = asyncio.create_task(
                 self._produce_request_audio(

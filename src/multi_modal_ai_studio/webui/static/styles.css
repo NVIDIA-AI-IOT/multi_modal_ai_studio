@@ -1386,8 +1386,82 @@ body[data-configuration-layout="compact"] .tts-rest-settings .form-group {
     margin-bottom: 0;
 }
 
-body[data-configuration-layout="compact"] .tts-quality-setting--rest {
-    display: none;
+/* Provider-specific voice tools stay grouped in either Configuration layout. */
+.tts-rest-settings .qwen-voice-panel {
+    min-width: 0;
+    margin: 0 0 var(--space-lg);
+    padding: 12px;
+    border: 1px solid rgba(56, 189, 248, 0.65);
+    border-radius: var(--radius-sm);
+    background: rgba(56, 189, 248, 0.04);
+}
+
+.qwen-voice-panel-heading {
+    margin: 0 0 12px;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.qwen-voice-panel-heading span {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+
+.qwen-voice-panel-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-md);
+}
+
+.tts-rest-settings .qwen-voice-panel .form-group {
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.qwen-voice-panel .input-hint {
+    overflow-wrap: anywhere;
+}
+
+body[data-configuration-layout="compact"] .tts-rest-settings .qwen-voice-panel {
+    margin-bottom: 0;
+}
+
+/* Common audio controls use the pane's available width, not the viewport. */
+.tts-rest-settings .tts-audio-settings-grid,
+body[data-configuration-layout="compact"] .tts-rest-settings .tts-audio-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr));
+    gap: var(--space-md);
+    align-items: start;
+    margin-bottom: var(--space-sm);
+}
+
+.tts-rest-settings .tts-audio-settings-grid > .form-group {
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.tts-rest-settings .tts-speed-control {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: 38px;
+}
+
+.tts-rest-settings .tts-speed-control input[type="range"] {
+    flex: 1;
+    width: 0;
+    min-width: 0;
+    margin: 0;
+}
+
+.tts-rest-settings .tts-speed-control .range-value {
+    flex: 0 0 auto;
+}
+
+.tts-rest-settings .tts-audio-settings-hint {
+    margin-bottom: var(--space-lg);
 }
 
 /* Read-only forms */
